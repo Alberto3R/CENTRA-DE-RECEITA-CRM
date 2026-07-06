@@ -149,19 +149,19 @@ html[data-mode="light"] {
 
 :root,
 html[data-theme="sales3r"] {
-  /* Verde 3R (#A6E43C) — cor de assinatura da marca. Texto escuro
-   * (preto tinta) sobre o lime brilhante para contraste AA. */
-  --primary: oklch(0.847 0.2 128.1);
-  --primary-foreground: oklch(0.145 0 0);
-  --primary-hover: oklch(0.8 0.19 129);
-  --primary-soft: oklch(0.847 0.2 128.1 / 0.12);
-  --primary-soft-2: oklch(0.847 0.2 128.1 / 0.22);
-  --ring: oklch(0.847 0.2 128.1);
-  --chart-1: oklch(0.847 0.2 128.1);
-  --chart-2: oklch(0.714 0.182 130.6);
-  --sidebar-primary: oklch(0.847 0.2 128.1);
-  --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-ring: oklch(0.847 0.2 128.1);
+  /* Esmeralda (#10B981) — cor de assinatura da Central de Receita.
+   * Tinta escura esverdeada (#04231A) sobre o esmeralda para contraste. */
+  --primary: oklch(0.696 0.17 162.48);
+  --primary-foreground: oklch(0.27 0.045 165);
+  --primary-hover: oklch(0.76 0.16 163);
+  --primary-soft: oklch(0.696 0.17 162.48 / 0.12);
+  --primary-soft-2: oklch(0.696 0.17 162.48 / 0.22);
+  --ring: oklch(0.696 0.17 162.48);
+  --chart-1: oklch(0.696 0.17 162.48);
+  --chart-2: oklch(0.78 0.11 168);
+  --sidebar-primary: oklch(0.696 0.17 162.48);
+  --sidebar-primary-foreground: oklch(0.27 0.045 165);
+  --sidebar-ring: oklch(0.696 0.17 162.48);
 }
 
 html[data-theme="violet"] {

@@ -135,7 +135,7 @@ function SignupPageInner() {
             {inviteToken ? (
               <UsersRound className="h-6 w-6 text-primary" />
             ) : (
-              <span className="text-lg font-bold tracking-tight text-primary">CR</span>
+              <svg viewBox="0 0 120 120" fill="currentColor" className="h-6 w-6 text-primary"><circle cx="60" cy="22" r="5"/><path d="M60 27 C67 27 72 33 72 41 L72 43 C83 48 86 62 87 74 C87 78 89 81 91 83 C93 85 92 88 89 88 L31 88 C28 88 27 85 29 83 C31 81 33 78 33 74 C34 62 37 48 48 43 L48 41 C48 33 53 27 60 27 Z"/><path d="M49 92 C49 98 54 102 60 102 C66 102 71 98 71 92 Z"/></svg>
             )}
           </div>
           <CardTitle className="text-xl text-foreground">
