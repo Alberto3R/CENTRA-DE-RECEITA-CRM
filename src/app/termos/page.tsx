@@ -8,16 +8,11 @@ export const metadata: Metadata = {
   title: "Termos de Uso",
 };
 
-const ATUALIZADO_EM = "[DATA]";
+const ATUALIZADO_EM = "6 de julho de 2026";
 
 export default function TermosDeUso() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 text-foreground">
-      <div className="mb-8 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-        ⚠️ <strong>Rascunho.</strong> Este documento precisa de revisão jurídica
-        e do preenchimento dos dados da empresa antes de ser publicado.
-      </div>
-
       <h1 className="text-2xl font-semibold tracking-tight">
         Termos de Uso — Central de Receita
       </h1>
@@ -30,9 +25,14 @@ export default function TermosDeUso() {
           <h2 className="text-lg font-semibold">1. Aceite</h2>
           <p>
             Ao criar uma conta ou usar a Central de Receita, plataforma de CRM e
-            Gestão Comercial operada por <strong>[RAZÃO SOCIAL]</strong> (CNPJ{" "}
-            <strong>[CNPJ]</strong>), você concorda com estes Termos. Se não
-            concordar, não utilize o serviço.
+            Gestão Comercial operada por{" "}
+            <strong>
+              Jano Marketing Direto e Treinamento em Desenvolvimento
+              Profissional e Gerencial Ltda
+            </strong>{" "}
+            (nome fantasia Sales 3R Performance Comercial, CNPJ{" "}
+            <strong>43.317.252/0001-51</strong>), você concorda com estes Termos.
+            Se não concordar, não utilize o serviço.
           </p>
         </section>
 
@@ -103,7 +103,7 @@ export default function TermosDeUso() {
           <p>
             O serviço é fornecido &quot;no estado em que se encontra&quot;. Na
             máxima extensão permitida em lei, nossa responsabilidade fica
-            limitada ao valor pago nos <strong>[N]</strong> meses anteriores ao
+            limitada ao valor pago nos <strong>12</strong> meses anteriores ao
             evento.
           </p>
         </section>
@@ -120,8 +120,8 @@ export default function TermosDeUso() {
           <h2 className="text-lg font-semibold">10. Foro e contato</h2>
           <p>
             Estes Termos são regidos pelas leis brasileiras, foro da comarca de{" "}
-            <strong>[COMARCA/UF]</strong>. Contato:{" "}
-            <strong>[E-MAIL DE CONTATO]</strong>.
+            <strong>São Paulo/SP</strong>. Contato:{" "}
+            <strong>contato@sales3r.com.br</strong>.
           </p>
         </section>
       </div>

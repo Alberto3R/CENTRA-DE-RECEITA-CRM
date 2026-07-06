@@ -8,17 +8,11 @@ export const metadata: Metadata = {
   title: "Política de Privacidade",
 };
 
-const ATUALIZADO_EM = "[DATA]";
+const ATUALIZADO_EM = "6 de julho de 2026";
 
 export default function PoliticaPrivacidade() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 text-foreground">
-      <div className="mb-8 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-        ⚠️ <strong>Rascunho.</strong> Este documento é um ponto de partida e
-        precisa de revisão jurídica (LGPD) e do preenchimento dos dados da
-        empresa antes de ser publicado.
-      </div>
-
       <h1 className="text-2xl font-semibold tracking-tight">
         Política de Privacidade — Central de Receita
       </h1>
@@ -31,11 +25,17 @@ export default function PoliticaPrivacidade() {
           <h2 className="text-lg font-semibold">1. Quem somos</h2>
           <p>
             A Central de Receita é uma plataforma de CRM e Gestão Comercial
-            operada por <strong>[RAZÃO SOCIAL]</strong>, inscrita no CNPJ{" "}
-            <strong>[CNPJ]</strong>, com sede em <strong>[ENDEREÇO]</strong>{" "}
-            (&quot;Central de Receita&quot;, &quot;nós&quot;). Esta Política
-            explica como tratamos dados pessoais, em conformidade com a Lei nº
-            13.709/2018 (LGPD).
+            operada por{" "}
+            <strong>
+              Jano Marketing Direto e Treinamento em Desenvolvimento
+              Profissional e Gerencial Ltda
+            </strong>{" "}
+            (nome fantasia Sales 3R Performance Comercial), inscrita no CNPJ{" "}
+            <strong>43.317.252/0001-51</strong>, com sede na Av. Pres. Juscelino
+            Kubitschek, 1327, Andar 4, Conj. 41, Vila Nova Conceição, São
+            Paulo/SP, CEP 04.543-011 (&quot;Central de Receita&quot;,
+            &quot;nós&quot;). Esta Política explica como tratamos dados pessoais,
+            em conformidade com a Lei nº 13.709/2018 (LGPD).
           </p>
         </section>
 
@@ -101,7 +101,7 @@ export default function PoliticaPrivacidade() {
             Você pode solicitar confirmação de tratamento, acesso, correção,
             anonimização, portabilidade e eliminação dos seus dados, além de
             revogar consentimento, escrevendo para{" "}
-            <strong>[E-MAIL DE CONTATO/DPO]</strong>. Para dados de contatos que
+            <strong>contato@sales3r.com.br</strong>. Para dados de contatos que
             você gerencia como Controladora, atendemos às suas instruções.
           </p>
         </section>
@@ -111,7 +111,7 @@ export default function PoliticaPrivacidade() {
           <p>
             Mantemos os dados enquanto a conta estiver ativa. Após o
             encerramento, os dados são eliminados ou anonimizados em{" "}
-            <strong>[PRAZO]</strong> dias, salvo obrigação legal de retenção.
+            <strong>90</strong> dias, salvo obrigação legal de retenção.
           </p>
         </section>
 
@@ -128,8 +128,9 @@ export default function PoliticaPrivacidade() {
         <section>
           <h2 className="text-lg font-semibold">8. Encarregado (DPO)</h2>
           <p>
-            Encarregado pelo tratamento de dados: <strong>[NOME DO DPO]</strong>
-            , contato <strong>[E-MAIL DO DPO]</strong>.
+            Encarregado pelo tratamento de dados:{" "}
+            <strong>Alberto Oliveira</strong>, contato{" "}
+            <strong>contato@sales3r.com.br</strong>.
           </p>
         </section>
 
