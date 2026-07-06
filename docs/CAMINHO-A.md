@@ -35,15 +35,20 @@ e `settings/page.tsx`): plano atual + uso de créditos (`GET /api/ai/creditos`),
 mensal/anual, botões **Assinar** (→ checkout) e **Gerenciar assinatura** (→ portal).
 Owner-only. Typecheck limpo (`tsc --noEmit` exit 0).
 
+**Banner de assinatura vencida** (`subscription-banner.tsx` no `dashboard-shell.tsx`):
+aviso persistente no topo quando `accounts.subscription_status` ∈ (`past_due`,
+`canceled`, `unpaid`, `incomplete`), com botão "Regularizar" → aba Assinatura (owner).
+Não faz lockout — o tier free é legítimo e as features de IA já travam por crédito.
+
 **Páginas legais LGPD** (rascunho): `/privacidade` e `/termos`. Preencher `[COLCHETES]`
 (CNPJ, razão social, DPO, foro) e passar no jurídico.
 
-## 🔧 Falta codar (frontend)
+## ✅ Código do Caminho A: COMPLETO
 
-### Banner de assinatura vencida
-Quando `accounts.subscription_status` ∈ (`past_due`,`canceled`), mostrar banner
-persistente no shell do dashboard ("Pagamento pendente — regularize") com botão → portal.
-Evitar lockout total (tier free é legítimo).
+Todos os itens de código foram implementados (rebrand, assentos, portal, aba Assinatura,
+banner de assinatura vencida, páginas legais). `tsc --noEmit` limpo. Falta só merge + tarefas humanas.
+
+## 🔧 Pendências de merge (não-código)
 
 ### 2 arquivos de rebrand fora da branch (colidem com WIP)
 `sidebar.tsx` (wordmark) e `template-manager.tsx` (cópia) têm o rebrand aplicado no
