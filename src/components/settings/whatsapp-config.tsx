@@ -465,7 +465,7 @@ export function WhatsAppConfig() {
                   }
                 >
                   {isRegistered
-                    ? 'Registrado — a Meta entregará eventos à Sales 3R'
+                    ? 'Registrado — a Meta entregará eventos à Central de Receita'
                     : 'Não registrado — a Meta não entregará eventos'}
                 </AlertTitle>
               </div>

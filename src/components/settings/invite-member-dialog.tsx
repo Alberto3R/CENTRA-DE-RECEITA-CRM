@@ -140,7 +140,7 @@ export function InviteMemberDialog({
         // string if `account` hasn't loaded yet (shouldn't happen
         // — the dialog requires admin+ which requires a loaded
         // profile — but stay safe).
-        accountName: account?.name ?? 'nossa conta na Sales 3R',
+        accountName: account?.name ?? 'nossa conta na Central de Receita',
       });
       onCreated();
     } catch (err) {
@@ -169,8 +169,8 @@ export function InviteMemberDialog({
     // they're being invited to before clicking through. This matters
     // for users in multi-team contexts where "our wacrm account"
     // wouldn't be enough to disambiguate.
-    const accountName = result?.accountName ?? 'nossa conta na Sales 3R';
-    const message = `Entre em ${accountName} na Sales 3R usando este link (válido por ${result?.expiresInDays} dias): ${url}`;
+    const accountName = result?.accountName ?? 'nossa conta na Central de Receita';
+    const message = `Entre em ${accountName} na Central de Receita usando este link (válido por ${result?.expiresInDays} dias): ${url}`;
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }
 

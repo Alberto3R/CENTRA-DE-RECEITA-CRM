@@ -32,6 +32,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import { getPlan } from "@/lib/billing/plans";
 
 // Resolve the base URL we publish invite links under.
 //
@@ -190,6 +191,38 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "'role' must be one of admin, agent, viewer" },
         { status: 400 },
+      );
+    }
+
+    // Enforcement de assentos: cada plano inclui um número de usuários.
+    // Bloqueia novos convites quando (membros ativos + convites pendentes)
+    // já atingiu o teto do plano. Assento extra pago exige quantity no
+    // Stripe (Caminho B); por ora, o teto é rígido nos inclusos.
+    const { data: acct } = await ctx.supabase
+      .from("accounts")
+      .select("plan")
+      .eq("id", ctx.accountId)
+      .maybeSingle<{ plan: string | null }>();
+    const plano = getPlan(acct?.plan);
+    const [membros, pendentes] = await Promise.all([
+      ctx.supabase
+        .from("profiles")
+        .select("user_id", { count: "exact", head: true })
+        .eq("account_id", ctx.accountId),
+      ctx.supabase
+        .from("account_invitations")
+        .select("id", { count: "exact", head: true })
+        .eq("account_id", ctx.accountId)
+        .is("accepted_at", null)
+        .gt("expires_at", new Date().toISOString()),
+    ]);
+    const assentosUsados = (membros.count ?? 0) + (pendentes.count ?? 0);
+    if (assentosUsados >= plano.usuariosInclusos) {
+      return NextResponse.json(
+        {
+          error: `Seu plano (${plano.label}) inclui ${plano.usuariosInclusos} usuário(s). Faça upgrade para adicionar mais.`,
+        },
+        { status: 403 },
       );
     }
 

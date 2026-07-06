@@ -78,7 +78,7 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <span className="text-lg font-bold tracking-tight text-primary">3R</span>
+            <span className="text-lg font-bold tracking-tight text-primary">CR</span>
           </div>
           <CardTitle className="text-xl text-foreground">Redefinir senha</CardTitle>
           <CardDescription className="text-muted-foreground">

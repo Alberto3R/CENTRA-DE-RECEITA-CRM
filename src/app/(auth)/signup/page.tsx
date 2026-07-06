@@ -135,7 +135,7 @@ function SignupPageInner() {
             {inviteToken ? (
               <UsersRound className="h-6 w-6 text-primary" />
             ) : (
-              <span className="text-lg font-bold tracking-tight text-primary">3R</span>
+              <span className="text-lg font-bold tracking-tight text-primary">CR</span>
             )}
           </div>
           <CardTitle className="text-xl text-foreground">

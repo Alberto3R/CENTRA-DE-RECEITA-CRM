@@ -816,8 +816,8 @@ export function MessageThread({
       onHandoffChange(conversation.id, aiHandoff);
       toast.success(
         aiHandoff
-          ? "Você assumiu o atendimento. A IA da 3R não responde mais nesta conversa."
-          : "IA da 3R reativada nesta conversa.",
+          ? "Você assumiu o atendimento. A IA da Central não responde mais nesta conversa."
+          : "IA da Central reativada nesta conversa.",
       );
     },
     [conversation, isHandoffSaving, onHandoffChange],
@@ -1062,7 +1062,7 @@ export function MessageThread({
                 type="button"
                 onClick={() => handleHandoffChange(false)}
                 disabled={isHandoffSaving}
-                title="Devolver o atendimento para a IA da 3R"
+                title="Devolver o atendimento para a IA da Central"
                 className={cn(
                   "inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
                 )}
@@ -1076,7 +1076,7 @@ export function MessageThread({
               type="button"
               onClick={() => handleHandoffChange(true)}
               disabled={isHandoffSaving}
-              title="Assumir o atendimento — a IA da 3R para de responder"
+              title="Assumir o atendimento — a IA da Central para de responder"
               className={cn(
                 "inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
               )}

@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
-// Brand favicon — Sales 3R: lime square (#A6E43C, the brand signature
-// green) with "3R" in ink. Next.js renders this at build time and
+// Brand favicon — Central de Receita: lime square (#A6E43C, the brand
+// signature green) with "CR" in ink. Next.js renders this at build time and
 // auto-injects <link rel="icon"> into <head>. Takes precedence over
 // src/app/favicon.ico (the Next.js default, harmless on disk).
 
@@ -28,7 +28,7 @@ export default function Icon() {
           borderRadius: 6,
         }}
       >
-        3R
+        CR
       </div>
     ),
     { ...size },

@@ -27,10 +27,11 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Sales 3R",
-    template: "%s — Sales 3R",
+    default: "Central de Receita",
+    template: "%s — Central de Receita",
   },
-  description: "CRM da Sales 3R — venda todo dia.",
+  description:
+    "Central de Receita — CRM e Gestor Comercial no WhatsApp. Venda todo dia.",
   robots: {
     index: false,
     follow: false,

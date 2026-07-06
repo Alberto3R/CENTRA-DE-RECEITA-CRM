@@ -70,8 +70,8 @@ export interface ThemeMeta {
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   {
     id: "sales3r",
-    name: "Sales 3R",
-    tagline: "Verde 3R — a cor de assinatura da marca.",
+    name: "Central de Receita",
+    tagline: "Verde-limão — a cor de assinatura da marca.",
     swatch: "oklch(0.847 0.200 128.1)",
   },
   {
