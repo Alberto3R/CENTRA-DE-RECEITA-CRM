@@ -266,6 +266,14 @@ export function TemplateManager() {
     setDialogOpen(true);
   }
 
+  // Rascunho (ex.: criado fora do compositor) → abre o compositor pré-preenchido
+  // em modo CRIAR (editingId=null), pra submeter à Meta. O POST /submit faz
+  // upsert por (user_id, name, language), então atualiza o próprio rascunho.
+  function openDraftForSubmit(template: MessageTemplate) {
+    openEdit(template);
+    setEditingId(null);
+  }
+
   async function handleSubmit() {
     // AUTHENTICATION is blocked by the persistent banner + disabled
     // submit button; this is a defensive second line of defense.
@@ -607,6 +615,19 @@ export function TemplateManager() {
                       >
                         <RotateCcw className="size-3.5" />
                         Reenviar
+                      </Button>
+                    )}
+                    {statusKey === 'DRAFT' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openDraftForSubmit(template)}
+                        title="Revise e envie o rascunho para aprovação da Meta."
+                        aria-label="Enviar modelo para aprovação"
+                        className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
+                      >
+                        <Upload className="size-3.5" />
+                        Enviar
                       </Button>
                     )}
                     <Button
@@ -1110,8 +1131,8 @@ export function TemplateManager() {
             <DialogTitle className="text-popover-foreground">Excluir modelo?</DialogTitle>
             <DialogDescription className="text-muted-foreground">
               {templateToDelete?.meta_template_id
-                ? `"${templateToDelete?.name}" será excluído da Meta e da Sales 3R. Disparos ativos que usam este modelo começarão a falhar no próximo envio. Isso não pode ser desfeito.`
-                : `"${templateToDelete?.name}" será excluído da Sales 3R. Ele nunca foi enviado à Meta, então não é necessária nenhuma limpeza remota.`}
+                ? `"${templateToDelete?.name}" será excluído da Meta e da Central de Receita. Disparos ativos que usam este modelo começarão a falhar no próximo envio. Isso não pode ser desfeito.`
+                : `"${templateToDelete?.name}" será excluído da Central de Receita. Ele nunca foi enviado à Meta, então não é necessária nenhuma limpeza remota.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="bg-popover border-border">

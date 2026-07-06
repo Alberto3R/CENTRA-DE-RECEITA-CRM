@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { AccountSwitcher } from "./account-switcher";
 import {
+  Brain,
+  ChevronDown,
+  Sparkles,
   Crown,
   GitBranch,
   BarChart3,
@@ -99,6 +102,14 @@ const navItems: NavItem[] = [
   { href: "/flows", label: "Fluxos", icon: Workflow, beta: true },
 ];
 
+// Itens do Gestor Comercial — rotulados como AÇÕES (verbos), não features.
+const gestorItems: NavItem[] = [
+  { href: "/ia/analise", label: "Analisar conversa", icon: MessageSquare },
+  { href: "/ia/funil", label: "Analisar funil", icon: BarChart3 },
+  { href: "/ia/time", label: "Avaliar time", icon: UsersRound },
+  { href: "/ia/criar", label: "Criar materiais", icon: Sparkles },
+];
+
 const bottomNavItems = [
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
@@ -111,6 +122,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const [gestorOpen, setGestorOpen] = useState(pathname.startsWith("/ia"));
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
   // Only surface the account-name strip when it actually carries
@@ -183,10 +195,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-[13px] font-bold tracking-tight text-primary-foreground">
-              3R
+              CR
             </div>
             <span className="text-sm font-semibold tracking-tight text-foreground">
-              Sales 3R
+              Central de Receita
             </span>
           </Link>
           <button
@@ -249,6 +261,54 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               );
             })}
           </ul>
+
+          {/* Gestor Comercial — grupo colapsável, itens como ações (verbos) */}
+          <div className="mt-1">
+            <button
+              type="button"
+              onClick={() => setGestorOpen((v) => !v)}
+              aria-expanded={gestorOpen}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                pathname.startsWith("/ia")
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Brain className="h-4 w-4" />
+              <span className="flex-1 text-left">Gestor Comercial</span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform",
+                  gestorOpen ? "rotate-180" : "",
+                )}
+              />
+            </button>
+            {gestorOpen ? (
+              <ul className="mt-1 ml-4 flex flex-col gap-1 border-l border-border pl-3">
+                {gestorItems.map((item) => {
+                  const isActive =
+                    pathname === item.href || pathname.startsWith(item.href);
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                          isActive
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
 
           <div className="my-4 border-t border-border" />
 

@@ -13,6 +13,28 @@ import { runAgent, type AgentTurn } from './respond'
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
 
+// Monta o bloco de contexto do lead da calculadora (se houver) pra injetar na
+// mensagem do agente — assim a IA já chega sabendo a dor, sem perguntar de novo.
+function leadContextFrom(raw: Record<string, unknown> | null | undefined): string | undefined {
+  if (!raw || raw.origem !== 'calculadora-vaga-aberta') return undefined
+  const money = (v: unknown) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? 'R$ ' + Math.round(n).toLocaleString('pt-BR') : '—'
+  }
+  const lines = [
+    'CONTEXTO DO LEAD (veio da Calculadora de Vaga Aberta da Augra — já temos estes dados, NÃO pergunte de novo):',
+    `- Vaga: ${raw.cargo_vaga ?? '—'}${raw.qtd_vagas_abertas ? ` (×${raw.qtd_vagas_abertas})` : ''}`,
+    raw.dias_vaga_aberta != null ? `- Aberta há: ${raw.dias_vaga_aberta} dias` : '',
+    raw.salario_anunciado != null ? `- Salário anunciado: ${money(raw.salario_anunciado)}` : '',
+    raw.custo_estimado_mensal != null
+      ? `- Perda estimada (estimativa de mercado): ${money(raw.custo_estimado_mensal)}/mês`
+      : '',
+    raw.empresa ? `- Empresa: ${raw.empresa}` : '',
+    'Use isso pra personalizar a conversa e conduzir pro diagnóstico/recrutamento.',
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
 async function sendText(
   phoneNumberId: string,
   accessToken: string,
@@ -114,7 +136,7 @@ export async function maybeRunAgent(params: {
   // 2. Conversa já em handoff → humano no comando, bot não responde
   const { data: conv } = await supabase
     .from('conversations')
-    .select('ai_handoff')
+    .select('ai_handoff, contact_id')
     .eq('id', conversationId)
     .maybeSingle()
   if (conv?.ai_handoff) return
@@ -151,6 +173,23 @@ export async function maybeRunAgent(params: {
     text: m.content_text as string,
   }))
 
+  // 4b. Contexto do lead (dados da calculadora) — se o contato tiver atribuição
+  //     dessa origem, injeta na mensagem do agente. Silencioso se não houver.
+  let leadContext: string | undefined
+  const contactId = (conv as { contact_id?: string } | null)?.contact_id
+  if (contactId) {
+    const { data: attr } = await supabase
+      .from('lead_attribution')
+      .select('raw')
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    leadContext = leadContextFrom(
+      (attr as { raw?: Record<string, unknown> } | null)?.raw,
+    )
+  }
+
   // 5. Roda o agente
   const result = await runAgent({
     config: {
@@ -160,6 +199,7 @@ export async function maybeRunAgent(params: {
     },
     history,
     incomingText: inboundText,
+    leadContext,
   })
   if (!result || !result.reply.trim()) {
     // Falha da IA (erro de API, parse inválido ou resposta vazia): em vez

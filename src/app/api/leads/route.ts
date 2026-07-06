@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { fireWebLead } from '@/lib/conversions/capi'
 import { notifyTeamNewLead } from '@/lib/notifications/lead-alert'
+import { decrypt } from '@/lib/whatsapp/encryption'
+import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 
 // ============================================================
 // POST /api/leads — captação de lead da landing (Funil 2) direto no CRM
@@ -16,7 +18,34 @@ import { notifyTeamNewLead } from '@/lib/notifications/lead-alert'
 // Conta de destino: LEAD_CAPTURE_ACCOUNT_ID.
 // ============================================================
 
-const PIPELINE_NAME = 'Tráfego Pago'
+// token (x-lead-token) → conta de destino + pipeline. Retrocompatível:
+// o token existente continua indo pra Sales 3R · "Tráfego Pago" (Sprint);
+// o token AUGRA vai pra conta AUGRA · "AUGRA · Recrutamento" (esta campanha).
+// Cada token é um segredo separado — dá pra revogar/rotacionar um sem mexer no outro.
+function resolveRoute(
+  token: string | null,
+): { accountId: string; pipeline: string; welcomeTemplate?: string } | null {
+  if (!token) return null
+  const routes: Record<
+    string,
+    { accountId?: string; pipeline: string; welcomeTemplate?: string }
+  > = {}
+  if (process.env.LEAD_CAPTURE_TOKEN)
+    routes[process.env.LEAD_CAPTURE_TOKEN] = {
+      accountId: process.env.LEAD_CAPTURE_ACCOUNT_ID,
+      pipeline: 'Tráfego Pago',
+    }
+  if (process.env.LEAD_CAPTURE_TOKEN_AUGRA)
+    routes[process.env.LEAD_CAPTURE_TOKEN_AUGRA] = {
+      accountId: process.env.LEAD_CAPTURE_ACCOUNT_ID_AUGRA,
+      pipeline: 'AUGRA · Recrutamento',
+      welcomeTemplate: 'augra_calculadora_abertura',
+    }
+  const r = routes[token]
+  return r && r.accountId
+    ? { accountId: r.accountId, pipeline: r.pipeline, welcomeTemplate: r.welcomeTemplate }
+    : null
+}
 
 // classificação do gate → estágio do pipeline
 const STAGE_BY_STATUS: Record<string, string> = {
@@ -44,16 +73,135 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
+// R$ a partir de número (ou string numérica). Ex.: 210000 → "R$ 210.000".
+function brl(v: unknown): string | null {
+  const n =
+    typeof v === 'number'
+      ? v
+      : typeof v === 'string'
+        ? Number(v.replace(/[^\d.-]/g, ''))
+        : NaN
+  return Number.isFinite(n) ? 'R$ ' + Math.round(n).toLocaleString('pt-BR') : null
+}
+
+// Nomes dos campos customizados (batem com os criados na conta AUGRA).
+const CF_CARGO = 'Cargo da vaga'
+const CF_SALARIO = 'Salário anunciado'
+const CF_DIAS = 'Dias em aberto'
+const CF_QTD = 'Nº de vagas'
+const CF_PERDA = 'Perda estimada/mês'
+
+// Enriquecimento do contato com os dados da calculadora: grava os campos
+// customizados + uma nota-resumo (pro humano ver no timeline e o agente usar).
+// Self-scoped: só age quando o lead traz `cargo_vaga` (calculadora) e a conta
+// tem os campos — leads do Sprint (sem cargo_vaga) passam batido.
+async function enrichLeadFields(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  accountId: string,
+  contactId: string,
+  ownerId: string,
+  a: Record<string, unknown>,
+) {
+  const cargo = str(a.cargo_vaga)
+  if (!cargo) return
+
+  const salario = brl(a.salario_anunciado)
+  const dias = a.dias_vaga_aberta != null ? String(a.dias_vaga_aberta) : null
+  const qtd = a.qtd_vagas_abertas != null ? String(a.qtd_vagas_abertas) : null
+  const perdaMes = brl(a.custo_estimado_mensal)
+  const perdaTotal = brl(a.custo_estimado_total)
+
+  // 1) valores nos campos customizados da conta
+  const wanted: Record<string, string | null> = {
+    [CF_CARGO]: cargo,
+    [CF_SALARIO]: salario,
+    [CF_DIAS]: dias,
+    [CF_QTD]: qtd,
+    [CF_PERDA]: perdaMes,
+  }
+  const { data: fields } = await db
+    .from('custom_fields')
+    .select('id, field_name')
+    .eq('account_id', accountId)
+    .in('field_name', Object.keys(wanted))
+  const rows = ((fields as { id: string; field_name: string }[]) ?? [])
+    .filter((f) => wanted[f.field_name] != null)
+    .map((f) => ({ contact_id: contactId, custom_field_id: f.id, value: wanted[f.field_name] }))
+  if (rows.length) {
+    await db.from('contact_custom_values').upsert(rows, { onConflict: 'contact_id,custom_field_id' })
+  }
+
+  // 2) nota-resumo (aparece no timeline do contato)
+  const note =
+    `📊 Calculadora de Vaga Aberta — vaga de ${cargo}` +
+    (qtd ? ` (×${qtd})` : '') +
+    (dias ? `, aberta há ${dias} dias` : '') +
+    (salario ? ` · salário anunciado ${salario}` : '') +
+    (perdaMes ? ` · perda estimada ${perdaMes}/mês` : '') +
+    (perdaTotal ? ` (acumulada ${perdaTotal})` : '') +
+    '. Estimativa de mercado. Origem: tráfego pago.'
+  await db
+    .from('contact_notes')
+    .insert({ account_id: accountId, contact_id: contactId, user_id: ownerId, note_text: note })
+}
+
+// Mensagem de abertura (template aprovado) logo após o cadastro do lead.
+// AUTO-GATED: só dispara quando o template está APPROVED na Meta — antes disso
+// (DRAFT/PENDING) não faz nada, evitando chamada que a Meta rejeitaria. No
+// minuto em que a Meta aprova (webhook atualiza status → APPROVED), começa
+// a disparar sozinho, sem redeploy.
+async function maybeSendWelcome(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  accountId: string,
+  templateName: string | undefined,
+  toPhone: string,
+  name: string,
+) {
+  if (!templateName) return
+
+  const { data: tpl } = await db
+    .from('message_templates')
+    .select('status, language')
+    .eq('account_id', accountId)
+    .eq('name', templateName)
+    .maybeSingle()
+  if (!tpl || tpl.status !== 'APPROVED') return
+
+  const { data: wa } = await db
+    .from('whatsapp_config')
+    .select('phone_number_id, access_token')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (!wa?.phone_number_id || !wa?.access_token) return
+
+  let token: string
+  try {
+    token = decrypt(wa.access_token as string)
+  } catch {
+    return
+  }
+
+  const firstName = (name || '').trim().split(/\s+/)[0] || 'tudo bem'
+  await sendTemplateMessage({
+    phoneNumberId: wa.phone_number_id as string,
+    accessToken: token,
+    to: toPhone,
+    templateName,
+    language: (tpl.language as string) || 'pt_BR',
+    params: [firstName],
+  })
+}
+
 export async function POST(request: Request) {
-  // 1. Auth
-  const token = request.headers.get('x-lead-token')
-  if (!token || token !== process.env.LEAD_CAPTURE_TOKEN) {
+  // 1. Auth + roteamento por token (conta + pipeline de destino)
+  const route = resolveRoute(request.headers.get('x-lead-token'))
+  if (!route) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
-  const accountId = process.env.LEAD_CAPTURE_ACCOUNT_ID
-  if (!accountId) {
-    return NextResponse.json({ error: 'capture not configured' }, { status: 500 })
-  }
+  const accountId = route.accountId
+  const pipelineName = route.pipeline
 
   // 2. Payload
   let a: Record<string, unknown>
@@ -78,7 +226,7 @@ export async function POST(request: Request) {
       .from('pipelines')
       .select('id')
       .eq('account_id', accountId)
-      .eq('name', PIPELINE_NAME)
+      .eq('name', pipelineName)
       .maybeSingle(),
   ])
   const ownerId = (acc as { owner_user_id?: string } | null)?.owner_user_id
@@ -180,6 +328,14 @@ export async function POST(request: Request) {
     landing_url: str(a.event_source_url),
     raw: a,
   })
+
+  // 6b. Enriquecimento: campos customizados + nota-resumo com os dados da
+  //     calculadora (pro humano ver e o agente IA usar). Nunca derruba a resposta.
+  await enrichLeadFields(db, accountId, contactId, ownerId, a).catch(() => {})
+
+  // 6c. Mensagem de abertura no WhatsApp logo após o cadastro (template
+  //     aprovado). Auto-gated pelo status do template; nunca derruba a resposta.
+  await maybeSendWelcome(db, accountId, route.welcomeTemplate, phone, name).catch(() => {})
 
   // 7. CAPI "Lead" server-side (dedup com o pixel do navegador via event_id).
   //    Substitui o disparo que o cenário do Make fazia no Funil 2. Await pra

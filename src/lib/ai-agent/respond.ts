@@ -41,12 +41,13 @@ function todayBRT(): string {
   return fmt.format(new Date())
 }
 
-function buildUserMessage(history: AgentTurn[], incoming: string): string {
+function buildUserMessage(history: AgentTurn[], incoming: string, leadContext?: string): string {
   const transcript = history.length
     ? history.map((t) => `${t.fromCustomer ? 'Cliente' : 'Agente'}: ${t.text}`).join('\n')
     : '(primeiro contato)'
   return [
     `Data de hoje: ${todayBRT()}, fuso America/Sao_Paulo.`,
+    ...(leadContext ? ['', leadContext] : []),
     '',
     'Transcrição da conversa até agora:',
     transcript,
@@ -98,13 +99,15 @@ export async function runAgent(params: {
   config: AgentConfig
   history: AgentTurn[]
   incomingText: string
+  /** Contexto do lead (ex.: dados da calculadora) injetado na mensagem. */
+  leadContext?: string
 }): Promise<AgentReply | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
     console.error('[ai-agent] ANTHROPIC_API_KEY não configurada — agente inativo')
     return null
   }
-  const { config, history, incomingText } = params
+  const { config, history, incomingText, leadContext } = params
   try {
     const res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
@@ -117,7 +120,7 @@ export async function runAgent(params: {
         model: config.model,
         max_tokens: config.max_tokens,
         system: config.system_prompt,
-        messages: [{ role: 'user', content: buildUserMessage(history, incomingText) }],
+        messages: [{ role: 'user', content: buildUserMessage(history, incomingText, leadContext) }],
       }),
     })
     if (!res.ok) {
