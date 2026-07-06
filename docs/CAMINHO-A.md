@@ -30,15 +30,15 @@ telas de `login/signup/forgot-password` (glyph), `themes.ts` (nome do tema),
 **Portal de billing** (`api/billing/portal`, novo): Stripe Billing Portal; só owner;
 retorna `{ url }` pra ver fatura, trocar cartão, cancelar.
 
+**Aba "Assinatura" no Settings** (`billing-settings.tsx` + wiring em `settings-sections.ts`
+e `settings/page.tsx`): plano atual + uso de créditos (`GET /api/ai/creditos`), toggle
+mensal/anual, botões **Assinar** (→ checkout) e **Gerenciar assinatura** (→ portal).
+Owner-only. Typecheck limpo (`tsc --noEmit` exit 0).
+
 **Páginas legais LGPD** (rascunho): `/privacidade` e `/termos`. Preencher `[COLCHETES]`
 (CNPJ, razão social, DPO, foro) e passar no jurídico.
 
 ## 🔧 Falta codar (frontend)
-
-### Aba "Assinatura" no Settings
-`settings-sections.ts` não lista billing. Adicionar aba que mostra plano atual +
-créditos (`GET /api/ai/creditos`) e 2 botões: **Assinar/Upgrade** (→ `POST /api/billing/checkout`)
-e **Gerenciar assinatura** (→ `POST /api/billing/portal`, redireciona pro `url`).
 
 ### Banner de assinatura vencida
 Quando `accounts.subscription_status` ∈ (`past_due`,`canceled`), mostrar banner

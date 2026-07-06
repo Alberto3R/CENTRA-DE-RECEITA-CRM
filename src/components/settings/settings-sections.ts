@@ -1,6 +1,7 @@
 import {
   Bot,
   Coins,
+  CreditCard,
   FileText,
   KeyRound,
   LayoutGrid,
@@ -27,6 +28,7 @@ export const SETTINGS_SECTIONS = [
   'profile',
   'security',
   'appearance',
+  'billing',
   'whatsapp',
   'templates',
   'fields',
@@ -54,6 +56,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
+  billing: { id: 'billing', label: 'Assinatura', icon: CreditCard, group: 'account' },
   whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace' },
   templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace' },
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace' },
