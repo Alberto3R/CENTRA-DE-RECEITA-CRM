@@ -3,6 +3,8 @@
 import type { Deal, PipelineStage } from "@/types";
 import { Calendar, Check, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
+import { WaCallButton } from "@/components/whatsapp/wa-call-button";
+import { StartTemplateButton } from "@/components/whatsapp/start-template-button";
 
 interface DealCardProps {
   deal: Deal;
@@ -30,14 +32,22 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const assigneeLabel = deal.assignee?.full_name || null;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={isOverlay ? -1 : 0}
       onClick={(e) => {
         // `onClick` still fires after a non-drag tap because the PointerSensor
         // requires 5px movement before it counts as a drag.
         if (isOverlay) return;
         e.stopPropagation();
         onEdit(deal);
+      }}
+      onKeyDown={(e) => {
+        if (isOverlay) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit(deal);
+        }
       }}
       className={`group relative w-full cursor-pointer rounded-xl border border-border/50 bg-muted/70 pl-4 pr-3 py-3 text-left shadow-sm transition-all ${
         isOverlay
@@ -100,6 +110,20 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           </span>
         </div>
       )}
-    </button>
+
+      {/* Ações rápidas do card: ligar (WhatsApp) e iniciar conversa com
+          modelo. stopPropagation no pointer/click pra não abrir o negócio
+          nem iniciar o drag do kanban. */}
+      {deal.contact?.id && !isOverlay && (
+        <div
+          className="mt-3 flex items-center gap-1 border-t border-border/50 pt-2"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <WaCallButton contactId={deal.contact.id} compact />
+          <StartTemplateButton contactId={deal.contact.id} />
+        </div>
+      )}
+    </div>
   );
 }
