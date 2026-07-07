@@ -39,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
@@ -904,6 +905,11 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Ligação WhatsApp (business-initiated). Ícone no header; abre
+              o softphone WebRTC. Requer calling habilitado + permissão do
+              lead + tier — senão avisa via tooltip/estado. */}
+          <WaCallButton contactId={contact.id} compact />
+
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just

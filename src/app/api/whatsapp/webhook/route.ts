@@ -12,6 +12,10 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import {
+  handleCallsWebhook,
+  type CallsWebhookValue,
+} from '@/lib/whatsapp/call-webhook'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,6 +236,17 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       if (isTemplateWebhookField(change.field)) {
         await handleTemplateWebhookChange(
           { field: change.field, value: change.value as unknown },
+          supabaseAdmin(),
+        )
+        continue
+      }
+
+      // Eventos da Calling API (connect / status / terminate) chegam em
+      // change.field === 'calls' com um value de shape próprio — roteia
+      // pro handler dedicado que sinaliza o softphone via whatsapp_calls.
+      if (change.field === 'calls') {
+        await handleCallsWebhook(
+          change.value as unknown as CallsWebhookValue,
           supabaseAdmin(),
         )
         continue
