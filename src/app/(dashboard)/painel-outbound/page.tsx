@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Star, TrendingUp } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  SlidersHorizontal,
+  Star,
+  TrendingUp,
+} from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +57,16 @@ const KPIS: { key: keyof Kpis; label: string; star?: boolean }[] = [
   { key: "qualificados", label: "Leads qualificados" },
 ];
 
+const META_FIELDS: { key: string; label: string }[] = [
+  { key: "dials", label: "Ligações/dia" },
+  { key: "atendimentos", label: "Atendimentos/dia" },
+  { key: "decisor", label: "Conversas c/ decisor/dia" },
+  { key: "whatsapp", label: "WhatsApp/dia" },
+  { key: "reunioes", label: "Reuniões/dia" },
+  { key: "qualificados", label: "Qualificados/dia" },
+  { key: "reunioes_mes", label: "Reuniões/mês (time)" },
+];
+
 function businessDaysElapsed(now: Date): number {
   const y = now.getFullYear();
   const m = now.getMonth();
@@ -79,6 +96,10 @@ export default function PainelOutbound() {
   const [resultado, setResultado] = useState("no_answer");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const { canEditSettings } = useAuth();
+  const [metasModal, setMetasModal] = useState(false);
+  const [metasForm, setMetasForm] = useState<Record<string, number>>({});
+  const [savingMetas, setSavingMetas] = useState(false);
 
   const load = useCallback(async () => {
     const now = new Date();
@@ -131,6 +152,33 @@ export default function PainelOutbound() {
     }
   }
 
+  function abrirMetas() {
+    if (!panel) return;
+    setMetasForm({
+      ...panel.metas,
+      reunioes_mes: panel.metaReunioesMes,
+    } as Record<string, number>);
+    setMetasModal(true);
+  }
+  async function salvarMetas() {
+    setSavingMetas(true);
+    try {
+      const res = await fetch("/api/outbound/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(metasForm),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Metas atualizadas");
+      setMetasModal(false);
+      await load();
+    } catch {
+      toast.error("Não foi possível salvar as metas");
+    } finally {
+      setSavingMetas(false);
+    }
+  }
+
   async function registrar() {
     setSaving(true);
     try {
@@ -167,12 +215,19 @@ export default function PainelOutbound() {
             métrica-estrela: conversas com o decisor.
           </p>
         </div>
-        <Button
-          onClick={() => setModal(true)}
-          className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="size-4" /> Registrar atividade
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          {canEditSettings && (
+            <Button variant="outline" onClick={abrirMetas}>
+              <SlidersHorizontal className="size-4" /> Metas
+            </Button>
+          )}
+          <Button
+            onClick={() => setModal(true)}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="size-4" /> Registrar atividade
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -365,10 +420,7 @@ export default function PainelOutbound() {
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
                 >
                   <option value="call">Ligação</option>
-                  <option value="whatsapp">WhatsApp</option>
                   <option value="email">E-mail</option>
-                  <option value="meeting">Reunião agendada</option>
-                  <option value="qualification">Lead qualificado</option>
                 </select>
               </div>
               {tipo === "call" && (
@@ -398,6 +450,10 @@ export default function PainelOutbound() {
                   placeholder="Ex.: retornar amanhã 14h"
                 />
               </div>
+              <p className="text-xs text-muted-foreground">
+                WhatsApp, reuniões e qualificações são registrados automaticamente
+                (envio no inbox e mudança de etapa do lead).
+              </p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <Button
@@ -413,6 +469,67 @@ export default function PainelOutbound() {
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {saving ? <Loader2 className="size-4 animate-spin" /> : "Registrar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL editar metas */}
+      {metasModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !savingMetas && setMetasModal(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-card p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-foreground">
+              Metas do time
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Valores diários por SDR; reuniões/mês é a meta mensal do time.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {META_FIELDS.map((f) => (
+                <div key={f.key}>
+                  <label className="text-xs text-muted-foreground">
+                    {f.label}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={metasForm[f.key] ?? 0}
+                    onChange={(e) =>
+                      setMetasForm((s) => ({
+                        ...s,
+                        [f.key]: Number(e.target.value),
+                      }))
+                    }
+                    className="mt-1 h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setMetasModal(false)}
+                disabled={savingMetas}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={salvarMetas}
+                disabled={savingMetas}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {savingMetas ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  "Salvar metas"
+                )}
               </Button>
             </div>
           </div>

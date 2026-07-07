@@ -13,6 +13,7 @@ const METAS = {
   qualificados: 4,
 } as const;
 const META_REUNIOES_MES = 22;
+const DIAS_UTEIS_MES = 22; // dias úteis médios no mês (base da projeção)
 
 const TIPOS = ["call", "whatsapp", "email", "meeting", "qualification"];
 const RESULTADOS = ["no_answer", "connected", "decision_maker"];
@@ -39,24 +40,30 @@ export async function GET(request: Request) {
 
     const sb = ctx.supabase;
 
-    const [{ data: acts }, { data: profs }, { count: reunioesMes }] = await Promise.all([
-      sb
-        .from("sdr_activities")
-        .select("user_id,tipo,resultado")
-        .eq("account_id", ctx.accountId)
-        .gte("created_at", from)
-        .lte("created_at", to),
-      sb
-        .from("profiles")
-        .select("user_id,full_name")
-        .eq("account_id", ctx.accountId),
-      sb
-        .from("sdr_activities")
-        .select("id", { count: "exact", head: true })
-        .eq("account_id", ctx.accountId)
-        .eq("tipo", "meeting")
-        .gte("created_at", monthFrom),
-    ]);
+    const [{ data: acts }, { data: profs }, { count: reunioesMes }, { data: tRow }] =
+      await Promise.all([
+        sb
+          .from("sdr_activities")
+          .select("user_id,tipo,resultado")
+          .eq("account_id", ctx.accountId)
+          .gte("created_at", from)
+          .lte("created_at", to),
+        sb
+          .from("profiles")
+          .select("user_id,full_name")
+          .eq("account_id", ctx.accountId),
+        sb
+          .from("sdr_activities")
+          .select("id", { count: "exact", head: true })
+          .eq("account_id", ctx.accountId)
+          .eq("tipo", "meeting")
+          .gte("created_at", monthFrom),
+        sb
+          .from("outbound_targets")
+          .select("*")
+          .eq("account_id", ctx.accountId)
+          .maybeSingle(),
+      ]);
 
     const nameById = new Map<string, string>(
       ((profs as { user_id: string; full_name: string | null }[]) ?? []).map((p) => [
@@ -104,11 +111,23 @@ export async function GET(request: Request) {
       blank(),
     );
 
-    const projecaoMes = Math.round(((reunioesMes ?? 0) / diasUteis) * META_REUNIOES_MES);
+    const t = tRow as Record<string, number> | null;
+    const metas = t
+      ? {
+          dials: t.dials,
+          atendimentos: t.atendimentos,
+          decisor: t.decisor,
+          whatsapp: t.whatsapp,
+          reunioes: t.reunioes,
+          qualificados: t.qualificados,
+        }
+      : METAS;
+    const metaReunioesMes = t?.reunioes_mes ?? META_REUNIOES_MES;
+    const projecaoMes = Math.round(((reunioesMes ?? 0) / diasUteis) * DIAS_UTEIS_MES);
 
     return NextResponse.json({
-      metas: METAS,
-      metaReunioesMes: META_REUNIOES_MES,
+      metas,
+      metaReunioesMes,
       sdrs,
       team,
       forecast: { reunioesMes: reunioesMes ?? 0, projecaoMes },
