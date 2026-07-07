@@ -17,6 +17,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { LossReasonsSettings } from "./loss-reasons-settings";
 
 /**
  * Deals settings — account-wide default currency.
@@ -125,6 +126,10 @@ export function DealsSettings() {
           )}
         </CardContent>
       </Card>
+
+      <div className="mt-6">
+        <LossReasonsSettings />
+      </div>
     </section>
   );
 }

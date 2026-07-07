@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { CURRENCIES } from "@/lib/currency";
+import { DEFAULT_LOSS_REASONS } from "@/lib/deals/loss-reasons";
 import type {
   Contact,
   Conversation,
@@ -43,18 +44,6 @@ interface DealFormProps {
   onSaved: () => void;
 }
 
-// Lista padrão (universal) de motivos de perda — sugestão do CRM.
-const LOSS_REASONS = [
-  "Preço / orçamento",
-  "Sem fit (não é o perfil)",
-  "Sumiu / parou de responder",
-  "Escolheu concorrente",
-  "Sem urgência (timing)",
-  "Não era o decisor",
-  "Sem necessidade no momento",
-  "Outro",
-];
-
 export function DealForm({
   open,
   onOpenChange,
@@ -86,7 +75,8 @@ export function DealForm({
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lostReasonOpen, setLostReasonOpen] = useState(false);
-  const [lostReason, setLostReason] = useState(LOSS_REASONS[0]);
+  const [lossReasons, setLossReasons] = useState<string[]>(DEFAULT_LOSS_REASONS);
+  const [lostReason, setLostReason] = useState(DEFAULT_LOSS_REASONS[0]);
 
   // Reset the form fields every time the sheet opens or its input
   // props change. This is a legitimate prop-driven sync; the rule is
@@ -119,6 +109,30 @@ export function DealForm({
     }
   }, [open, deal, defaultStageId, stages, defaultCurrency]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Motivos de perda da conta (fallback: lista padrão do sistema).
+  useEffect(() => {
+    if (!open || !accountId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("loss_reasons")
+        .select("reason")
+        .eq("account_id", accountId)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      const list = ((data as { reason: string }[] | null) ?? []).map(
+        (r) => r.reason,
+      );
+      const resolved = list.length > 0 ? list : DEFAULT_LOSS_REASONS;
+      setLossReasons(resolved);
+      setLostReason(resolved[0]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, accountId, supabase]);
 
   // Load supporting data once the sheet is open
   useEffect(() => {
@@ -437,7 +451,7 @@ export function DealForm({
                       onChange={(e) => setLostReason(e.target.value)}
                       className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
                     >
-                      {LOSS_REASONS.map((r) => (
+                      {lossReasons.map((r) => (
                         <option key={r} value={r}>
                           {r}
                         </option>
