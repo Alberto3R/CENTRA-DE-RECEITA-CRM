@@ -90,6 +90,12 @@ interface NavItem {
    * Purely informational — doesn't affect routing or access.
    */
   beta?: boolean;
+  /**
+   * When true, the row only renders for admins+ (owner/admin). Agents e
+   * viewers não veem. As páginas em si continuam protegidas por RLS/checagem
+   * de papel — isto é a camada de menu (issue: SDR via Configurações etc.).
+   */
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -100,8 +106,8 @@ const navItems: NavItem[] = [
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { href: "/painel-outbound", label: "Painel Outbound", icon: Gauge },
   { href: "/broadcasts", label: "Disparos", icon: Radio },
-  { href: "/automations", label: "Automações", icon: Zap },
-  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true },
+  { href: "/automations", label: "Automações", icon: Zap, adminOnly: true },
+  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true, adminOnly: true },
 ];
 
 // Itens do Gestor Comercial — rotulados como AÇÕES (verbos), não features.
@@ -125,7 +131,19 @@ interface SidebarProps {
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const [gestorOpen, setGestorOpen] = useState(pathname.startsWith("/ia"));
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const {
+    profile,
+    profileLoading,
+    account,
+    accountRole,
+    canEditSettings,
+    signOut,
+  } = useAuth();
+  // Admin+ (owner/admin) veem tudo; agentes/visualizadores não veem os itens
+  // de gestão/configuração (Automações, Fluxos, Gestor Comercial, Configurações).
+  const visibleNavItems = navItems.filter(
+    (item) => !item.adminOnly || canEditSettings,
+  );
   const totalUnread = useTotalUnread();
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
@@ -219,7 +237,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -264,7 +282,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             })}
           </ul>
 
-          {/* Gestor Comercial — grupo colapsável, itens como ações (verbos) */}
+          {canEditSettings ? (
+            <>
+          {/* Gestor Comercial — grupo colapsável, itens como ações (verbos).
+              Toolkit de gestão → admin+ apenas. */}
           <div className="mt-1">
             <button
               type="button"
@@ -335,6 +356,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               );
             })}
           </ul>
+            </>
+          ) : null}
         </nav>
 
         {/* User section */}
@@ -416,18 +439,20 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <User className="size-4" />
                 Perfil
               </DropdownMenuItem>
-              <DropdownMenuItem
-                render={
-                  <Link
-                    href="/settings?tab=whatsapp"
-                    onClick={onClose}
-                    className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
-                  />
-                }
-              >
-                <Settings className="size-4" />
-                Configurações
-              </DropdownMenuItem>
+              {canEditSettings ? (
+                <DropdownMenuItem
+                  render={
+                    <Link
+                      href="/settings?tab=whatsapp"
+                      onClick={onClose}
+                      className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                    />
+                  }
+                >
+                  <Settings className="size-4" />
+                  Configurações
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuSeparator className="bg-border" />
               <DropdownMenuItem
                 onClick={signOut}

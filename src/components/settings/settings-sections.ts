@@ -49,23 +49,34 @@ export interface SectionMeta {
   label: string;
   icon: LucideIcon;
   group: 'top' | 'account' | 'workspace';
+  /**
+   * Só admins+ (owner/admin) veem/abrem. Seções pessoais (perfil, login,
+   * aparência) ficam livres pra qualquer papel. Reforçado na página (agent
+   * que deep-linkar cai no Perfil) e no rail (some da lista).
+   */
+  adminOnly?: boolean;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
-  overview: { id: 'overview', label: 'Visão geral', icon: LayoutGrid, group: 'top' },
+  overview: { id: 'overview', label: 'Visão geral', icon: LayoutGrid, group: 'top', adminOnly: true },
   profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
-  billing: { id: 'billing', label: 'Assinatura', icon: CreditCard, group: 'account' },
-  whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace' },
-  templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace' },
-  fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace' },
-  deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace' },
-  'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace' },
-  webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace' },
-  members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace' },
-  api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
+  billing: { id: 'billing', label: 'Assinatura', icon: CreditCard, group: 'account', adminOnly: true },
+  whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace', adminOnly: true },
+  templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace', adminOnly: true },
+  fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },
+  deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace', adminOnly: true },
+  'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace', adminOnly: true },
+  webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', adminOnly: true },
+  members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace', adminOnly: true },
+  api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', adminOnly: true },
 };
+
+/** True quando a seção exige admin+ (usado na página e no rail). */
+export function isAdminSection(section: SettingsSection): boolean {
+  return SECTION_META[section].adminOnly === true;
+}
 
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
   { label: null, group: 'top' },
