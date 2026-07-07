@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Pipeline, PipelineStage, Deal } from "@/types";
 import { PipelineBoard } from "@/components/pipelines/pipeline-board";
@@ -56,6 +56,13 @@ export default function PipelinesPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Filtros do board
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [members, setMembers] = useState<{ id: string; full_name: string }[]>([]);
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
+
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
   const [newPipelineName, setNewPipelineName] = useState("");
@@ -99,7 +106,7 @@ export default function PipelinesPage() {
     async (pipelineId: string) => {
       const { data } = await supabase
         .from("deals")
-        .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(*)")
+        .select("*, contact:contacts(*, contact_tags(tag_id)), assignee:profiles!deals_assigned_to_fkey(*)")
         .eq("pipeline_id", pipelineId)
         .order("created_at", { ascending: false });
       return (data ?? []) as Deal[];
@@ -193,6 +200,53 @@ export default function PipelinesPage() {
       cancelled = true;
     };
   }, [selectedPipelineId, loadStages, loadDeals]);
+
+  // Responsáveis (membros) e tags da conta — alimentam os filtros.
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: m }, { data: t }] = await Promise.all([
+        supabase.from("profiles").select("id, full_name").eq("account_id", accountId),
+        supabase.from("tags").select("id, name").eq("account_id", accountId).order("name"),
+      ]);
+      if (cancelled) return;
+      setMembers((m as { id: string; full_name: string }[]) ?? []);
+      setTags((t as { id: string; name: string }[]) ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, supabase]);
+
+  const filteredDeals = useMemo(() => {
+    const now = new Date();
+    const cutoff = (days: number) => {
+      const c = new Date(now);
+      c.setDate(now.getDate() - days);
+      return c;
+    };
+    return deals.filter((d) => {
+      if (dateFilter !== "all") {
+        const created = new Date(d.created_at);
+        if (dateFilter === "today") {
+          if (created.toDateString() !== now.toDateString()) return false;
+        } else if (created < cutoff(dateFilter === "7d" ? 7 : 30)) return false;
+      }
+      if (assigneeFilter === "__none__") {
+        if (d.assigned_to != null) return false;
+      } else if (assigneeFilter && d.assigned_to !== assigneeFilter) return false;
+      if (tagFilter) {
+        const cts = (
+          d.contact as unknown as { contact_tags?: { tag_id: string }[] } | null
+        )?.contact_tags;
+        if (!cts?.some((ct) => ct.tag_id === tagFilter)) return false;
+      }
+      return true;
+    });
+  }, [deals, dateFilter, assigneeFilter, tagFilter]);
+
+  const filtroAtivo = dateFilter !== "all" || !!assigneeFilter || !!tagFilter;
 
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
@@ -388,6 +442,65 @@ export default function PipelinesPage() {
         </div>
       </div>
 
+      {/* Filtros do board */}
+      {selectedPipelineId ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Filtros</span>
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+            className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+          >
+            <option value="all">Data: todas</option>
+            <option value="today">Criados hoje</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+          </select>
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+          >
+            <option value="">Responsável: todos</option>
+            <option value="__none__">Sem responsável</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.full_name || "Sem nome"}
+              </option>
+            ))}
+          </select>
+          {tags.length > 0 ? (
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="">Tag: todas</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {filtroAtivo ? (
+            <button
+              onClick={() => {
+                setDateFilter("all");
+                setAssigneeFilter("");
+                setTagFilter("");
+              }}
+              className="text-xs text-primary hover:underline"
+            >
+              Limpar
+            </button>
+          ) : null}
+          <span className="ml-auto font-mono text-xs text-muted-foreground">
+            {filteredDeals.length} de {deals.length} negócios
+          </span>
+        </div>
+      ) : null}
+
       {/* Board */}
       {pipelines.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20">
@@ -410,10 +523,10 @@ export default function PipelinesPage() {
         </div>
       ) : (
         <>
-          <PipelineAnalytics stages={stages} deals={deals} />
+          <PipelineAnalytics stages={stages} deals={filteredDeals} />
           <PipelineBoard
             stages={stages}
-            deals={deals}
+            deals={filteredDeals}
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
