@@ -16,6 +16,7 @@ interface Kpis {
   dials: number;
   atendimentos: number;
   decisor: number;
+  whatsapp: number;
   reunioes: number;
   qualificados: number;
 }
@@ -30,11 +31,21 @@ interface Panel {
   team: Kpis;
   forecast: { reunioesMes: number; projecaoMes: number };
 }
+interface CadItem {
+  id: string;
+  passo: number;
+  canal: string;
+  total: number;
+  atrasado: boolean;
+  titulo: string;
+  contato: string;
+}
 
 const KPIS: { key: keyof Kpis; label: string; star?: boolean }[] = [
   { key: "dials", label: "Ligações" },
   { key: "atendimentos", label: "Atendimentos" },
   { key: "decisor", label: "Conversas c/ decisor", star: true },
+  { key: "whatsapp", label: "WhatsApp" },
   { key: "reunioes", label: "Reuniões agendadas" },
   { key: "qualificados", label: "Leads qualificados" },
 ];
@@ -61,6 +72,7 @@ function tone(v: number, meta: number): string {
 
 export default function PainelOutbound() {
   const [panel, setPanel] = useState<Panel | null>(null);
+  const [cadence, setCadence] = useState<CadItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [tipo, setTipo] = useState("call");
@@ -90,9 +102,34 @@ export default function PainelOutbound() {
     }
   }, []);
 
+  const loadCadence = useCallback(async () => {
+    try {
+      const res = await fetch("/api/outbound/cadence");
+      const data = await res.json();
+      if (res.ok) setCadence((data.items as CadItem[]) ?? []);
+    } catch {
+      /* silencioso */
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadCadence();
+  }, [load, loadCadence]);
+
+  async function avancar(id: string) {
+    try {
+      const res = await fetch("/api/outbound/cadence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error();
+      await loadCadence();
+    } catch {
+      toast.error("Não foi possível avançar o toque");
+    }
+  }
 
   async function registrar() {
     setSaving(true);
@@ -154,7 +191,7 @@ export default function PainelOutbound() {
               <CardTitle className="text-foreground">Time — hoje</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                 {KPIS.map((k) => (
                   <div key={k.key}>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -208,6 +245,47 @@ export default function PainelOutbound() {
             </CardContent>
           </Card>
 
+          {/* PRÓXIMOS PASSOS (cadência) */}
+          {cadence.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-foreground">
+                  Próximos passos — hoje ({cadence.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="divide-y divide-border">
+                {cadence.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {c.contato}
+                        {c.atrasado && (
+                          <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-400">
+                            ATRASADO
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Passo {c.passo + 1}/{c.total} ·{" "}
+                        <span className="text-primary">{c.canal}</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => avancar(c.id)}
+                      className="shrink-0"
+                    >
+                      Feito →
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           {/* POR SDR */}
           <div className="space-y-1.5">
             <h2 className="text-sm font-semibold text-foreground">
@@ -227,7 +305,7 @@ export default function PainelOutbound() {
                     <div className="mb-3 font-semibold text-foreground">
                       {s.name}
                     </div>
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                       {KPIS.map((k) => {
                         const meta = panel.metas[k.key];
                         const val = s[k.key];

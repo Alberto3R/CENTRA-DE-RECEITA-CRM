@@ -388,6 +388,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // Auto-log da atividade de WhatsApp do SDR — alimenta o Painel Outbound.
+    // Fire-and-forget: NUNCA derruba o envio (best-effort, igual ao pause de flow).
+    try {
+      void supabaseAdmin()
+        .from('sdr_activities')
+        .insert({
+          account_id: accountId,
+          user_id: user.id,
+          contact_id: contact.id,
+          tipo: 'whatsapp',
+        })
+        .then(({ error }) => {
+          if (error)
+            console.warn('[sdr_activities] whatsapp auto-log failed:', error.message)
+        })
+    } catch (err) {
+      console.warn(
+        '[sdr_activities] whatsapp auto-log threw:',
+        err instanceof Error ? err.message : err,
+      )
+    }
+
     // Update conversation. Um humano respondendo manualmente é o sinal mais
     // forte de "assumi o atendimento" — então pausamos a IA nativa nesta
     // conversa (mesmo efeito do botão "Assumir atendimento"). O operador

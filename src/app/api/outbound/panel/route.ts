@@ -8,6 +8,7 @@ const METAS = {
   dials: 50,
   atendimentos: 12,
   decisor: 6,
+  whatsapp: 30,
   reunioes: 1,
   qualificados: 4,
 } as const;
@@ -68,6 +69,7 @@ export async function GET(request: Request) {
       dials: 0,
       atendimentos: 0,
       decisor: 0,
+      whatsapp: 0,
       reunioes: 0,
       qualificados: 0,
     });
@@ -79,7 +81,8 @@ export async function GET(request: Request) {
         if (a.resultado === "connected" || a.resultado === "decision_maker")
           u.atendimentos++;
         if (a.resultado === "decision_maker") u.decisor++;
-      } else if (a.tipo === "meeting") u.reunioes++;
+      } else if (a.tipo === "whatsapp") u.whatsapp++;
+      else if (a.tipo === "meeting") u.reunioes++;
       else if (a.tipo === "qualification") u.qualificados++;
       byUser.set(a.user_id, u);
     }
@@ -94,6 +97,7 @@ export async function GET(request: Request) {
         dials: t.dials + s.dials,
         atendimentos: t.atendimentos + s.atendimentos,
         decisor: t.decisor + s.decisor,
+        whatsapp: t.whatsapp + s.whatsapp,
         reunioes: t.reunioes + s.reunioes,
         qualificados: t.qualificados + s.qualificados,
       }),
