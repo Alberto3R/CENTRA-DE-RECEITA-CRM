@@ -72,9 +72,14 @@ function SignupPageInner() {
     // email back at the join page so the user can accept after
     // verifying. Without a token, Supabase uses its default
     // redirect (the app root).
-    const emailRedirectTo = inviteToken
-      ? `${window.location.origin}/join/${encodeURIComponent(inviteToken)}`
-      : undefined;
+    // Após confirmar o e-mail, o Supabase redireciona para /auth/callback,
+    // que troca o ?code por sessão e leva ao destino. `next` retoma o fluxo
+    // de convite quando houver; sem token, cai no /dashboard.
+    const emailRedirectTo = `${window.location.origin}/auth/callback${
+      inviteToken
+        ? `?next=${encodeURIComponent(`/join/${inviteToken}`)}`
+        : ""
+    }`;
 
     const { error } = await supabase.auth.signUp({
       email,
@@ -83,7 +88,7 @@ function SignupPageInner() {
         data: {
           full_name: fullName,
         },
-        ...(emailRedirectTo ? { emailRedirectTo } : {}),
+        emailRedirectTo,
       },
     });
 
