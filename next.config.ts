@@ -123,6 +123,28 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  /**
+   * Marketing domain: centraldereceita.com.br serve a landing (public/lp.html)
+   * na raiz; o app segue respondendo nos demais paths do mesmo projeto
+   * (/signup, /login, /privacidade, /dashboard...). `beforeFiles` intercepta
+   * "/" pelo host ANTES da rota "/" do app.
+   */
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: "/",
+          has: [{ type: "host", value: "centraldereceita.com.br" }],
+          destination: "/lp.html",
+        },
+        {
+          source: "/",
+          has: [{ type: "host", value: "www.centraldereceita.com.br" }],
+          destination: "/lp.html",
+        },
+      ],
+    };
+  },
 };
 
 export default nextConfig;
