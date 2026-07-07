@@ -1,26 +1,38 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
-
-// Cadência outbound padrão (SpectraX-style). dia = offset em dias desde a
-// inscrição. O ENVIO real fica nas Automações; aqui é só a fila de adesão.
-const CADENCE = [
-  { dia: 0, canal: "Ligação" },
-  { dia: 1, canal: "WhatsApp" },
-  { dia: 2, canal: "Ligação" },
-  { dia: 4, canal: "E-mail" },
-  { dia: 6, canal: "Ligação" },
-  { dia: 8, canal: "WhatsApp (última tentativa)" },
-];
+import { DEFAULT_CADENCE, type CadenceStep } from "@/lib/outbound/cadence";
 
 function hoje(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Cadência da conta (tabela cadence_steps) ou a lista padrão do sistema.
+// O ENVIO real fica nas Automações; aqui é só a fila de adesão.
+async function loadCadence(
+  supabase: SupabaseClient,
+  accountId: string,
+): Promise<CadenceStep[]> {
+  const { data } = await supabase
+    .from("cadence_steps")
+    .select("dia,canal,position")
+    .eq("account_id", accountId)
+    .order("position", { ascending: true });
+  if (data && data.length) {
+    return (data as { dia: number; canal: string }[]).map((s) => ({
+      dia: s.dia,
+      canal: s.canal,
+    }));
+  }
+  return DEFAULT_CADENCE;
 }
 
 // GET /api/outbound/cadence — leads com toque vencido/hoje (fila do dia).
 export async function GET() {
   try {
     const ctx = await requireRole("agent");
+    const CADENCE = await loadCadence(ctx.supabase, ctx.accountId);
     const { data } = await ctx.supabase
       .from("cadence_enrollments")
       .select(
@@ -77,6 +89,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "inscrição não encontrada" }, { status: 404 });
     }
 
+    const CADENCE = await loadCadence(ctx.supabase, ctx.accountId);
     const novoPasso = enr.passo + 1;
     let patch: Record<string, unknown>;
     if (novoPasso >= CADENCE.length) {

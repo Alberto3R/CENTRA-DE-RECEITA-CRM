@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  ArrowDown,
+  ArrowUp,
+  ListOrdered,
   Loader2,
   Plus,
   SlidersHorizontal,
   Star,
+  Trash2,
   TrendingUp,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { DEFAULT_CADENCE, type CadenceStep } from "@/lib/outbound/cadence";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -100,6 +105,9 @@ export default function PainelOutbound() {
   const [metasModal, setMetasModal] = useState(false);
   const [metasForm, setMetasForm] = useState<Record<string, number>>({});
   const [savingMetas, setSavingMetas] = useState(false);
+  const [cadModal, setCadModal] = useState(false);
+  const [cadSteps, setCadSteps] = useState<CadenceStep[]>([]);
+  const [savingCad, setSavingCad] = useState(false);
 
   const load = useCallback(async () => {
     const now = new Date();
@@ -179,6 +187,55 @@ export default function PainelOutbound() {
     }
   }
 
+  async function abrirCadencia() {
+    try {
+      const res = await fetch("/api/outbound/cadence/steps");
+      const data = await res.json();
+      setCadSteps(
+        res.ok && Array.isArray(data.steps) && data.steps.length
+          ? (data.steps as CadenceStep[])
+          : DEFAULT_CADENCE,
+      );
+    } catch {
+      setCadSteps(DEFAULT_CADENCE);
+    }
+    setCadModal(true);
+  }
+  function updStep(i: number, patch: Partial<CadenceStep>) {
+    setCadSteps((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  }
+  function moveStep(i: number, dir: -1 | 1) {
+    setCadSteps((s) => {
+      const j = i + dir;
+      if (j < 0 || j >= s.length) return s;
+      const c = [...s];
+      [c[i], c[j]] = [c[j], c[i]];
+      return c;
+    });
+  }
+  async function salvarCadencia() {
+    if (cadSteps.some((s) => !s.canal.trim())) {
+      toast.error("Todo passo precisa de um canal.");
+      return;
+    }
+    setSavingCad(true);
+    try {
+      const res = await fetch("/api/outbound/cadence/steps", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ steps: cadSteps }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Cadência atualizada");
+      setCadModal(false);
+      await loadCadence();
+    } catch {
+      toast.error("Não foi possível salvar a cadência");
+    } finally {
+      setSavingCad(false);
+    }
+  }
+
   async function registrar() {
     setSaving(true);
     try {
@@ -217,9 +274,14 @@ export default function PainelOutbound() {
         </div>
         <div className="flex shrink-0 gap-2">
           {canEditSettings && (
-            <Button variant="outline" onClick={abrirMetas}>
-              <SlidersHorizontal className="size-4" /> Metas
-            </Button>
+            <>
+              <Button variant="outline" onClick={abrirCadencia}>
+                <ListOrdered className="size-4" /> Cadência
+              </Button>
+              <Button variant="outline" onClick={abrirMetas}>
+                <SlidersHorizontal className="size-4" /> Metas
+              </Button>
+            </>
           )}
           <Button
             onClick={() => setModal(true)}
@@ -529,6 +591,138 @@ export default function PainelOutbound() {
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   "Salvar metas"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL editar cadência */}
+      {cadModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !savingCad && setCadModal(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-card p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-foreground">
+              Cadência de toques
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              A sequência que o SDR segue no reaquecimento. <strong>Dia</strong> é
+              o offset desde a entrada do lead na etapa &ldquo;Em cadência&rdquo;;{" "}
+              <strong>canal</strong> é o toque. Os toques vencidos aparecem em
+              &ldquo;Próximos passos&rdquo;.
+            </p>
+
+            <div className="mt-4 space-y-2 overflow-y-auto pr-1">
+              <div className="flex items-center gap-2 px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span className="w-6">#</span>
+                <span className="w-16">Dia</span>
+                <span className="flex-1">Canal</span>
+                <span className="w-[68px]" />
+              </div>
+              {cadSteps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-6 text-center font-mono text-sm text-muted-foreground">
+                    {i + 1}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={s.dia}
+                    onChange={(e) =>
+                      updStep(i, { dia: Math.max(0, Number(e.target.value)) })
+                    }
+                    className="h-9 w-16 rounded-lg border border-border bg-muted px-2 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <input
+                    value={s.canal}
+                    onChange={(e) => updStep(i, { canal: e.target.value })}
+                    placeholder="Ligação, WhatsApp, E-mail…"
+                    className="h-9 flex-1 rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
+                  />
+                  <div className="flex shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => moveStep(i, -1)}
+                      disabled={i === 0}
+                      title="Subir"
+                    >
+                      <ArrowUp className="size-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => moveStep(i, 1)}
+                      disabled={i === cadSteps.length - 1}
+                      title="Descer"
+                    >
+                      <ArrowDown className="size-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() =>
+                        setCadSteps((st) => st.filter((_, j) => j !== i))
+                      }
+                      title="Remover passo"
+                      className="text-muted-foreground hover:text-red-400"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {cadSteps.length === 0 && (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  Nenhum passo. Adicione o primeiro toque abaixo.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setCadSteps((s) => [
+                    ...s,
+                    { dia: s.length ? s[s.length - 1].dia + 1 : 0, canal: "" },
+                  ])
+                }
+              >
+                <Plus className="size-4" /> Adicionar passo
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setCadSteps(DEFAULT_CADENCE)}
+                className="text-muted-foreground"
+              >
+                Restaurar padrão
+              </Button>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setCadModal(false)}
+                disabled={savingCad}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={salvarCadencia}
+                disabled={savingCad || cadSteps.length === 0}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {savingCad ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  "Salvar cadência"
                 )}
               </Button>
             </div>
