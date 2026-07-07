@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import type { MessageTemplate } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ export function TemplatePicker({
   onOpenChange,
   onSelect,
 }: TemplatePickerProps) {
+  const { accountId } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
@@ -92,11 +94,11 @@ export function TemplatePicker({
     (async () => {
       setLoading(true);
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
+      // Templates pertencem à CONTA, não ao usuário. Filtrar por user_id
+      // (legado single-user) escondia os modelos de todo mundo que não fosse
+      // o dono/criador da linha — por isso agentes viam zero. A RLS já
+      // restringe a leitura aos membros da conta.
+      if (!accountId) {
         if (!cancelled) {
           setTemplates([]);
           setLoading(false);
@@ -107,7 +109,7 @@ export function TemplatePicker({
       const { data, error } = await supabase
         .from("message_templates")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("account_id", accountId)
         .eq("status", "APPROVED")
         .order("created_at", { ascending: false });
 
@@ -124,7 +126,7 @@ export function TemplatePicker({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, accountId]);
 
   function resetSelection() {
     setSelected(null);
