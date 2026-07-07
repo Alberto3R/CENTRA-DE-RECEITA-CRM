@@ -39,6 +39,7 @@ function SignupPageInner() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -55,6 +56,13 @@ function SignupPageInner() {
 
     if (password.length < 6) {
       setError("A senha deve ter pelo menos 6 caracteres");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError(
+        "Você precisa aceitar os Termos de Uso e a Política de Privacidade.",
+      );
       return;
     }
 
@@ -215,9 +223,37 @@ function SignupPageInner() {
               />
             </div>
 
+            <label className="flex items-start gap-2.5 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link
+                  href="/termos"
+                  target="_blank"
+                  className="text-primary underline hover:text-primary/80"
+                >
+                  Termos de Uso
+                </Link>{" "}
+                e a{" "}
+                <Link
+                  href="/privacidade"
+                  target="_blank"
+                  className="text-primary underline hover:text-primary/80"
+                >
+                  Política de Privacidade
+                </Link>
+                .
+              </span>
+            </label>
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || !acceptedTerms}
               className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {loading ? "Criando conta..." : "Criar conta"}
