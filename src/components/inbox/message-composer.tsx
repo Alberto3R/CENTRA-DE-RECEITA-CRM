@@ -511,6 +511,21 @@ export function MessageComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Microfone fixo — atalho pra "Mensagem de voz" (mesma gravação
+              do menu do clipe), sempre visível na barra. */}
+          <GatedButton
+            variant="ghost"
+            size="sm"
+            canAct={!readOnly}
+            gateReason="send messages"
+            disabled={inputsDisabled || busy}
+            title={readOnly ? undefined : "Gravar mensagem de voz"}
+            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-primary"
+            onClick={() => void startRecording()}
+          >
+            <Mic className="h-4 w-4" />
+          </GatedButton>
+
           <GatedButton
             variant="ghost"
             size="sm"
@@ -564,7 +579,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge. */}
       {!draft && !recording && (
-        <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
+        <p className="mt-1 pl-[8.25rem] text-[10px] text-muted-foreground">
           Digite &apos;/&apos; para respostas rápidas
         </p>
       )}
