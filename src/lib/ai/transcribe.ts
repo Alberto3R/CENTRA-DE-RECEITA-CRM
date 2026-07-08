@@ -73,7 +73,7 @@ function diarizado(data: ScribeResponse): string {
       buf.push(w.text);
       continue;
     }
-    const sp = w.speaker_id ?? cur;
+    const sp: string | null = w.speaker_id ?? cur;
     if (sp !== cur) {
       flush();
       cur = sp;
