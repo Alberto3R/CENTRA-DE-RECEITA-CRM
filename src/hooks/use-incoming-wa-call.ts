@@ -5,6 +5,10 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  startCallRecording,
+  type CallRecorder,
+} from "@/lib/whatsapp/call-recorder";
 
 /**
  * Ouvinte GLOBAL de chamadas WhatsApp entrantes (USER_INITIATED).
@@ -76,16 +80,70 @@ export function useIncomingWaCall() {
     return supabaseRef.current;
   }
 
+  // ---- Gravação da chamada ----
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<CallRecorder | null>(null);
+  const recordingArmedRef = useRef(false);
+  const activeCallIdRef = useRef<string | null>(null);
+  const accountIdRef = useRef<string | null>(accountId ?? null);
+  accountIdRef.current = accountId ?? null;
+
+  const uploadRecording = useCallback(async (rowId: string, blob: Blob) => {
+    const acc = accountIdRef.current;
+    if (!acc) return;
+    try {
+      const path = `${acc}/${rowId}.webm`;
+      const sb = supabase();
+      const { error } = await sb.storage
+        .from("call-recordings")
+        .upload(path, blob, {
+          contentType: blob.type || "audio/webm",
+          upsert: true,
+        });
+      if (error) {
+        console.error("[wa-call-in] upload da gravação falhou:", error.message);
+        return;
+      }
+      await sb
+        .from("whatsapp_calls")
+        .update({ recording_path: path })
+        .eq("id", rowId);
+    } catch (e) {
+      console.error("[wa-call-in] finalização da gravação falhou:", e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const maybeStartRecording = useCallback(() => {
+    if (recorderRef.current || !recordingArmedRef.current) return;
+    if (localStreamRef.current && remoteStreamRef.current) {
+      recorderRef.current = startCallRecording(
+        localStreamRef.current,
+        remoteStreamRef.current,
+      );
+    }
+  }, []);
+
   const cleanupMedia = useCallback(() => {
+    recordingArmedRef.current = false;
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    const rowId = activeCallIdRef.current;
+    if (rec) {
+      void rec.stop().then((blob) => {
+        if (blob && rowId) void uploadRecording(rowId, blob);
+      });
+    }
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    remoteStreamRef.current = null;
     if (pcRef.current) {
       pcRef.current.ontrack = null;
       pcRef.current.onconnectionstatechange = null;
       pcRef.current.close();
       pcRef.current = null;
     }
-  }, []);
+  }, [uploadRecording]);
 
   // Assinatura Realtime persistente enquanto o componente estiver montado.
   useEffect(() => {
@@ -143,6 +201,7 @@ export function useIncomingWaCall() {
     if (!incoming || !offerRef.current) return;
     setError(null);
     setStatus("answering");
+    activeCallIdRef.current = incoming.id;
 
     let stream: MediaStream;
     try {
@@ -160,7 +219,9 @@ export function useIncomingWaCall() {
     pcRef.current = pc;
     stream.getTracks().forEach((t) => pc.addTrack(t, stream));
     pc.ontrack = (e) => {
+      remoteStreamRef.current = e.streams[0] ?? null;
       if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0];
+      maybeStartRecording();
     };
 
     try {
@@ -200,8 +261,10 @@ export function useIncomingWaCall() {
       cleanupMedia();
       return;
     }
+    recordingArmedRef.current = true;
+    maybeStartRecording();
     setStatus("in_progress");
-  }, [incoming, cleanupMedia]);
+  }, [incoming, cleanupMedia, maybeStartRecording]);
 
   const dismiss = useCallback(
     async (action: "reject" | "terminate") => {

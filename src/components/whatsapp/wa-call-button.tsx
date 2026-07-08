@@ -88,6 +88,14 @@ export function WaCallButton({
             <span className="font-mono text-xs tabular-nums text-red-300">
               {activeLabel}
             </span>
+            {status === "in_progress" && (
+              <span
+                title="Chamada sendo gravada"
+                className="text-[9px] font-semibold uppercase tracking-wide text-red-400/80"
+              >
+                REC
+              </span>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"

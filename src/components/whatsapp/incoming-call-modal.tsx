@@ -35,6 +35,7 @@ export function IncomingCallModal() {
                   <span className="inline-flex items-center gap-1.5">
                     <span className="flex h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
                     <span className="font-mono tabular-nums text-red-300">{mmss}</span>
+                    <span className="text-[9px] font-semibold uppercase tracking-wide text-red-400/80">REC</span>
                     <span>· WhatsApp</span>
                   </span>
                 ) : answering ? (

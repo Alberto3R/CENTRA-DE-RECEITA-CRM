@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  startCallRecording,
+  type CallRecorder,
+} from "@/lib/whatsapp/call-recorder";
 
 /**
  * Softphone WhatsApp (business-initiated) — WebRTC no navegador.
@@ -86,11 +91,69 @@ export function useWaCall() {
     return supabaseRef.current;
   }
 
+  // ---- Gravação da chamada (WebRTC → Storage) ----
+  const { accountId } = useAuth();
+  const accountIdRef = useRef<string | null>(accountId ?? null);
+  accountIdRef.current = accountId ?? null;
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<CallRecorder | null>(null);
+  const recordingArmedRef = useRef(false);
+
+  const uploadRecording = useCallback(async (rowId: string, blob: Blob) => {
+    const acc = accountIdRef.current;
+    if (!acc) return;
+    try {
+      const path = `${acc}/${rowId}.webm`;
+      const sb = supabase();
+      const { error } = await sb.storage
+        .from("call-recordings")
+        .upload(path, blob, {
+          contentType: blob.type || "audio/webm",
+          upsert: true,
+        });
+      if (error) {
+        console.error("[wa-call] upload da gravação falhou:", error.message);
+        return;
+      }
+      await sb
+        .from("whatsapp_calls")
+        .update({ recording_path: path })
+        .eq("id", rowId);
+    } catch (e) {
+      console.error("[wa-call] finalização da gravação falhou:", e);
+    }
+    // supabase() é estável (ref) — nada de dep externa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Só grava quando a chamada foi ATENDIDA (armada em in_progress) e já há os
+  // dois streams (mic + lead).
+  const maybeStartRecording = useCallback(() => {
+    if (recorderRef.current || !recordingArmedRef.current) return;
+    if (localStreamRef.current && remoteStreamRef.current) {
+      recorderRef.current = startCallRecording(
+        localStreamRef.current,
+        remoteStreamRef.current,
+      );
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
+    // finaliza a gravação (best-effort) ANTES de derrubar as tracks
+    recordingArmedRef.current = false;
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    const recRowId = callRowIdRef.current;
+    if (rec) {
+      void rec.stop().then((blob) => {
+        if (blob && recRowId) void uploadRecording(recRowId, blob);
+      });
+    }
     channelRef.current?.unsubscribe();
     channelRef.current = null;
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    remoteStreamRef.current = null;
     if (pcRef.current) {
       pcRef.current.ontrack = null;
       pcRef.current.onconnectionstatechange = null;
@@ -98,7 +161,7 @@ export function useWaCall() {
       pcRef.current = null;
     }
     callRowIdRef.current = null;
-  }, []);
+  }, [uploadRecording]);
 
   const startCall = useCallback(
     async (opts: StartOpts) => {
@@ -124,7 +187,9 @@ export function useWaCall() {
       pcRef.current = pc;
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       pc.ontrack = (e) => {
+        remoteStreamRef.current = e.streams[0] ?? null;
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0];
+        maybeStartRecording();
       };
       pc.onconnectionstatechange = () => {
         if (
@@ -199,8 +264,11 @@ export function useWaCall() {
                 console.error("[wa-call] setRemoteDescription falhou", e);
               }
             }
-            if (row.status === "in_progress") setStatus("in_progress");
-            else if (row.status === "ringing") setStatus("ringing");
+            if (row.status === "in_progress") {
+              setStatus("in_progress");
+              recordingArmedRef.current = true;
+              maybeStartRecording();
+            } else if (row.status === "ringing") setStatus("ringing");
             else if (
               ["completed", "failed", "rejected", "missed"].includes(row.status)
             ) {
@@ -212,7 +280,7 @@ export function useWaCall() {
         .subscribe();
       channelRef.current = ch;
     },
-    [cleanup],
+    [cleanup, maybeStartRecording],
   );
 
   const requestPermission = useCallback(async (opts: StartOpts) => {
