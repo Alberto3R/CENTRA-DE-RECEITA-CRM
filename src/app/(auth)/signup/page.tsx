@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,14 @@ function SignupPageInner() {
   // points back at /join/<token> so the user lands on the redeem
   // step after verifying instead of being dropped on /dashboard.
   const inviteToken = searchParams.get("invite");
+  const router = useRouter();
+
+  // Cadastro é SÓ por convite (ou compra). Sem token de convite, não há
+  // auto-criação de conta — manda pro login. Fecha o buraco de "criar conta
+  // avulsa" que confundia quem era convidado.
+  useEffect(() => {
+    if (!inviteToken) router.replace("/login");
+  }, [inviteToken, router]);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -101,6 +109,9 @@ function SignupPageInner() {
     setSuccess(true);
     setLoading(false);
   };
+
+  // Sem convite: nada a renderizar — o efeito acima já redirecionou ao login.
+  if (!inviteToken) return null;
 
   if (success) {
     return (

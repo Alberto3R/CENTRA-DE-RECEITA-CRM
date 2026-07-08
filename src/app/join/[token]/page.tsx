@@ -22,7 +22,7 @@
 // this page after email verification.
 // ============================================================
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -202,6 +202,19 @@ export default function JoinPage() {
     }
   }, [token]);
 
+  // Auto-aceite: assim que a pessoa chega AQUI já autenticada com um convite
+  // válido (ex.: voltou da confirmação de e-mail), aceitamos sozinhos — sem o
+  // passo manual "Aceitar" onde o convidado se perdia e ficava no tenant vazio.
+  // 409 (já em outra conta com dados) cai no modal de conflito normalmente.
+  const autoRedeemedRef = useRef(false);
+  useEffect(() => {
+    if (autoRedeemedRef.current) return;
+    if (peek?.ok && authedUserId && !accepting && conflictMessage === null) {
+      autoRedeemedRef.current = true;
+      void handleAccept();
+    }
+  }, [peek, authedUserId, accepting, conflictMessage, handleAccept]);
+
   const handleSignOutAndRetry = useCallback(async () => {
     setSigningOut(true);
     try {
@@ -244,46 +257,22 @@ export default function JoinPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {/* For server_error the failure is transient — the network
-              flapped or the peek endpoint hiccupped. Try-again is
-              the right primary action; the "create account" /
-              "sign in" links stay as secondary options. Other
-              failure reasons (not_found / used / expired) are
-              terminal for this token, so no retry — just the
-              signup/sign-in escape hatches. */}
+          {/* Cadastro avulso não existe mais (só convite). server_error é
+              transitório → "Tentar novamente". Os demais (not_found / used /
+              expired) são terminais para este token → só o caminho de login. */}
           {peek.reason === 'server_error' ? (
-            <>
-              <Button
-                onClick={loadPeekAndAuth}
-                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                Tentar novamente
-              </Button>
-              <Link href="/signup">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Criar uma nova conta
-                </Button>
-              </Link>
-            </>
+            <Button
+              onClick={loadPeekAndAuth}
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Tentar novamente
+            </Button>
           ) : (
-            <>
-              <Link href="/signup">
-                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                  Criar uma nova conta
-                </Button>
-              </Link>
-              <Link href="/login">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Entrar
-                </Button>
-              </Link>
-            </>
+            <Link href="/login">
+              <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                Ir para o login
+              </Button>
+            </Link>
           )}
         </CardContent>
       </Card>
