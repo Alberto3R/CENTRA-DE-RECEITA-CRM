@@ -28,6 +28,7 @@ import {
   Workflow,
   X,
   Zap,
+  PhoneCall,
 } from "lucide-react";
 import type { AccountRole } from "@/lib/auth/roles";
 
@@ -105,6 +106,7 @@ const navItems: NavItem[] = [
   { href: "/pipelines", label: "Funis", icon: GitBranch },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { href: "/painel-outbound", label: "Painel Outbound", icon: Gauge },
+  { href: "/ligacoes", label: "Ligações", icon: PhoneCall, adminOnly: true },
   { href: "/broadcasts", label: "Disparos", icon: Radio },
   { href: "/automations", label: "Automações", icon: Zap, adminOnly: true },
   { href: "/flows", label: "Fluxos", icon: Workflow, beta: true, adminOnly: true },
