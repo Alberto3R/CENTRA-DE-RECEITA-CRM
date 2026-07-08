@@ -15,8 +15,10 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  PhoneCall,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CallHistory } from "@/components/whatsapp/call-history";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 
@@ -244,6 +246,20 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Ligações WhatsApp */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <PhoneCall className="h-3 w-3" />
+              Ligações
+            </div>
+            <div className="mt-2">
+              <CallHistory contactId={contact.id} />
             </div>
           </div>
 
