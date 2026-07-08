@@ -90,7 +90,7 @@ interface TemplateFormData {
 const emptyForm: TemplateFormData = {
   name: '',
   category: 'Marketing',
-  language: 'en_US',
+  language: 'pt_BR',
   header_format: 'none',
   header_content: '',
   header_media_url: '',
@@ -101,24 +101,26 @@ const emptyForm: TemplateFormData = {
   buttons: [],
 };
 
-const COMMON_LANGUAGE_CODES = [
-  'en_US',
-  'en_GB',
-  'en',
-  'es',
-  'es_ES',
-  'es_MX',
-  'fr',
-  'fr_FR',
-  'de',
-  'it',
-  'pt_BR',
-  'pt_PT',
-  'nl',
-  'pl',
-  'ru',
-  'tr',
-  'lt',
+// Idiomas oferecidos no seletor. Português no topo (produto BR); o código
+// (ex.: pt_BR) é o que a Meta exige — o rótulo é só para o usuário escolher.
+const COMMON_LANGUAGES = [
+  { code: 'pt_BR', label: 'Português (Brasil)' },
+  { code: 'pt_PT', label: 'Português (Portugal)' },
+  { code: 'en_US', label: 'Inglês (EUA)' },
+  { code: 'en_GB', label: 'Inglês (Reino Unido)' },
+  { code: 'en', label: 'Inglês' },
+  { code: 'es', label: 'Espanhol' },
+  { code: 'es_ES', label: 'Espanhol (Espanha)' },
+  { code: 'es_MX', label: 'Espanhol (México)' },
+  { code: 'fr', label: 'Francês' },
+  { code: 'fr_FR', label: 'Francês (França)' },
+  { code: 'de', label: 'Alemão' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'nl', label: 'Holandês' },
+  { code: 'pl', label: 'Polonês' },
+  { code: 'ru', label: 'Russo' },
+  { code: 'tr', label: 'Turco' },
+  { code: 'lt', label: 'Lituano' },
 ];
 
 function emptyButton(type: TemplateButton['type']): TemplateButton {
@@ -743,30 +745,42 @@ export function TemplateManager() {
 
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Idioma</Label>
-                <Input
-                  list="template-language-codes"
-                  placeholder="en_US"
+                <Select
                   value={form.language}
-                  onChange={(e) =>
-                    setForm({ ...form, language: e.target.value })
+                  onValueChange={(val) =>
+                    setForm({ ...form, language: val || 'pt_BR' })
                   }
                   disabled={editingId !== null}
-                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
-                />
-                <datalist id="template-language-codes">
-                  {COMMON_LANGUAGE_CODES.map((code) => (
-                    <option key={code} value={code} />
-                  ))}
-                </datalist>
+                >
+                  <SelectTrigger className="w-full bg-muted border-border text-foreground disabled:opacity-60 disabled:cursor-not-allowed">
+                    <SelectValue placeholder="Selecione o idioma" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    {(form.language &&
+                    !COMMON_LANGUAGES.some((l) => l.code === form.language)
+                      ? [
+                          { code: form.language, label: form.language },
+                          ...COMMON_LANGUAGES,
+                        ]
+                      : COMMON_LANGUAGES
+                    ).map((l) => (
+                      <SelectItem
+                        key={l.code}
+                        value={l.code}
+                        className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                      >
+                        {l.label}{' '}
+                        <span className="text-muted-foreground">
+                          ({l.code})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-[11px] text-muted-foreground">
                   {editingId
                     ? 'O idioma é fixo depois que o modelo existe na Meta.'
-                    : (
-                        <>
-                          Deve corresponder exatamente ao código na Meta —{' '}
-                          <code>en_US</code> e <code>en</code> são distintos.
-                        </>
-                      )}
+                    : 'O idioma do modelo. Você pode ter o mesmo modelo em vários idiomas — cada um é aprovado separadamente pela Meta.'}
                 </p>
               </div>
             </div>
@@ -907,15 +921,21 @@ export function TemplateManager() {
                 maxLength={TEMPLATE_LIMITS.bodyMaxLength}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground resize-none"
               />
-              <p className="text-[11px] text-muted-foreground">
-                Use {`{{1}}`}, {`{{2}}`} para variáveis (devem ser contíguas
-                começando em {`{{1}}`}).
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                <strong className="text-foreground">Variáveis</strong> são
+                espaços que você preenche na hora de enviar — ex.: o nome do
+                cliente. Escreva {`{{1}}`}, {`{{2}}`}… no texto onde cada dado
+                deve entrar (numeradas em ordem, começando em {`{{1}}`}, sem
+                pular número). Para cada variável, informe abaixo um valor de
+                exemplo.
               </p>
 
               {bodyVarCount > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <Label className="text-[11px] text-muted-foreground">
-                    Valores de exemplo (a Meta os usa para revisar seu modelo)
+                    Valores de exemplo — a Meta usa <strong>só na revisão</strong>{' '}
+                    do modelo. No envio real, você (ou a automação) escolhe o
+                    valor de cada variável.
                   </Label>
                   {form.body_samples.map((val, i) => {
                     const inputId = `template-body-sample-${i}`;
