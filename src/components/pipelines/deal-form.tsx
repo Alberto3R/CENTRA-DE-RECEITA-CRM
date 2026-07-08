@@ -31,6 +31,8 @@ import {
   MessageSquare,
   DollarSign,
   Loader2,
+  Phone,
+  Mail,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -312,6 +314,38 @@ export function DealForm({
                   </option>
                 ))}
               </select>
+
+              {(() => {
+                const c = contacts.find((x) => x.id === contactId);
+                if (!c) return null;
+                return (
+                  <div className="mt-1 flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-sm">
+                    <a
+                      href={`tel:${c.phone}`}
+                      className="inline-flex items-center gap-2 text-foreground hover:text-primary"
+                    >
+                      <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      {c.phone || (
+                        <span className="text-muted-foreground">Sem telefone</span>
+                      )}
+                    </a>
+                    {c.email ? (
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="inline-flex items-center gap-2 text-foreground hover:text-primary"
+                      >
+                        <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        {c.email}
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 text-muted-foreground">
+                        <Mail className="h-3.5 w-3.5 shrink-0" />
+                        Sem e-mail
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
 
               {linkedConversation && (
                 <Link
