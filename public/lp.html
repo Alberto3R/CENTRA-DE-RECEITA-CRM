@@ -193,7 +193,7 @@
       <h1 class="rv" style="margin-top:22px">A <span class="mark">receita</span> da sua empresa, num lugar só.</h1>
       <p class="lead rv">CRM no WhatsApp + um Gestor Comercial com IA que organiza, acompanha e faz a receita crescer. Você não gerencia a ferramenta — ela trabalha pra sua receita subir.</p>
       <div class="hero-cta rv">
-        <a class="btn btn-lime" href="mailto:comercial@centraldereceita.com.br?subject=Quero%20a%20Central%20de%20Receita">Falar com vendas →</a>
+        <a class="btn btn-lime" href="#assinar" onclick="crOpenAssinar('starter','mensal');return false;">Assinar agora →</a>
         <a class="btn btn-ghost" href="#gestor">Ver o que entrega</a>
       </div>
       <div class="hero-note rv">Método 3R · Resultado · Rotina · Ritual</div>
@@ -397,7 +397,7 @@
           <li>200 créditos de Gestor/mês</li>
           <li>Funis, disparos, automações</li>
         </ul>
-        <a class="btn btn-ghost" href="mailto:comercial@centraldereceita.com.br?subject=Assinar%20Starter">Falar com vendas</a>
+        <a class="btn btn-ghost" href="#assinar" onclick="crOpenAssinar('starter','mensal');return false;">Assinar Starter</a>
       </div>
       <div class="pc feature">
         <span class="tag">Mais escolhido</span>
@@ -410,7 +410,7 @@
           <li>500 créditos de Gestor/mês</li>
           <li>Todas as análises de IA liberadas</li>
         </ul>
-        <a class="btn btn-lime" href="mailto:comercial@centraldereceita.com.br?subject=Assinar%20Pro">Falar com vendas</a>
+        <a class="btn btn-lime" href="#assinar" onclick="crOpenAssinar('pro','mensal');return false;">Assinar Pro</a>
       </div>
       <div class="pc">
         <div class="pn">Enterprise</div>
@@ -434,7 +434,7 @@
     <span class="kicker" style="justify-content:center">Vender todo dia</span>
     <h2 style="margin-top:18px">Sua central de receita<br>começa agora.</h2>
     <p>Coloque CRM, gestão e IA no mesmo lugar — e faça a receita subir com previsibilidade.</p>
-    <a class="btn btn-lime" href="mailto:comercial@centraldereceita.com.br?subject=Quero%20a%20Central%20de%20Receita" style="position:relative">Falar com vendas →</a>
+    <a class="btn btn-lime" href="#assinar" onclick="crOpenAssinar('pro','mensal');return false;" style="position:relative">Assinar agora →</a>
   </div>
 </section>
 
@@ -462,5 +462,42 @@
   const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12});
   document.querySelectorAll('section .head, .cap, .oc, .pc, .r, .feat, .strip .cell').forEach((el,i)=>{el.classList.add('rv'); el.style.transitionDelay=(i%6*0.05)+'s'; io.observe(el)});
 </script>
+
+<div id="cr-assinar-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:16px;">
+  <div style="width:100%;max-width:440px;background:#0f1512;border:1px solid #1f2a24;border-radius:16px;padding:24px;color:#e8f0ec;font-family:inherit;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:4px;">
+      <h3 style="margin:0;font-size:20px;">Assinar a Central de Receita</h3>
+      <button type="button" onclick="crCloseAssinar()" style="background:none;border:none;color:#8fa79d;font-size:24px;cursor:pointer;line-height:1;">&times;</button>
+    </div>
+    <p style="margin:0 0 16px;font-size:13px;color:#9fb3ab;">Preencha os dados da empresa e continue pro pagamento seguro (Stripe).</p>
+    <form id="cr-assinar-form" onsubmit="return crSubmitAssinar(event)">
+      <div style="display:grid;gap:10px;">
+        <input name="empresa" required placeholder="Empresa" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+        <input name="nome" required placeholder="Seu nome" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+        <input name="email" type="email" required placeholder="E-mail" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+        <input name="whatsapp" placeholder="WhatsApp (com DDD)" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+        <div style="display:flex;gap:10px;">
+          <select name="plano" id="cr-plano" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+            <option value="starter">Plano Starter</option>
+            <option value="pro">Plano Pro</option>
+          </select>
+          <select name="ciclo" id="cr-ciclo" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #26332c;background:#0b100e;color:#e8f0ec;font-size:14px;box-sizing:border-box;">
+            <option value="mensal">Mensal</option>
+            <option value="anual">Anual (à vista)</option>
+          </select>
+        </div>
+        <button type="submit" id="cr-assinar-btn" class="btn btn-lime" style="width:100%;justify-content:center;margin-top:4px;">Ir para o pagamento &rarr;</button>
+        <p id="cr-assinar-err" style="color:#f87171;font-size:12px;display:none;margin:4px 0 0;">Não foi possível continuar. Confira os dados e tente de novo.</p>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function crOpenAssinar(p,c){var m=document.getElementById('cr-assinar-modal');if(p)document.getElementById('cr-plano').value=p;if(c)document.getElementById('cr-ciclo').value=c;m.style.display='flex';}
+function crCloseAssinar(){document.getElementById('cr-assinar-modal').style.display='none';}
+async function crSubmitAssinar(e){e.preventDefault();var f=e.target,b=document.getElementById('cr-assinar-btn'),er=document.getElementById('cr-assinar-err');er.style.display='none';b.disabled=true;var t=b.textContent;b.textContent='Aguarde...';try{var r=await fetch('/api/checkout/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({empresa:f.empresa.value,nome:f.nome.value,email:f.email.value,whatsapp:f.whatsapp.value,plano:f.plano.value,ciclo:f.ciclo.value})});var j=await r.json();if(!r.ok||!j.url)throw 0;window.location.href=j.url;}catch(x){er.style.display='block';b.disabled=false;b.textContent=t;}return false;}
+document.addEventListener('DOMContentLoaded',function(){var m=document.getElementById('cr-assinar-modal');if(m)m.addEventListener('click',function(e){if(e.target===this)crCloseAssinar();});});
+</script>
+
 </body>
 </html>
