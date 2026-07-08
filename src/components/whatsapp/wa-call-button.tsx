@@ -42,12 +42,22 @@ export function WaCallButton({
     status,
     error,
     permissionSent,
+    seconds,
     startCall,
     hangup,
     requestPermission,
     remoteAudioRef,
   } = useWaCall();
   const opts = { contactId, dealId, to };
+  const mmss = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const activeLabel =
+    status === "in_progress"
+      ? mmss
+      : status === "ringing"
+        ? "Chamando…"
+        : status === "requesting_mic"
+          ? "Microfone…"
+          : "Conectando…";
 
   const active =
     status === "requesting_mic" ||
@@ -68,6 +78,31 @@ export function WaCallButton({
   const audio = <audio ref={remoteAudioRef} autoPlay className="hidden" />;
 
   if (compact) {
+    // Em chamada: "pílula" clara com bolinha vermelha + estado/contador +
+    // encerrar. Fora de chamada: só o ícone de telefone. Sem sobreposição.
+    if (active) {
+      return (
+        <>
+          <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 py-0.5 pl-2 pr-0.5">
+            <span className="flex h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="font-mono text-xs tabular-nums text-red-300">
+              {activeLabel}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={hangup}
+              title="Encerrar chamada"
+              aria-label="Encerrar chamada"
+              className="h-6 w-6 text-red-300 hover:bg-red-500/20 hover:text-red-200"
+            >
+              <PhoneOff className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {audio}
+        </>
+      );
+    }
     return (
       <>
         <Button
@@ -76,27 +111,17 @@ export function WaCallButton({
           title={title}
           aria-label={title}
           onClick={() =>
-            active
-              ? hangup()
-              : status === "needs_permission"
-                ? requestPermission(opts)
-                : startCall(opts)
+            status === "needs_permission"
+              ? requestPermission(opts)
+              : startCall(opts)
           }
           className={
-            active
-              ? "text-red-400 hover:bg-red-500/10"
-              : status === "needs_permission" || status === "failed"
-                ? "text-amber-400 hover:text-amber-300"
-                : "text-muted-foreground hover:text-primary"
+            status === "needs_permission" || status === "failed"
+              ? "text-amber-400 hover:text-amber-300"
+              : "text-muted-foreground hover:text-primary"
           }
         >
-          {busy ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : active ? (
-            <PhoneOff className="h-4 w-4" />
-          ) : (
-            <Phone className="h-4 w-4" />
-          )}
+          <Phone className="h-4 w-4" />
         </Button>
         {audio}
       </>

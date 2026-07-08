@@ -11,11 +11,12 @@ import { useIncomingWaCall } from "@/hooks/use-incoming-wa-call";
  * chamada, mostra Encerrar. O áudio remoto sai do <audio> embutido.
  */
 export function IncomingCallModal() {
-  const { incoming, status, error, accept, reject, hangup, remoteAudioRef } =
+  const { incoming, status, error, seconds, accept, reject, hangup, remoteAudioRef } =
     useIncomingWaCall();
 
   const inCall = status === "in_progress";
   const answering = status === "answering";
+  const mmss = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
   return (
     <>
@@ -30,11 +31,17 @@ export function IncomingCallModal() {
                 {incoming.phone ?? "Número desconhecido"}
               </p>
               <p className="text-xs text-muted-foreground">
-                {inCall
-                  ? "Em chamada · WhatsApp"
-                  : answering
-                    ? "Conectando…"
-                    : "Chamada recebida · WhatsApp"}
+                {inCall ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="flex h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="font-mono tabular-nums text-red-300">{mmss}</span>
+                    <span>· WhatsApp</span>
+                  </span>
+                ) : answering ? (
+                  "Conectando…"
+                ) : (
+                  "Chamada recebida · WhatsApp"
+                )}
               </p>
             </div>
           </div>

@@ -55,6 +55,15 @@ export function useIncomingWaCall() {
   const [incoming, setIncoming] = useState<Incoming | null>(null);
   const [status, setStatus] = useState<IncomingStatus>("ringing");
   const [error, setError] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (status !== "in_progress") {
+      if (status !== "answering") setSeconds(0);
+      return;
+    }
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [status]);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -218,5 +227,14 @@ export function useIncomingWaCall() {
   const reject = useCallback(() => dismiss("reject"), [dismiss]);
   const hangup = useCallback(() => dismiss("terminate"), [dismiss]);
 
-  return { incoming, status, error, accept, reject, hangup, remoteAudioRef };
+  return {
+    incoming,
+    status,
+    error,
+    seconds,
+    accept,
+    reject,
+    hangup,
+    remoteAudioRef,
+  };
 }

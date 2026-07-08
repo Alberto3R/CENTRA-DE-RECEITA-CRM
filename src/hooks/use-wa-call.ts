@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
@@ -62,6 +62,18 @@ export function useWaCall() {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [permissionSent, setPermissionSent] = useState(false);
+  // Duração da chamada (segundos) — começa a contar quando o lead atende
+  // (status 'in_progress'). Usado pelo botão pra mostrar 0:12 etc.
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (status !== "in_progress") {
+      if (status === "idle" || status === "ended" || status === "failed")
+        setSeconds(0);
+      return;
+    }
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [status]);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -246,6 +258,7 @@ export function useWaCall() {
     status,
     error,
     permissionSent,
+    seconds,
     startCall,
     hangup,
     requestPermission,
