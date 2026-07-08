@@ -869,8 +869,8 @@ export function MessageThread({
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+      <div className="@container flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
           {onBack && (
@@ -895,7 +895,7 @@ export function MessageThread({
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden shrink-0 gap-1 border-border text-[10px] lg:ml-2 lg:inline-flex",
+              "ml-1 hidden shrink-0 gap-1 border-border text-[10px] @md:ml-2 @md:inline-flex",
               sessionInfo.expired ? "text-red-400" : "text-primary"
             )}
           >
@@ -993,7 +993,7 @@ export function MessageThread({
               )}
             >
               <UserPlus className="h-3 w-3" />
-              <span className="hidden xl:inline">{assignLabel}</span>
+              <span className="hidden @xl:inline">{assignLabel}</span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -1059,7 +1059,7 @@ export function MessageThread({
             <>
               <Badge
                 variant="outline"
-                className="hidden gap-1 border-amber-500/40 text-[10px] text-amber-400 xl:inline-flex"
+                className="hidden gap-1 border-amber-500/40 text-[10px] text-amber-400 @xl:inline-flex"
               >
                 <Hand className="h-3 w-3" />
                 Atendimento humano
@@ -1074,7 +1074,7 @@ export function MessageThread({
                 )}
               >
                 <Bot className="h-3 w-3" />
-                <span className="hidden xl:inline">Reativar IA</span>
+                <span className="hidden @xl:inline">Reativar IA</span>
               </button>
             </>
           ) : (
@@ -1088,7 +1088,7 @@ export function MessageThread({
               )}
             >
               <Hand className="h-3 w-3" />
-              <span className="hidden xl:inline">Assumir atendimento</span>
+              <span className="hidden @xl:inline">Assumir atendimento</span>
             </button>
           )}
         </div>
