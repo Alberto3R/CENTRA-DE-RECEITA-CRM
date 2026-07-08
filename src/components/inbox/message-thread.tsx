@@ -870,7 +870,7 @@ export function MessageThread({
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
           {onBack && (
@@ -895,7 +895,7 @@ export function MessageThread({
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
+              "ml-1 hidden shrink-0 gap-1 border-border text-[10px] sm:ml-2 sm:inline-flex",
               sessionInfo.expired ? "text-red-400" : "text-primary"
             )}
           >
@@ -904,7 +904,7 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           {/* Ligação WhatsApp (business-initiated). Ícone no header; abre
               o softphone WebRTC. Requer calling habilitado + permissão do
               lead + tier — senão avisa via tooltip/estado. */}
