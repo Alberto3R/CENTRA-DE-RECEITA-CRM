@@ -895,7 +895,7 @@ export function MessageThread({
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden shrink-0 gap-1 border-border text-[10px] sm:ml-2 sm:inline-flex",
+              "ml-1 hidden shrink-0 gap-1 border-border text-[10px] lg:ml-2 lg:inline-flex",
               sessionInfo.expired ? "text-red-400" : "text-primary"
             )}
           >
@@ -993,7 +993,7 @@ export function MessageThread({
               )}
             >
               <UserPlus className="h-3 w-3" />
-              <span className="hidden sm:inline">{assignLabel}</span>
+              <span className="hidden xl:inline">{assignLabel}</span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -1059,7 +1059,7 @@ export function MessageThread({
             <>
               <Badge
                 variant="outline"
-                className="hidden gap-1 border-amber-500/40 text-[10px] text-amber-400 sm:inline-flex"
+                className="hidden gap-1 border-amber-500/40 text-[10px] text-amber-400 xl:inline-flex"
               >
                 <Hand className="h-3 w-3" />
                 Atendimento humano
@@ -1074,7 +1074,7 @@ export function MessageThread({
                 )}
               >
                 <Bot className="h-3 w-3" />
-                <span className="hidden sm:inline">Reativar IA</span>
+                <span className="hidden xl:inline">Reativar IA</span>
               </button>
             </>
           ) : (
@@ -1088,7 +1088,7 @@ export function MessageThread({
               )}
             >
               <Hand className="h-3 w-3" />
-              <span className="hidden sm:inline">Assumir atendimento</span>
+              <span className="hidden xl:inline">Assumir atendimento</span>
             </button>
           )}
         </div>
