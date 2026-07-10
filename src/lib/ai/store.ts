@@ -192,6 +192,10 @@ export async function listarAnalises(
       "id, created_at, nota, tipo, seller_id, conversation_id, perda_estimada_reais, documento:ai_documents(origem)",
     )
     .eq("account_id", accountId)
+    // Só análises de CONVERSA aqui (call/whatsapp). Análises de funil/time têm
+    // formato de dimensão diferente e página própria — não entram neste histórico
+    // (o render de conversa quebraria ao abrir uma delas).
+    .in("tipo", ["call", "whatsapp"])
     .order("created_at", { ascending: false })
     .limit(limite);
   if (error) {

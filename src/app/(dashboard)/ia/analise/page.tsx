@@ -581,7 +581,13 @@ export default function AnaliseCallPage() {
             </p>
             <div className="flex flex-col gap-2">
               {dims.map(([dim, d]) => {
-                const tone = scoreTone(d.score);
+                // Blindagem: análises de formatos diferentes (ex.: funil) não
+                // devem quebrar a tela ao serem abertas.
+                const score = typeof d?.score === "number" ? d.score : 0;
+                const evidencias = Array.isArray(d?.evidencias)
+                  ? d.evidencias
+                  : [];
+                const tone = scoreTone(score);
                 return (
                   <details
                     key={dim}
@@ -596,22 +602,22 @@ export default function AnaliseCallPage() {
                         <span
                           className={`font-mono text-sm font-bold tabular-nums ${tone.texto}`}
                         >
-                          {d.score}
+                          {score}
                           <span className="text-xs text-muted-foreground">/10</span>
                         </span>
                       </div>
                       <div className="ml-6 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
                           className={`h-full rounded-full ${tone.bar}`}
-                          style={{ width: `${d.score * 10}%` }}
+                          style={{ width: `${score * 10}%` }}
                         />
                       </div>
                     </summary>
                     <div className="border-t border-border px-3 pb-3 pt-2.5">
-                      <p className="text-xs text-muted-foreground">{d.resumo}</p>
-                      {d.evidencias.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">{d?.resumo}</p>
+                      {evidencias.length > 0 ? (
                         <ul className="mt-2 flex flex-col gap-1 border-l-2 border-border pl-3">
-                          {d.evidencias.map((e, i) => (
+                          {evidencias.map((e, i) => (
                             <li key={i} className="text-xs text-foreground/80">
                               <span className="font-mono text-primary">
                                 {e.timestamp}
