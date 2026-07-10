@@ -90,6 +90,7 @@ interface StepMeta {
 const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_message: { label: "Enviar mensagem", icon: MessageSquare, border: "border-l-primary" },
   send_template: { label: "Enviar modelo", icon: FileText, border: "border-l-primary" },
+  send_document: { label: "Enviar documento", icon: FileText, border: "border-l-primary" },
   add_tag: { label: "Adicionar tag", icon: Tag, border: "border-l-primary" },
   remove_tag: { label: "Remover tag", icon: TagIcon, border: "border-l-primary" },
   assign_conversation: { label: "Atribuir conversa", icon: UserCheck, border: "border-l-primary" },

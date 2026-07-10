@@ -390,6 +390,7 @@ export type AutomationTriggerType =
 export type AutomationStepType =
   | 'send_message'
   | 'send_template'
+  | 'send_document'
   | 'add_tag'
   | 'remove_tag'
   | 'assign_conversation'
@@ -433,6 +434,15 @@ export interface SendTemplateStepConfig {
   template_name: string;
   language?: string;
   variables?: Record<string, string>;
+}
+
+export interface SendDocumentStepConfig {
+  /** Public URL of the document to send (PDF etc.). */
+  link: string;
+  /** Filename shown in the recipient's chat (document only). */
+  filename?: string;
+  /** Optional caption; supports `{{ vars.* }}` interpolation at runtime. */
+  caption?: string;
 }
 
 export interface TagStepConfig {
@@ -492,6 +502,7 @@ export interface SendWebhookStepConfig {
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendTemplateStepConfig
+  | SendDocumentStepConfig
   | TagStepConfig
   | AssignConversationStepConfig
   | UpdateContactFieldStepConfig

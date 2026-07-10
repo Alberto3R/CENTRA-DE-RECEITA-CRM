@@ -1,4 +1,4 @@
-import { sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/meta-api'
+import { sendTextMessage, sendTemplateMessage, sendMediaMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   sanitizePhoneForMeta,
@@ -43,6 +43,19 @@ interface SendTemplateArgs {
   params?: string[]
 }
 
+interface SendDocumentArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  /** Public URL of the document (PDF etc.). */
+  link: string
+  /** Filename shown in the recipient's chat. */
+  filename?: string
+  /** Optional caption sent alongside the document. */
+  caption?: string
+}
+
 export async function engineSendText(args: SendTextArgs): Promise<{ whatsapp_message_id: string }> {
   return sendViaMeta({ ...args, kind: 'text' })
 }
@@ -53,9 +66,16 @@ export async function engineSendTemplate(
   return sendViaMeta({ ...args, kind: 'template' })
 }
 
+export async function engineSendDocument(
+  args: SendDocumentArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  return sendViaMeta({ ...args, kind: 'document' })
+}
+
 type SendInput =
   | (SendTextArgs & { kind: 'text' })
   | (SendTemplateArgs & { kind: 'template' })
+  | (SendDocumentArgs & { kind: 'document' })
 
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
@@ -106,6 +126,18 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       })
       return r.messageId
     }
+    if (input.kind === 'document') {
+      const r = await sendMediaMessage({
+        phoneNumberId: config.phone_number_id,
+        accessToken,
+        to: phone,
+        kind: 'document',
+        link: input.link,
+        caption: input.caption,
+        filename: input.filename,
+      })
+      return r.messageId
+    }
     const r = await sendTextMessage({
       phoneNumberId: config.phone_number_id,
       accessToken,
@@ -143,9 +175,12 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // Persist the sent message so it appears in the inbox with a real
   // Meta message id. sender_type='bot' distinguishes automation sends
   // from manual agent sends.
-  const content_type = input.kind === 'template' ? 'template' : 'text'
-  const content_text = input.kind === 'text' ? input.text : null
+  const content_type =
+    input.kind === 'template' ? 'template' : input.kind === 'document' ? 'document' : 'text'
+  const content_text =
+    input.kind === 'text' ? input.text : input.kind === 'document' ? (input.caption ?? null) : null
   const template_name = input.kind === 'template' ? input.templateName : null
+  const media_url = input.kind === 'document' ? input.link : null
 
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,
@@ -153,6 +188,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     content_type,
     content_text,
     template_name,
+    media_url,
     message_id: waMessageId,
     status: 'sent',
   })
@@ -166,7 +202,11 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     .from('conversations')
     .update({
       last_message_text:
-        input.kind === 'template' ? `[template:${input.templateName}]` : input.text,
+        input.kind === 'template'
+          ? `[template:${input.templateName}]`
+          : input.kind === 'document'
+            ? input.caption || '[documento]'
+            : input.text,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

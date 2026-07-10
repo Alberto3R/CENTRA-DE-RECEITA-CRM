@@ -7,6 +7,7 @@ import type {
   KeywordMatchTriggerConfig,
   SendMessageStepConfig,
   SendTemplateStepConfig,
+  SendDocumentStepConfig,
   SendWebhookStepConfig,
   TagStepConfig,
   UpdateContactFieldStepConfig,
@@ -15,7 +16,7 @@ import type {
   AssignConversationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
-import { engineSendText, engineSendTemplate } from './meta-send'
+import { engineSendText, engineSendTemplate, engineSendDocument } from './meta-send'
 
 // ------------------------------------------------------------
 // Public API
@@ -390,6 +391,24 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         params,
       })
       return `template sent via Meta (${whatsapp_message_id})`
+    }
+
+    case 'send_document': {
+      const cfg = step.step_config as SendDocumentStepConfig
+      if (!args.contactId) throw new Error('send_document needs a contact')
+      const link = (cfg.link ?? '').trim()
+      if (!link) throw new Error('send_document needs a link')
+      const conversationId = await resolveConversationId(args)
+      const { whatsapp_message_id } = await engineSendDocument({
+        accountId: args.automation.account_id,
+        userId: args.automation.user_id,
+        conversationId,
+        contactId: args.contactId,
+        link,
+        filename: cfg.filename,
+        caption: cfg.caption ? interpolate(cfg.caption, args) : undefined,
+      })
+      return `document sent via Meta (${whatsapp_message_id})`
     }
 
     case 'add_tag': {
