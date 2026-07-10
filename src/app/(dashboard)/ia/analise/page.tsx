@@ -570,47 +570,60 @@ export default function AnaliseCallPage() {
             </div>
           ) : null}
 
-          {/* Dimensões — barra de score colorida por faixa (leitura instantânea) */}
+          {/* Dimensões — linhas compactas recolhíveis: nome + barra + nota
+              sempre visíveis (placar escaneável); resumo/evidências só ao
+              expandir, pra não virar rolagem infinita. */}
           <ResultSection title="Dimensões avaliadas">
-            <ul className="flex flex-col gap-4">
+            <p className="-mt-1 mb-3 text-xs text-muted-foreground">
+              Toque numa dimensão para ver o resumo e as evidências.
+            </p>
+            <div className="flex flex-col gap-2">
               {dims.map(([dim, d]) => {
                 const tone = scoreTone(d.score);
                 return (
-                  <li key={dim}>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <h3 className="text-sm font-semibold capitalize text-foreground">
-                        {dim.replaceAll("_", " ")}
-                      </h3>
-                      <span
-                        className={`font-mono text-sm font-bold tabular-nums ${tone.texto}`}
-                      >
-                        {d.score}
-                        <span className="text-xs text-muted-foreground">/10</span>
-                      </span>
+                  <details
+                    key={dim}
+                    className="group rounded-lg border border-border bg-card"
+                  >
+                    <summary className="flex cursor-pointer list-none flex-col gap-2 p-3">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                        <h3 className="flex-1 truncate text-sm font-semibold capitalize text-foreground">
+                          {dim.replaceAll("_", " ")}
+                        </h3>
+                        <span
+                          className={`font-mono text-sm font-bold tabular-nums ${tone.texto}`}
+                        >
+                          {d.score}
+                          <span className="text-xs text-muted-foreground">/10</span>
+                        </span>
+                      </div>
+                      <div className="ml-6 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full ${tone.bar}`}
+                          style={{ width: `${d.score * 10}%` }}
+                        />
+                      </div>
+                    </summary>
+                    <div className="border-t border-border px-3 pb-3 pt-2.5">
+                      <p className="text-xs text-muted-foreground">{d.resumo}</p>
+                      {d.evidencias.length > 0 ? (
+                        <ul className="mt-2 flex flex-col gap-1 border-l-2 border-border pl-3">
+                          {d.evidencias.map((e, i) => (
+                            <li key={i} className="text-xs text-foreground/80">
+                              <span className="font-mono text-primary">
+                                {e.timestamp}
+                              </span>{" "}
+                              — {e.comentario}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
-                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={`h-full rounded-full ${tone.bar}`}
-                        style={{ width: `${d.score * 10}%` }}
-                      />
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">{d.resumo}</p>
-                    {d.evidencias.length > 0 ? (
-                      <ul className="mt-2 flex flex-col gap-1 border-l-2 border-border pl-3">
-                        {d.evidencias.map((e, i) => (
-                          <li key={i} className="text-xs text-foreground/80">
-                            <span className="font-mono text-primary">
-                              {e.timestamp}
-                            </span>{" "}
-                            — {e.comentario}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </li>
+                  </details>
                 );
               })}
-            </ul>
+            </div>
           </ResultSection>
 
           {/* Prescrições — cards numerados e acionáveis */}
