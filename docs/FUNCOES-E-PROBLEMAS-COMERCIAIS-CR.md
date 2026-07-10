@@ -17,7 +17,8 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 | **WhatsApp oficial centralizado por marca** | Toda conversa do time comercial no número oficial (API da Meta), num só painel. | A conversa sai do **celular pessoal** de cada vendedor: o empresário passa a **enxergar e controlar todo o comercial num lugar só** — e o histórico **não vai embora quando o vendedor sai**. |
 | **Análise das conversas pelo próprio CRM** | O CRM lê e avalia as conversas dos vendedores e entrega a leitura pro dono. | O empresário **sabe como o time está vendendo** sem ter que ler conversa por conversa — qualidade de atendimento vira dado. |
 | **Envio de texto, mídia e documentos** | Responder com texto, imagem, áudio, PDF. | Atendimento completo sem sair da ferramenta. |
-| **Modelos (templates) aprovados** | Enviar mensagens pré-aprovadas pela Meta, com variáveis. | **Reabrir conversa fora da janela de 24h** (só template pode) e **padronizar a abordagem** — sem depender da inspiração de cada um. |
+| **Gravar e enviar áudio (mensagem de voz)** | Botão de microfone no compositor grava e envia o áudio na hora (na cor do tema). | Responder por **voz sem trocar de app** — mais rápido e mais humano, tudo registrado no CRM. |
+| **Modelos (templates) aprovados** | Enviar mensagens pré-aprovadas pela Meta, com variáveis. **Visíveis para todos os papéis da conta** (inclusive agentes), no chat e no funil. | **Reabrir conversa fora da janela de 24h** (só template pode) e **padronizar a abordagem** — sem depender da inspiração de cada um, e sem o SDR ficar sem os modelos aprovados. |
 | **Indicador de sessão de 24h** | Mostra quanto tempo resta da janela de conversa livre. | Saber **quando pode mandar mensagem livre** vs. quando precisa de template — evita mensagem que não entrega. |
 | **Respostas, reações, contexto** | Reply citado, reações, thread. | Conversa organizada em volume alto — não se perde o fio. |
 | **Buscar conversa no WhatsApp (no Gestor)** | Puxar o histórico de um número para analisar. | Recuperar contexto de um lead **sem pedir print** pro vendedor. |
@@ -31,6 +32,8 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 |---|---|---|
 | **Kanban de negócios** | Cada oportunidade num estágio visível, arrastável. | **Visão clara do que aconteceu com cada lead que você gerou**: entraram X leads e onde cada um chegou até agora — o progresso de cada oportunidade, sem nada sumir no meio do caminho. |
 | **Filtros (data, responsável, tag)** | Recortar o funil por período, dono ou segmento. | Foco: o gestor vê **só o que importa** (ex.: negócios parados, de um SDR, de uma campanha). |
+| **Busca no funil** | Achar um negócio por nome, e-mail, telefone ou título — filtra os cards ao vivo. | **Encontrar o lead na hora** (ele ligou, mandou msg) sem varrer o Kanban. |
+| **Dados de contato no card** | Ao abrir um negócio, telefone e e-mail do contato aparecem (clicáveis). | **Agir sem procurar**: ligar/mandar e-mail direto do negócio, sem ir a outra tela. |
 | **Motivos de perda editáveis** | Marcar por que um negócio foi perdido, com lista por conta. | Parar de perder pelo mesmo motivo: **entender a causa raiz** (preço? timing? concorrente?) e atacar. |
 | **Valor, moeda e previsão de fechamento** | Ticket e data esperada por negócio. | **Forecast** de receita — previsibilidade em vez de achismo. |
 | **Ligar + Iniciar conversa com modelo (no card)** | Direto do card: ligar pelo WhatsApp ou disparar um template (cria a conversa se não existir). | **Agir na hora**, sem trocar de tela — encurta o caminho do funil até o toque. |
@@ -101,7 +104,8 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 
 | Função | O que faz | Problema comercial que resolve |
 |---|---|---|
-| **Analisar conversa** | IA lê a transcrição (colada **ou buscada no WhatsApp**) e avalia. | **Coaching em escala**: o que o vendedor fez bem/mal e o próximo passo — sem o líder ouvir call por call. |
+| **Analisar conversa** | IA lê a transcrição (colada, **buscada no WhatsApp** — com **áudios transcritos** — ou de uma **ligação gravada**) e avalia. | **Coaching em escala**: o que o vendedor fez bem/mal e o próximo passo — sem o líder ouvir call por call, e sem perder o que foi dito em áudio. |
+| **Régua certa por papel (closer × SDR)** | A análise usa a **régua da função** de quem atendeu: closer é avaliado por fechar; SDR, por qualificar e agendar. | **Diagnóstico justo**: o SDR não "perde a venda" se qualificou e agendou; o closer não passa só por marcar reunião. Cada um cobrado pelo que controla. |
 | **Analisar funil** | IA lê o funil e aponta gargalos. | Enxergar **onde vaza** oportunidade e por quê. |
 | **Avaliar time** | Comparativo de desempenho. | Saber **quem precisa de ajuda** e quem replicar. |
 | **Criar materiais** | Gera copy, scripts e mensagens. | **Acelerar** a produção comercial (abordagens, follow-ups, respostas a objeção). |
@@ -118,12 +122,19 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 | Função | O que faz | Problema comercial que resolve |
 |---|---|---|
 | **Receber chamadas no CRM** | Lead liga pelo WhatsApp → atende no navegador (WebRTC), com registro. | Atender pelo **mesmo número/marca**, grátis pro cliente, com **histórico** — a ligação deixa de se perder no celular. |
-| **Ligar para o lead** *(aguardando tier Meta)* | SDR liga pelo número verificado, direto do inbox/card. | Prospecção por **voz** sem discador externo, com a **identidade da marca** (mais atendimento). |
+| **Ligar para o lead** *(liberado, com aceite do lead)* | SDR liga pelo número verificado, direto do inbox/card — o lead precisa ter autorizado receber ligação. | Prospecção por **voz** sem discador externo, com a **identidade da marca** (mais atendimento). |
 | **Permissão de retorno (callback)** | Quem liga pra você já autoriza você ligar de volta. | Transformar inbound de voz em **permissão de follow-up**. |
+| **Botões no card do negócio** | "Ligar" e "Iniciar conversa com modelo" direto no card do lead. | Agir por **voz ou mensagem sem sair do funil** — menos cliques, mais toque. |
+| **Gravação da ligação** | A chamada (voz local + do lead) é gravada e guardada no CRM (Storage). | Ter a **prova e o material** de cada conversa pra treino, auditoria e análise. |
+| **Ouvir gravação** | Player da chamada na página **Ligações** e no painel do contato. | Rever a conversa a qualquer hora, **sem depender da memória** do SDR. |
+| **Transcrição (ElevenLabs Scribe, com diarização)** | Áudio → texto em turnos "Falante 1/2", sob demanda no botão "Analisar". | Transformar voz em **texto pesquisável** e pronto pra IA — sem digitar nada. |
+| **Análise da ligação no Gestor** | A transcrição vai pro Gestor Comercial (§9) e vira diagnóstico da call. | **Coaching de voz automático** — o que funcionou, objeções e próximos passos. |
+| **Página Ligações (central)** | Histórico de todas as chamadas da conta, com filtro "só com gravação". *(acesso admin/gestor)* | Ponto único pra **gestão ouvir e analisar** o esforço de voz do time. |
 | **Auto-log de ligação** | Ligação encerrada vira atividade no Painel Outbound. | **Medir o esforço de voz** junto com o resto — visão real da atividade. |
 
 > Dor central: **voz e mensagem separadas** (celular + CRM) = ligação sem registro,
-> sem medição e sem identidade de marca. Aqui é **um número, um histórico**.
+> sem medição e sem identidade de marca. Aqui é **um número, um histórico** —
+> e agora com **gravação, transcrição e coaching** em cima de cada conversa.
 
 ---
 
@@ -131,8 +142,10 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 
 | Função | O que faz | Problema comercial que resolve |
 |---|---|---|
-| **Membros e papéis (owner/admin/agent/viewer)** | Controle de quem vê e edita o quê. | **SDR não mexe em configuração**; o dono controla acesso — segurança e foco. |
-| **Convites de time** | Onboarding de novos usuários por link. | Colocar vendedor novo pra **operar rápido**, sem TI. |
+| **Membros e papéis (owner/admin/agent/viewer)** | Controle de quem vê e edita o quê. O menu do agente é **enxuto** — só o que ele opera; Configurações e páginas de gestão ficam ocultas. | **SDR não mexe em configuração**; o dono controla acesso — segurança e foco. |
+| **Função comercial do usuário (closer/SDR/...)** | Cada membro tem uma **função comercial** (separada do nível de acesso), definida no convite e editável em Membros. | É ela que faz a **IA usar a régua certa** por pessoa (§10/§9) — o time é avaliado pelo papel real de cada um, sem configurar nada a cada análise. |
+| **Onboarding só por convite/compra** | Novo usuário entra **direto na conta certa** pelo convite (ou via compra), já com nível de acesso **e função comercial**. Não há mais "criar conta" espalhado (removido inclusive o botão "Começar" da página de vendas). | Fim do vendedor que **cria uma conta vazia e se perde** — cada pessoa cai já operando na marca certa e com o papel definido. |
+| **Compra self-service (página de vendas → Stripe)** | Na página de vendas, o CTA do topo fala com vendas; os demais abrem um formulário de cadastro da empresa e **redirecionam para o checkout Stripe**. | Transformar interesse em **cliente pagante sem fricção** — captura o dado e leva direto ao pagamento. |
 | **Modelos (gestão)** | Criar/sincronizar templates aprovados. | Manter o **arsenal de mensagens** pronto e conforme a Meta. |
 | **Campos e tags** | Modelar o processo e o ICP. | O CRM **fala a língua do negócio** do cliente. |
 | **Negócios e moeda** | Padrão de moeda/forecast por conta. | Números **comparáveis** e forecast consistente. |
@@ -161,8 +174,18 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 - **Painel Outbound:** gere **atividade** (não só resultado) e garante follow-up.
 - **Disparos/Automações/Fluxos:** comunicação e atendimento **em escala**, 24/7.
 - **Gestor Comercial (IA):** a **melhor função** — um gestor nos seus dados **em tempo real, que não dorme nem tira férias**.
-- **Ligação da Meta (WhatsApp):** **voz no mesmo número oficial**, dentro do CRM, com registro.
+- **Ligação da Meta (WhatsApp):** **voz no mesmo número oficial**, dentro do CRM, com **gravação, transcrição e coaching** por IA.
 - **Multi-marca + plataforma:** operar **várias marcas com segurança** num só lugar.
 
 ---
-*Documento de posicionamento — Central de Receita, jul/2026.*
+
+## Observações de estado (jul/2026)
+
+- **Ligar para o lead:** liberado — depende de o lead ter **autorizado receber ligação** (permissão de call da Meta). Sem essa autorização, o CRM só **recebe** a chamada que o lead iniciar.
+- **Gravação:** vale a partir da entrada do recurso — **ligações antigas (anteriores) não têm gravação** e aparecem como "sem gravação" na página Ligações. Só chamadas novas gravam.
+- **Transcrição:** usa a **ElevenLabs Scribe** (a assinatura ElevenLabs que a operação já paga), em PT-BR com diarização. Roda **sob demanda** (botão "Analisar"), não automaticamente — controla custo e só transcreve o que o gestor quer analisar. Requer a env `ELEVENLABS_API_KEY` no ambiente; sem ela, o player continua funcionando e só a transcrição fica indisponível.
+- **Página Ligações e "Analisar":** restritas a **admin/gestor** (agente/visualizador não acessam).
+- **Onboarding:** modelo **só convite + compra**; criação avulsa de conta foi removida da maioria dos pontos (inclusive o botão "Começar" da página de vendas).
+
+---
+*Documento de posicionamento — Central de Receita, jul/2026. Atualizado com o módulo de Ligação completo (gravar/ouvir/transcrever/analisar), onboarding por convite e checkout Stripe.*
