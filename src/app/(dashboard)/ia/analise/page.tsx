@@ -133,26 +133,27 @@ export default function AnaliseCallPage() {
   const [carregandoConversa, setCarregandoConversa] = useState(false);
   const [origem, setOrigem] = useState<string | null>(null);
 
-  // Vendedor da conversa — a FUNÇÃO dele (closer/sdr) define a régua de análise.
-  const [sellers, setSellers] = useState<
-    { id: string; nome: string; funcao: string }[]
+  // Atendente da conversa — membro do CRM. A FUNÇÃO dele (profiles.funcao)
+  // define a régua de análise (sdr = qualificar+agendar; demais = fechar).
+  const [membros, setMembros] = useState<
+    { user_id: string; full_name: string; funcao: string | null }[]
   >([]);
-  const [sellerId, setSellerId] = useState<string>("");
+  const [membroId, setMembroId] = useState<string>("");
 
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch("/api/ai/sellers");
+        const res = await fetch("/api/account/members");
         const j = await res.json();
-        if (res.ok && Array.isArray(j.sellers)) setSellers(j.sellers);
+        if (res.ok && Array.isArray(j.members)) setMembros(j.members);
       } catch {
         /* silencioso — o seletor apenas some se não carregar */
       }
     })();
   }, []);
 
-  const sellerSel = sellers.find((s) => s.id === sellerId);
-  const reguaSdr = sellerSel?.funcao === "sdr";
+  const membroSel = membros.find((m) => m.user_id === membroId);
+  const reguaSdr = membroSel?.funcao === "sdr";
 
   const carregarHistorico = useCallback(async () => {
     setCarregandoHist(true);
@@ -276,7 +277,7 @@ export default function AnaliseCallPage() {
         body: JSON.stringify({
           texto,
           origem: origem ?? undefined,
-          sellerId: sellerId || undefined,
+          ownerUserId: membroId || undefined,
         }),
       });
       const json = await res.json();
@@ -453,20 +454,21 @@ export default function AnaliseCallPage() {
       </div>
 
       <div className="flex flex-col gap-3">
-        {sellers.length > 0 ? (
+        {membros.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground">
-              Vendedor da conversa
+              Atendente da conversa
             </span>
             <select
-              value={sellerId}
-              onChange={(e) => setSellerId(e.target.value)}
+              value={membroId}
+              onChange={(e) => setMembroId(e.target.value)}
               className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
             >
               <option value="">Não informar (analisa como fechamento)</option>
-              {sellers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.nome}
+              {membros.map((m) => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.full_name || "Sem nome"}
+                  {m.funcao ? ` · ${m.funcao === "sdr" ? "SDR" : m.funcao}` : ""}
                 </option>
               ))}
             </select>
@@ -476,7 +478,7 @@ export default function AnaliseCallPage() {
                   ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
                   : "bg-primary/15 text-primary"
               }`}
-              title="A régua de análise vem da função do vendedor selecionado."
+              title="A régua de análise vem da função comercial do atendente selecionado."
             >
               Régua: {reguaSdr ? "SDR — qualificar + agendar" : "Closer — fechar na conversa"}
             </span>

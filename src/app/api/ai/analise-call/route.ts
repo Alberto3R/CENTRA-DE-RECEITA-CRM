@@ -27,6 +27,9 @@ const bodySchema = z.object({
   // Deriva a régua do dono da ligação (whatsapp_calls.user_id) quando não há
   // sellerId — usado pela análise das gravações em Ligações.
   callId: z.string().uuid().optional(),
+  // Deriva a régua da função (profiles.funcao) do atendente selecionado —
+  // usado pela tela "Analisar conversa" (seletor de membro do CRM).
+  ownerUserId: z.string().uuid().optional(),
   formato: z.enum(["vtt", "txt"]).optional(),
   origem: z.string().max(200).optional(),
 });
@@ -63,6 +66,12 @@ export async function POST(request: Request) {
       // Régua pela função de quem fez a ligação.
       objetivo = objetivoDeFuncao(
         await store.funcaoDoDonoDaCall(ctx.accountId, body.callId),
+      );
+    } else if (body.ownerUserId) {
+      // Régua pela função comercial do atendente selecionado (membro do CRM).
+      // funcaoDoUsuario escopa por conta — usuário de fora vira null (closer).
+      objetivo = objetivoDeFuncao(
+        await store.funcaoDoUsuario(ctx.accountId, body.ownerUserId),
       );
     }
 
