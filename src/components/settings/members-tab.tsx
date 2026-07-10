@@ -81,8 +81,21 @@ interface Member {
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  funcao: string | null;
   joined_at: string;
 }
+
+// Função comercial — define a régua de análise da IA (sdr = qualificar+agendar).
+// "nenhuma" é o sentinel de "não definida" (persistido como null).
+const FUNCOES_UI: { value: string; label: string }[] = [
+  { value: 'nenhuma', label: 'Função: —' },
+  { value: 'closer', label: 'Closer' },
+  { value: 'sdr', label: 'SDR / Pré-vendas' },
+  { value: 'social_seller', label: 'Social Seller' },
+  { value: 'gestor', label: 'Gestor' },
+];
+const funcaoLabel = (f: string | null): string =>
+  FUNCOES_UI.find((x) => x.value === (f ?? 'nenhuma'))?.label ?? 'Função: —';
 
 interface Invitation {
   id: string;
@@ -220,6 +233,46 @@ export function MembersTab() {
         ),
       );
       console.error('[MembersTab] role change error:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setPendingMemberAction(null);
+    }
+  }
+
+  async function handleFuncaoChange(member: Member, next: string) {
+    const nextFuncao = next === 'nenhuma' ? null : next;
+    if ((member.funcao ?? null) === nextFuncao) return;
+    const previous = member.funcao ?? null;
+    setPendingMemberAction(member.user_id);
+    setMembers((prev) =>
+      prev.map((m) =>
+        m.user_id === member.user_id ? { ...m, funcao: nextFuncao } : m,
+      ),
+    );
+    try {
+      const res = await fetch(`/api/account/members/${member.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ funcao: nextFuncao }),
+      });
+      if (!res.ok) {
+        setMembers((prev) =>
+          prev.map((m) =>
+            m.user_id === member.user_id ? { ...m, funcao: previous } : m,
+          ),
+        );
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || 'Falha ao atualizar a função comercial');
+        return;
+      }
+      toast.success(`Função de ${member.full_name || 'membro'} atualizada`);
+    } catch (err) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === member.user_id ? { ...m, funcao: previous } : m,
+        ),
+      );
+      console.error('[MembersTab] funcao change error:', err);
       toast.error('Não foi possível conectar ao servidor');
     } finally {
       setPendingMemberAction(null);
@@ -407,7 +460,37 @@ export function MembersTab() {
                       below the identity block; on desktop it sits
                       inline. Items align to the start on mobile so the
                       role dropdown lines up under the avatar. */}
-                  <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    {/* Função comercial — orthogonal ao RBAC; define a régua
+                        de análise da IA. Admin edita qualquer linha; demais
+                        veem só a etiqueta (quando definida). */}
+                    {canManageMembers ? (
+                      <Select
+                        value={member.funcao ?? 'nenhuma'}
+                        onValueChange={(v) =>
+                          v && handleFuncaoChange(member, v)
+                        }
+                      >
+                        <SelectTrigger
+                          className="w-36 bg-muted border-border text-foreground"
+                          disabled={isBusy}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FUNCOES_UI.map((f) => (
+                            <SelectItem key={f.value} value={f.value}>
+                              {f.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : member.funcao ? (
+                      <span className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                        {funcaoLabel(member.funcao)}
+                      </span>
+                    ) : null}
+
                     {/* Role display / editor. Inline Select is admin+
                         only AND not allowed on the owner row (owner
                         changes go through transfer, which lands later). */}

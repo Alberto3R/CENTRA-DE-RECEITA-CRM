@@ -114,6 +114,7 @@ export function CallHistory({ contactId }: { contactId: string }) {
         body: JSON.stringify({
           texto: tj.transcript,
           origem: "Ligação WhatsApp",
+          callId: id,
         }),
       });
       if (!an.ok) {

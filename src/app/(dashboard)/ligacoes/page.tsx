@@ -111,7 +111,11 @@ export default function LigacoesPage() {
       const an = await fetch("/api/ai/analise-call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: tj.transcript, origem: "Ligação WhatsApp" }),
+        body: JSON.stringify({
+          texto: tj.transcript,
+          origem: "Ligação WhatsApp",
+          callId: id,
+        }),
       });
       if (!an.ok) {
         const j = await an.json().catch(() => ({}));

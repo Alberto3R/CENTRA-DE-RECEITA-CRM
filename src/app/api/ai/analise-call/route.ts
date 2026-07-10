@@ -13,13 +13,20 @@ import { assertCreditos, consumirCreditos } from "@/lib/billing/quota";
 import { carregarSalesConfig } from "@/lib/ai/config";
 import { validarInsumo } from "@/lib/ai/validar-insumo";
 import { normalizarTranscricao } from "@/lib/ai/transcricao-extractor";
-import { analisarCall, type ObjetivoAnalise } from "@/lib/ai/analise-call";
+import {
+  analisarCall,
+  objetivoDeFuncao,
+  type ObjetivoAnalise,
+} from "@/lib/ai/analise-call";
 import { calcularCustoUsd } from "@/lib/ai/custo";
 import * as store from "@/lib/ai/store";
 
 const bodySchema = z.object({
   texto: z.string().min(1).max(200_000, "Transcrição muito longa (máx. ~200 mil caracteres)."),
   sellerId: z.string().uuid().optional(),
+  // Deriva a régua do dono da ligação (whatsapp_calls.user_id) quando não há
+  // sellerId — usado pela análise das gravações em Ligações.
+  callId: z.string().uuid().optional(),
   formato: z.enum(["vtt", "txt"]).optional(),
   origem: z.string().max(200).optional(),
 });
@@ -51,7 +58,12 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      objetivo = seller.funcao === "sdr" ? "sdr" : "closer";
+      objetivo = objetivoDeFuncao(seller.funcao);
+    } else if (body.callId) {
+      // Régua pela função de quem fez a ligação.
+      objetivo = objetivoDeFuncao(
+        await store.funcaoDoDonoDaCall(ctx.accountId, body.callId),
+      );
     }
 
     const config = await carregarSalesConfig(ctx.supabase, ctx.accountId);

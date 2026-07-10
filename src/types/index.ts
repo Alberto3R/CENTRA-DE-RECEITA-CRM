@@ -64,6 +64,8 @@ export interface AccountMember {
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  /** Função comercial (closer|sdr|social_seller|gestor). null = não definida. */
+  funcao: string | null;
   joined_at: string;
 }
 

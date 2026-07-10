@@ -31,6 +31,13 @@ import {
  */
 export type ObjetivoAnalise = "closer" | "sdr";
 
+/** Mapeia a função comercial (closer/sdr/social_seller/gestor) para a régua. */
+export function objetivoDeFuncao(
+  funcao: string | null | undefined,
+): ObjetivoAnalise {
+  return funcao === "sdr" ? "sdr" : "closer";
+}
+
 // ---------------------------------------------------------------------------
 // Zod — schema do resultado montado a partir das chaves de dimensão da conta.
 // É a fonte de verdade de validação (anti-alucinação) na borda da IA.

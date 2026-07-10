@@ -11,7 +11,11 @@ import { z } from "zod";
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { assertCreditos, consumirCreditos } from "@/lib/billing/quota";
 import { carregarSalesConfig } from "@/lib/ai/config";
-import { analisarCall } from "@/lib/ai/analise-call";
+import {
+  analisarCall,
+  objetivoDeFuncao,
+  type ObjetivoAnalise,
+} from "@/lib/ai/analise-call";
 import { calcularCustoUsd } from "@/lib/ai/custo";
 import * as store from "@/lib/ai/store";
 
@@ -35,14 +39,22 @@ export async function POST(request: Request) {
       );
     }
 
+    // Régua de análise: se veio sellerId, usa a função dele; senão, deriva de
+    // quem atende a conversa (assigned_agent_id/dono). sdr = qualificar+agendar.
+    let objetivo: ObjetivoAnalise = "closer";
     if (body.sellerId) {
-      const ok = await store.sellerPertenceAConta(ctx.accountId, body.sellerId);
-      if (!ok) {
+      const seller = await store.buscarSeller(ctx.accountId, body.sellerId);
+      if (!seller) {
         return NextResponse.json(
           { error: "Vendedor selecionado não pertence a esta conta." },
           { status: 400 },
         );
       }
+      objetivo = objetivoDeFuncao(seller.funcao);
+    } else {
+      objetivo = objetivoDeFuncao(
+        await store.funcaoDoDonoDaConversa(ctx.accountId, body.conversationId),
+      );
     }
 
     // Lê a conversa do CRM (escopada pela conta) e serializa.
@@ -68,7 +80,7 @@ export async function POST(request: Request) {
     });
 
     try {
-      const resultado = await analisarCall(texto, config);
+      const resultado = await analisarCall(texto, config, objetivo);
 
       const salva = await store.inserirAnalise({
         accountId: ctx.accountId,

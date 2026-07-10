@@ -175,6 +175,9 @@ export interface AnaliseResumo {
   seller_id: string | null;
   conversation_id: string | null;
   perda_estimada_reais: number | null;
+  // Origem do insumo (nome/telefone do contato ou "colado no app"), vinda do
+  // `ai_documents` vinculado — usada como rótulo legível no histórico.
+  origem: string | null;
 }
 
 /** Lista as análises recentes da conta (para a lista no app). */
@@ -186,7 +189,7 @@ export async function listarAnalises(
   const { data, error } = await admin
     .from("ai_analyses")
     .select(
-      "id, created_at, nota, tipo, seller_id, conversation_id, perda_estimada_reais",
+      "id, created_at, nota, tipo, seller_id, conversation_id, perda_estimada_reais, documento:ai_documents(origem)",
     )
     .eq("account_id", accountId)
     .order("created_at", { ascending: false })
@@ -194,7 +197,69 @@ export async function listarAnalises(
   if (error) {
     throw new Error(`Falha ao listar análises: ${error.message}`);
   }
-  return (data ?? []) as AnaliseResumo[];
+  // O embed many-to-one vem como objeto (ou null se o documento foi removido).
+  type Linha = Omit<AnaliseResumo, "origem"> & {
+    documento: { origem: string | null } | null;
+  };
+  return ((data ?? []) as unknown as Linha[]).map(({ documento, ...rest }) => ({
+    ...rest,
+    origem: documento?.origem ?? null,
+  }));
+}
+
+export interface AnaliseDetalhe {
+  id: string;
+  created_at: string;
+  tipo: string | null;
+  seller_id: string | null;
+  analise: AnaliseCall;
+}
+
+/**
+ * Reconstrói uma análise completa a partir da linha em `ai_analyses` — usado
+ * para reabrir uma análise antiga no app (histórico). O bundle acionável fica em
+ * `prescricoes` (jsonb); ver inserirAnalise para o formato gravado.
+ */
+export async function buscarAnalisePorId(
+  accountId: string,
+  id: string,
+): Promise<AnaliseDetalhe | null> {
+  const admin = supabaseAdmin();
+  const { data, error } = await admin
+    .from("ai_analyses")
+    .select(
+      "id, created_at, tipo, seller_id, dimensoes, nota, perda_estimada_reais, perda_memoria_calculo, prescricoes",
+    )
+    .eq("id", id)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao buscar análise: ${error.message}`);
+  if (!data) return null;
+
+  const bundle = (data.prescricoes ?? {}) as {
+    prescricoes?: AnaliseCall["prescricoes"];
+    proximos_passos?: string[];
+    dados_faltantes?: string[];
+    dados_crm?: AnaliseCall["dados_crm"];
+  };
+
+  return {
+    id: data.id as string,
+    created_at: data.created_at as string,
+    tipo: (data.tipo as string | null) ?? null,
+    seller_id: (data.seller_id as string | null) ?? null,
+    analise: {
+      dimensoes: (data.dimensoes ?? {}) as AnaliseCall["dimensoes"],
+      nota: data.nota as AnaliseCall["nota"],
+      perda_estimada_reais: (data.perda_estimada_reais as number | null) ?? null,
+      perda_memoria_calculo:
+        (data.perda_memoria_calculo as string | null) ?? null,
+      dados_faltantes: bundle.dados_faltantes ?? [],
+      prescricoes: bundle.prescricoes ?? [],
+      proximos_passos: bundle.proximos_passos ?? [],
+      dados_crm: bundle.dados_crm ?? {},
+    },
+  };
 }
 
 export interface SellerLite {
@@ -274,6 +339,61 @@ export async function buscarSeller(
     .maybeSingle();
   if (error) throw new Error(`Falha ao buscar vendedor: ${error.message}`);
   return (data as SellerLite | null) ?? null;
+}
+
+/** Função comercial (profiles.funcao) de um usuário do CRM. null se não houver. */
+export async function funcaoDoUsuario(
+  accountId: string,
+  userId: string | null | undefined,
+): Promise<string | null> {
+  if (!userId) return null;
+  const admin = supabaseAdmin();
+  const { data } = await admin
+    .from("profiles")
+    .select("funcao")
+    .eq("user_id", userId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  return (data?.funcao as string | null) ?? null;
+}
+
+/**
+ * Função comercial do dono de uma ligação (whatsapp_calls.user_id = o SDR/closer
+ * que ligou). Usada para derivar a régua de análise. null se não achar.
+ */
+export async function funcaoDoDonoDaCall(
+  accountId: string,
+  callId: string,
+): Promise<string | null> {
+  const admin = supabaseAdmin();
+  const { data } = await admin
+    .from("whatsapp_calls")
+    .select("user_id")
+    .eq("id", callId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  return funcaoDoUsuario(accountId, data?.user_id as string | null | undefined);
+}
+
+/**
+ * Função comercial de quem atende uma conversa (assigned_agent_id, senão o dono
+ * user_id). Usada para derivar a régua de análise da conversa. null se não achar.
+ */
+export async function funcaoDoDonoDaConversa(
+  accountId: string,
+  conversationId: string,
+): Promise<string | null> {
+  const admin = supabaseAdmin();
+  const { data } = await admin
+    .from("conversations")
+    .select("user_id, assigned_agent_id")
+    .eq("id", conversationId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  const owner =
+    (data?.assigned_agent_id as string | null) ??
+    (data?.user_id as string | null);
+  return funcaoDoUsuario(accountId, owner);
 }
 
 /**

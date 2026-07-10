@@ -19,11 +19,14 @@ import type { PostgrestError } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole } from "@/lib/auth/roles";
+import { supabaseAdmin } from "@/lib/flows/admin-client";
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+
+const FUNCOES_COMERCIAIS = ["closer", "sdr", "social_seller", "gestor"];
 
 // Map known SQLSTATEs from the RPCs (see migration 018) onto HTTP
 // statuses. The `error.code` field is the SQLSTATE; the `message`
@@ -58,35 +61,78 @@ export async function PATCH(
     const { userId } = await params;
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown }
+      | { role?: unknown; funcao?: unknown }
       | null;
-    const role = body?.role;
 
-    if (!isAccountRole(role)) {
+    const temRole = body != null && "role" in body;
+    const temFuncao = body != null && "funcao" in body;
+    if (!temRole && !temFuncao) {
       return NextResponse.json(
-        { error: "'role' must be one of owner, admin, agent, viewer" },
+        { error: "Informe 'role' e/ou 'funcao'." },
         { status: 400 },
       );
     }
 
-    // The RPC blocks promotion to / demotion from owner, but
-    // surface the friendlier 400 before crossing the wire too.
-    if (role === "owner") {
-      return NextResponse.json(
-        {
-          error:
-            "Use POST /api/account/transfer-ownership to promote a member to owner",
-        },
-        { status: 400 },
-      );
+    // Nível de acesso (RBAC) — via RPC SECURITY DEFINER.
+    if (temRole) {
+      const role = body?.role;
+      if (!isAccountRole(role)) {
+        return NextResponse.json(
+          { error: "'role' must be one of owner, admin, agent, viewer" },
+          { status: 400 },
+        );
+      }
+      if (role === "owner") {
+        return NextResponse.json(
+          {
+            error:
+              "Use POST /api/account/transfer-ownership to promote a member to owner",
+          },
+          { status: 400 },
+        );
+      }
+      const { error } = await ctx.supabase.rpc("set_member_role", {
+        p_user_id: userId,
+        p_new_role: role,
+      });
+      if (error) return rpcErrorToResponse(error);
     }
 
-    const { error } = await ctx.supabase.rpc("set_member_role", {
-      p_user_id: userId,
-      p_new_role: role,
-    });
-
-    if (error) return rpcErrorToResponse(error);
+    // Função comercial (define a régua de análise). null limpa. Atualiza via
+    // service client, mas só após confirmar que o alvo é desta conta.
+    if (temFuncao) {
+      const funcao = body?.funcao;
+      if (funcao !== null && !FUNCOES_COMERCIAIS.includes(funcao as string)) {
+        return NextResponse.json(
+          { error: "'funcao' inválida (closer, sdr, social_seller, gestor)." },
+          { status: 400 },
+        );
+      }
+      const admin = supabaseAdmin();
+      const { data: alvo } = await admin
+        .from("profiles")
+        .select("account_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!alvo || alvo.account_id !== ctx.accountId) {
+        return NextResponse.json(
+          { error: "Membro não pertence a esta conta." },
+          { status: 400 },
+        );
+      }
+      const { error: fErr } = await admin
+        .from("profiles")
+        .update({ funcao: funcao as string | null })
+        .eq("user_id", userId)
+        .eq("account_id", ctx.accountId);
+      if (fErr) {
+        console.error("[members PATCH] funcao update error:", fErr);
+        return NextResponse.json(
+          { error: "Falha ao atualizar a função." },
+          { status: 500 },
+        );
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

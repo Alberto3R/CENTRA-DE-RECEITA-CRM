@@ -180,7 +180,12 @@ export async function POST(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown; expiresInDays?: unknown; label?: unknown }
+      | {
+          role?: unknown;
+          expiresInDays?: unknown;
+          label?: unknown;
+          funcaoComercial?: unknown;
+        }
       | null;
 
     const role = body?.role;
@@ -247,6 +252,20 @@ export async function POST(request: Request) {
       label = trimmed === "" ? null : trimmed;
     }
 
+    // Função comercial (define a régua de análise da IA). Opcional; validada
+    // contra o conjunto permitido. Propagada ao profile no resgate do convite.
+    const FUNCOES_COMERCIAIS = ["closer", "sdr", "social_seller", "gestor"];
+    let funcaoComercial: string | null = null;
+    if (typeof body?.funcaoComercial === "string" && body.funcaoComercial) {
+      if (!FUNCOES_COMERCIAIS.includes(body.funcaoComercial)) {
+        return NextResponse.json(
+          { error: "'funcaoComercial' inválida." },
+          { status: 400 },
+        );
+      }
+      funcaoComercial = body.funcaoComercial;
+    }
+
     const { token, hash } = generateInviteToken();
 
     const { data, error } = await ctx.supabase
@@ -255,6 +274,7 @@ export async function POST(request: Request) {
         account_id: ctx.accountId,
         token_hash: hash,
         role,
+        funcao: funcaoComercial,
         created_by_user_id: ctx.userId,
         label,
         expires_at: expiresAt.toISOString(),

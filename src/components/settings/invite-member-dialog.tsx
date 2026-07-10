@@ -39,6 +39,14 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 
 type InviteRole = 'admin' | 'agent' | 'viewer';
+type FuncaoComercial = 'closer' | 'sdr' | 'social_seller' | 'gestor';
+
+const FUNCOES_COMERCIAIS: { value: FuncaoComercial; label: string }[] = [
+  { value: 'closer', label: 'Closer (fecha na conversa)' },
+  { value: 'sdr', label: 'SDR / Pré-vendas (qualifica + agenda)' },
+  { value: 'social_seller', label: 'Social Seller' },
+  { value: 'gestor', label: 'Gestor' },
+];
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -83,6 +91,8 @@ export function InviteMemberDialog({
 }: InviteMemberDialogProps) {
   const { account } = useAuth();
   const [role, setRole] = useState<InviteRole>('agent');
+  const [funcaoComercial, setFuncaoComercial] =
+    useState<FuncaoComercial>('closer');
   const [expiry, setExpiry] = useState<string>('7');
   const [label, setLabel] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -90,6 +100,7 @@ export function InviteMemberDialog({
 
   function reset() {
     setRole('agent');
+    setFuncaoComercial('closer');
     setExpiry('7');
     setLabel('');
     setResult(null);
@@ -115,6 +126,7 @@ export function InviteMemberDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           role,
+          funcaoComercial,
           expiresInDays: Number(expiry),
           label: trimmedLabel || undefined,
         }),
@@ -280,7 +292,7 @@ export function InviteMemberDialog({
 
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label className="text-muted-foreground">Função</Label>
+                <Label className="text-muted-foreground">Nível de acesso</Label>
                 <Select
                   value={role}
                   onValueChange={(v) => v && setRole(v as InviteRole)}
@@ -296,6 +308,31 @@ export function InviteMemberDialog({
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {ROLE_DESCRIPTIONS[role]}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Função comercial</Label>
+                <Select
+                  value={funcaoComercial}
+                  onValueChange={(v) =>
+                    v && setFuncaoComercial(v as FuncaoComercial)
+                  }
+                >
+                  <SelectTrigger className="w-full bg-muted border-border text-foreground">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FUNCOES_COMERCIAIS.map((f) => (
+                      <SelectItem key={f.value} value={f.value}>
+                        {f.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Define a régua de análise da IA nas conversas dessa pessoa —
+                  SDR é avaliado por qualificar e agendar; closer, por fechar.
                 </p>
               </div>
 
