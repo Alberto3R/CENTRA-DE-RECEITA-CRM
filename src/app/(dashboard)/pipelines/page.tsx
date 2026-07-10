@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
+import { GitBranch, Plus, ChevronDown, Settings, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useCan } from "@/hooks/use-can";
 import { useAuth } from "@/hooks/use-auth";
@@ -60,6 +60,7 @@ export default function PipelinesPage() {
   const [dateFilter, setDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [members, setMembers] = useState<{ id: string; full_name: string }[]>([]);
   const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
 
@@ -226,7 +227,28 @@ export default function PipelinesPage() {
       c.setDate(now.getDate() - days);
       return c;
     };
+    const q = searchQuery.trim().toLowerCase();
+    // Só dígitos, para casar telefone digitado com/sem formatação.
+    const qDigits = q.replace(/\D/g, "");
     return deals.filter((d) => {
+      if (q) {
+        const c = d.contact;
+        const alvos = [
+          d.title,
+          c?.name,
+          c?.email,
+          c?.phone,
+        ]
+          .filter(Boolean)
+          .map((s) => (s as string).toLowerCase());
+        const phoneDigits = (
+          c?.phone_normalized || c?.phone || ""
+        ).replace(/\D/g, "");
+        const casa =
+          alvos.some((s) => s.includes(q)) ||
+          (qDigits.length >= 3 && phoneDigits.includes(qDigits));
+        if (!casa) return false;
+      }
       if (dateFilter !== "all") {
         const created = new Date(d.created_at);
         if (dateFilter === "today") {
@@ -244,9 +266,13 @@ export default function PipelinesPage() {
       }
       return true;
     });
-  }, [deals, dateFilter, assigneeFilter, tagFilter]);
+  }, [deals, dateFilter, assigneeFilter, tagFilter, searchQuery]);
 
-  const filtroAtivo = dateFilter !== "all" || !!assigneeFilter || !!tagFilter;
+  const filtroAtivo =
+    dateFilter !== "all" ||
+    !!assigneeFilter ||
+    !!tagFilter ||
+    !!searchQuery.trim();
 
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
@@ -445,6 +471,15 @@ export default function PipelinesPage() {
       {/* Filtros do board */}
       {selectedPipelineId ? (
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar negócio: nome, e-mail, telefone..."
+              className="h-9 border-border bg-card pl-8 text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
           <span className="text-xs font-medium text-muted-foreground">Filtros</span>
           <select
             value={dateFilter}
@@ -489,6 +524,7 @@ export default function PipelinesPage() {
                 setDateFilter("all");
                 setAssigneeFilter("");
                 setTagFilter("");
+                setSearchQuery("");
               }}
               className="text-xs text-primary hover:underline"
             >
