@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Eye,
@@ -295,7 +295,8 @@ export function WhatsAppConfig() {
     }
   }
 
-  async function handleVerifyRegistration() {
+  async function handleVerifyRegistration(opts?: { silent?: boolean }) {
+    const silent = opts?.silent === true;
     setVerifyingRegistration(true);
     setRegistrationProbe(null);
     try {
@@ -304,22 +305,48 @@ export function WhatsAppConfig() {
       });
       const data = (await res.json()) as RegistrationProbe;
       setRegistrationProbe(data);
-      if (data.live) {
-        toast.success('O número está totalmente configurado — a Meta está entregando eventos.');
-      } else {
-        toast.error(
-          'O número não está totalmente registrado. Veja as verificações abaixo para saber qual etapa falhou.',
-          { duration: 8000 },
-        );
+      if (!silent) {
+        if (data.live) {
+          toast.success('O número está totalmente configurado — a Meta está entregando eventos.');
+        } else {
+          toast.error(
+            'O número não está totalmente registrado. Veja as verificações abaixo para saber qual etapa falhou.',
+            { duration: 8000 },
+          );
+        }
       }
       if (accountId) await fetchConfig(accountId);
     } catch (err) {
       console.error('verify-registration failed:', err);
-      toast.error('Não foi possível conectar ao endpoint de verificação.');
+      if (!silent) {
+        toast.error('Não foi possível conectar ao endpoint de verificação.');
+      }
     } finally {
       setVerifyingRegistration(false);
     }
   }
+
+  // Auto-reconciliação silenciosa ao abrir a página: números antigos
+  // (conectados reaproveitando token / antes do rastreamento de registro)
+  // mostram "Não registrado" mesmo estando CONNECTED e inscritos na Meta.
+  // Uma verificação silenciosa no primeiro load em que o número está
+  // conectado mas sem registered_at limpa o falso alarme em qualquer conta,
+  // sem depender do clique no botão. Roda no máximo uma vez por montagem.
+  const autoHealTriedRef = useRef(false);
+  useEffect(() => {
+    if (
+      !autoHealTriedRef.current &&
+      config &&
+      !config.registered_at &&
+      connectionStatus === 'connected'
+    ) {
+      autoHealTriedRef.current = true;
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      void handleVerifyRegistration({ silent: true });
+    }
+    // handleVerifyRegistration é estável o suficiente; o ref evita reexecução.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, connectionStatus]);
 
   async function handleReset() {
     if (!confirm('Isso vai excluir a configuração atual do WhatsApp para você reinseri-la. Continuar?')) {
@@ -472,7 +499,7 @@ export function WhatsAppConfig() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleVerifyRegistration}
+                onClick={() => handleVerifyRegistration()}
                 disabled={verifyingRegistration}
                 className="border-border bg-transparent text-foreground hover:bg-muted h-7"
               >

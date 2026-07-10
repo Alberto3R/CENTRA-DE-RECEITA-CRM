@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   getSubscribedApps,
@@ -100,12 +101,18 @@ export async function GET() {
   const errors: string[] = []
 
   // 1. Phone metadata
+  let phoneConnected = false
   try {
-    await verifyPhoneNumber({
+    const info = await verifyPhoneNumber({
       phoneNumberId: config.phone_number_id,
       accessToken,
     })
     checks.phone_metadata_ok = true
+    // CONNECTED = número registrado e ativo na Cloud API. É a prova
+    // (do lado da Meta) de que o /register já aconteceu — mesmo que este
+    // app nunca o tenha chamado (número migrado / embedded signup / token
+    // reaproveitado). Usado abaixo para auto-reconciliar registered_at.
+    phoneConnected = info.status === 'CONNECTED'
   } catch (err) {
     errors.push(
       `Phone metadata check failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -140,6 +147,38 @@ export async function GET() {
     )
   }
 
+  // Auto-reconciliação: um número que a Meta reporta CONNECTED e cujo WABA
+  // já está inscrito no app ESTÁ, de fato, registrado e entregando eventos —
+  // ainda que este app nunca tenha chamado /register (número migrado, embedded
+  // signup ou token reaproveitado, como o da SpectraX). Nesse caso, a coluna
+  // registered_at nula é só um rastreamento defasado: preenchemos aqui para
+  // limpar o falso alarme "Não registrado". Só reconciliamos quando a Meta
+  // confirma o estado real — nunca com base apenas na flag local.
+  let registeredAt = config.registered_at ?? null
+  let subscribedAppsAt = config.subscribed_apps_at ?? null
+  if (
+    !registeredAt &&
+    phoneConnected &&
+    checks.waba_subscribed_to_app === true
+  ) {
+    const agora = new Date().toISOString()
+    const { error: healErr } = await supabaseAdmin()
+      .from('whatsapp_config')
+      .update({
+        registered_at: agora,
+        subscribed_apps_at: subscribedAppsAt ?? agora,
+        last_registration_error: null,
+      })
+      .eq('account_id', accountId)
+    if (!healErr) {
+      registeredAt = agora
+      subscribedAppsAt = subscribedAppsAt ?? agora
+      checks.locally_marked_registered = true
+    } else {
+      console.error('[verify-registration] auto-heal falhou:', healErr)
+    }
+  }
+
   const live =
     checks.phone_metadata_ok &&
     (checks.waba_subscribed_to_app ?? false) &&
@@ -149,8 +188,10 @@ export async function GET() {
     live,
     checks,
     errors,
-    last_registration_error: config.last_registration_error ?? null,
-    registered_at: config.registered_at ?? null,
-    subscribed_apps_at: config.subscribed_apps_at ?? null,
+    last_registration_error: registeredAt
+      ? null
+      : (config.last_registration_error ?? null),
+    registered_at: registeredAt,
+    subscribed_apps_at: subscribedAppsAt,
   })
 }

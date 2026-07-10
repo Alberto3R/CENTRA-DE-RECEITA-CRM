@@ -21,6 +21,10 @@ export interface MetaPhoneInfo {
   display_phone_number: string
   verified_name?: string
   quality_rating?: string
+  /** CONNECTED quando o número está registrado e ativo na Cloud API. */
+  status?: string
+  /** CLOUD_API quando o número roda na Cloud API (vs. on-premise). */
+  platform_type?: string
 }
 
 interface MetaErrorResponse {
@@ -55,7 +59,7 @@ export async function verifyPhoneNumber(
   args: VerifyPhoneNumberArgs
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
-  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating`
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,status,platform_type`
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
