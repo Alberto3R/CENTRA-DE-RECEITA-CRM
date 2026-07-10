@@ -13,7 +13,7 @@ import { assertCreditos, consumirCreditos } from "@/lib/billing/quota";
 import { carregarSalesConfig } from "@/lib/ai/config";
 import { validarInsumo } from "@/lib/ai/validar-insumo";
 import { normalizarTranscricao } from "@/lib/ai/transcricao-extractor";
-import { analisarCall } from "@/lib/ai/analise-call";
+import { analisarCall, type ObjetivoAnalise } from "@/lib/ai/analise-call";
 import { calcularCustoUsd } from "@/lib/ai/custo";
 import * as store from "@/lib/ai/store";
 
@@ -39,15 +39,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // O sellerId vem do cliente e não é confiável — garante que é desta conta.
+    // O sellerId vem do cliente e não é confiável — garante que é desta conta
+    // e deriva a RÉGUA de análise da função do vendedor (sdr → qualificar+agendar;
+    // demais → closer/fechamento).
+    let objetivo: ObjetivoAnalise = "closer";
     if (body.sellerId) {
-      const ok = await store.sellerPertenceAConta(ctx.accountId, body.sellerId);
-      if (!ok) {
+      const seller = await store.buscarSeller(ctx.accountId, body.sellerId);
+      if (!seller) {
         return NextResponse.json(
           { error: "Vendedor selecionado não pertence a esta conta." },
           { status: 400 },
         );
       }
+      objetivo = seller.funcao === "sdr" ? "sdr" : "closer";
     }
 
     const config = await carregarSalesConfig(ctx.supabase, ctx.accountId);
@@ -84,7 +88,7 @@ export async function POST(request: Request) {
 
     try {
       const { textoNormalizado } = normalizarTranscricao(body.texto, body.formato);
-      const resultado = await analisarCall(textoNormalizado, config);
+      const resultado = await analisarCall(textoNormalizado, config, objetivo);
 
       const salva = await store.inserirAnalise({
         accountId: ctx.accountId,

@@ -133,6 +133,27 @@ export default function AnaliseCallPage() {
   const [carregandoConversa, setCarregandoConversa] = useState(false);
   const [origem, setOrigem] = useState<string | null>(null);
 
+  // Vendedor da conversa — a FUNÇÃO dele (closer/sdr) define a régua de análise.
+  const [sellers, setSellers] = useState<
+    { id: string; nome: string; funcao: string }[]
+  >([]);
+  const [sellerId, setSellerId] = useState<string>("");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/ai/sellers");
+        const j = await res.json();
+        if (res.ok && Array.isArray(j.sellers)) setSellers(j.sellers);
+      } catch {
+        /* silencioso — o seletor apenas some se não carregar */
+      }
+    })();
+  }, []);
+
+  const sellerSel = sellers.find((s) => s.id === sellerId);
+  const reguaSdr = sellerSel?.funcao === "sdr";
+
   const carregarHistorico = useCallback(async () => {
     setCarregandoHist(true);
     try {
@@ -252,7 +273,11 @@ export default function AnaliseCallPage() {
       const res = await fetch("/api/ai/analise-call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto, origem: origem ?? undefined }),
+        body: JSON.stringify({
+          texto,
+          origem: origem ?? undefined,
+          sellerId: sellerId || undefined,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -428,6 +453,35 @@ export default function AnaliseCallPage() {
       </div>
 
       <div className="flex flex-col gap-3">
+        {sellers.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Vendedor da conversa
+            </span>
+            <select
+              value={sellerId}
+              onChange={(e) => setSellerId(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="">Não informar (analisa como fechamento)</option>
+              {sellers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nome}
+                </option>
+              ))}
+            </select>
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                reguaSdr
+                  ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                  : "bg-primary/15 text-primary"
+              }`}
+              title="A régua de análise vem da função do vendedor selecionado."
+            >
+              Régua: {reguaSdr ? "SDR — qualificar + agendar" : "Closer — fechar na conversa"}
+            </span>
+          </div>
+        ) : null}
         <textarea
           value={texto}
           onChange={(e) => setTexto(e.target.value)}

@@ -89,6 +89,51 @@ export const DIMENSOES_3R: DimensaoSpec[] = [
   },
 ];
 
+/**
+ * Dimensões da régua SDR / pré-vendas. O objetivo do SDR NÃO é fechar na
+ * conversa — é qualificar o lead e agendar a call com o closer. Por isso a
+ * régua avalia descoberta, geração de interesse e, sobretudo, agendamento com
+ * compromisso (anti no-show) — não ancoragem de preço nem fechamento.
+ */
+export const DIMENSOES_SDR: DimensaoSpec[] = [
+  {
+    key: "abertura_enquadramento",
+    label: "Abertura & Enquadramento",
+    descricao:
+      "Abriu com contexto e deixou claro o porquê do contato? Prendeu a atenção nos primeiros segundos e enquadrou a conversa (sem já tentar vender)?",
+  },
+  {
+    key: "qualificacao_fit",
+    label: "Qualificação & Fit",
+    descricao:
+      "Confirmou perfil/ICP, autoridade (fala com o decisor?), necessidade e momento? Descobriu se faz sentido passar pro closer ou descartar?",
+  },
+  {
+    key: "descoberta_dor",
+    label: "Descoberta da Dor",
+    descricao:
+      "Fez perguntas que revelaram a dor real e o impacto dela, gerando consciência do problema no lead — em vez de só apresentar a empresa?",
+  },
+  {
+    key: "geracao_interesse",
+    label: "Geração de Interesse",
+    descricao:
+      "Conectou a dor ao valor de uma conversa com o especialista/closer, criando desejo pela call — sem tentar apresentar solução, preço ou fechar na hora (isso é papel do closer)?",
+  },
+  {
+    key: "agendamento",
+    label: "Agendamento",
+    descricao:
+      'Propôs e MARCOU a call com dia e horário específicos? Ofereceu opções concretas em vez de "depois a gente se fala"?',
+  },
+  {
+    key: "compromisso_proximos_passos",
+    label: "Compromisso & Próximos Passos",
+    descricao:
+      'Reduziu o risco de no-show (confirmou dia/hora, alinhou expectativa, deixou próximos passos claros) e contornou objeções ao avanço ("manda por e-mail", "só quero preço", "não tenho tempo") mantendo o agendamento?',
+  },
+];
+
 /** Preset de fábrica: método 3R, sem customização (motores usam texto verbatim). */
 export const CONFIG_3R: MetodoConfig = {
   metodoNome: "3R",

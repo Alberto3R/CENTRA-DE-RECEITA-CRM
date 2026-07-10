@@ -16,12 +16,20 @@ import {
   toolsCacheadas,
   type UsoTokens,
 } from "./anthropic";
-import { CONFIG_3R, type MetodoConfig } from "./method-config";
+import { CONFIG_3R, DIMENSOES_SDR, type MetodoConfig } from "./method-config";
 import {
   buildAnaliseTool,
   buildSystemPrompt,
+  SYSTEM_PROMPT_SDR,
   PROMPT_VERSAO,
 } from "./prompts/analise-call-v1";
+
+/**
+ * Objetivo da conversa — define a RÉGUA de análise.
+ * - "closer": fechar a venda na conversa (régua 3R padrão).
+ * - "sdr": qualificar o lead e agendar a call (régua de pré-vendas).
+ */
+export type ObjetivoAnalise = "closer" | "sdr";
 
 // ---------------------------------------------------------------------------
 // Zod — schema do resultado montado a partir das chaves de dimensão da conta.
@@ -101,19 +109,26 @@ export interface ResultadoAnalise {
 export async function analisarCall(
   transcricaoNormalizada: string,
   config: MetodoConfig = CONFIG_3R,
+  objetivo: ObjetivoAnalise = "closer",
 ): Promise<ResultadoAnalise> {
   if (transcricaoNormalizada.trim() === "") {
     throw new Error("Transcrição vazia: não há o que analisar.");
   }
 
-  const tool = buildAnaliseTool(config.dimensoes);
-  const schema = montarAnaliseSchema(config.dimensoes.map((d) => d.key));
+  // A régua SDR (qualificar + agendar) só se aplica ao preset de fábrica.
+  // Se a conta customizou o método, respeitamos a config dela.
+  const usarSdr = objetivo === "sdr" && !config.customizado;
+  const dimensoes = usarSdr ? DIMENSOES_SDR : config.dimensoes;
+  const systemPrompt = usarSdr ? SYSTEM_PROMPT_SDR : buildSystemPrompt(config);
+
+  const tool = buildAnaliseTool(dimensoes);
+  const schema = montarAnaliseSchema(dimensoes.map((d) => d.key));
   const client = getAnthropic();
 
   const resposta = await client.messages.create({
     model: MODELO_ANALISE,
     max_tokens: 16000,
-    system: systemCacheado(buildSystemPrompt(config)),
+    system: systemCacheado(systemPrompt),
     tools: toolsCacheadas([tool]),
     tool_choice: { type: "tool", name: tool.name },
     messages: [
