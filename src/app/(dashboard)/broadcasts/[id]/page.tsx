@@ -155,6 +155,7 @@ export default function BroadcastDetailPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sendingDraft, setSendingDraft] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -221,6 +222,26 @@ export default function BroadcastDetailPage() {
     const csv = toCsv([header, ...rows]);
     const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
     downloadBlob(`broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);
+  }
+
+  async function handleSendDraft() {
+    setSendingDraft(true);
+    try {
+      const res = await fetch(`/api/whatsapp/broadcast/${broadcastId}/send`, {
+        method: 'POST',
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(j.error ?? 'Falha ao enviar o rascunho.');
+        return;
+      }
+      toast.success(`Enviando para ${j.total ?? 0} contato(s)…`);
+      window.location.reload();
+    } catch {
+      toast.error('Erro de rede ao enviar o rascunho.');
+    } finally {
+      setSendingDraft(false);
+    }
   }
 
   async function handleDelete() {
@@ -303,6 +324,24 @@ export default function BroadcastDetailPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+        {broadcast.status === 'draft' && (
+          <Button
+            size="sm"
+            onClick={handleSendDraft}
+            disabled={sendingDraft}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            title="Resolve o público salvo, cria os destinatários e envia."
+          >
+            {sendingDraft ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Enviar agora
+          </Button>
+        )}
+
         {/* Delete — inline-confirm pattern matches the pipeline-settings
             "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
             because orphaning in-flight Meta messages would leave the
@@ -345,6 +384,7 @@ export default function BroadcastDetailPage() {
             Excluir
           </Button>
         )}
+        </div>
       </div>
 
       {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}
