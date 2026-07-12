@@ -28,10 +28,19 @@ interface Step4Props {
   template: MessageTemplate;
   audience: AudienceConfig;
   onSend: () => void;
+  /** Agenda o disparo para `whenIso` (ISO). O worker envia quando vencer. */
+  onSchedule?: (whenIso: string) => void;
   onSaveDraft?: () => void;
   onBack: () => void;
   isProcessing: boolean;
   progress: number;
+}
+
+/** datetime-local (hora local) → ISO UTC. '' se vazio. */
+function localToIso(local: string): string {
+  if (!local) return '';
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
 
 export function Step4ScheduleSend({
@@ -40,6 +49,7 @@ export function Step4ScheduleSend({
   template,
   audience,
   onSend,
+  onSchedule,
   onSaveDraft,
   onBack,
   isProcessing,
@@ -48,6 +58,12 @@ export function Step4ScheduleSend({
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
+  const [mode, setMode] = useState<'now' | 'schedule'>('now');
+  const [scheduleAt, setScheduleAt] = useState('');
+
+  const scheduleIso = localToIso(scheduleAt);
+  const scheduleValid =
+    mode === 'now' || (!!scheduleIso && new Date(scheduleIso).getTime() > Date.now());
 
   useEffect(() => {
     async function calculateReach() {
@@ -142,6 +158,54 @@ export function Step4ScheduleSend({
         </div>
       </div>
 
+      {/* Quando enviar */}
+      {onSchedule && (
+        <div className="space-y-3">
+          <label className="block text-sm font-medium text-foreground">Quando enviar</label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setMode('now')}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${
+                mode === 'now'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-muted text-muted-foreground'
+              }`}
+            >
+              Enviar agora
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('schedule')}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${
+                mode === 'schedule'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-muted text-muted-foreground'
+              }`}
+            >
+              Agendar
+            </button>
+          </div>
+          {mode === 'schedule' && (
+            <div>
+              <Input
+                type="datetime-local"
+                value={scheduleAt}
+                onChange={(e) => setScheduleAt(e.target.value)}
+                className="border-border bg-muted text-foreground"
+              />
+              {!scheduleValid && scheduleAt ? (
+                <p className="mt-1 text-xs text-red-400">Escolha uma data/hora no futuro.</p>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  O envio roda no servidor no horário marcado — não precisa manter a página aberta.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Processing overlay */}
       {isProcessing && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
@@ -189,13 +253,13 @@ export function Step4ScheduleSend({
           <DialogTrigger
             render={
               <Button
-                disabled={!name.trim() || isProcessing}
+                disabled={!name.trim() || isProcessing || !scheduleValid}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               />
             }
           >
             <Send className="h-4 w-4" />
-            Enviar disparo
+            {mode === 'schedule' ? 'Agendar disparo' : 'Enviar disparo'}
           </DialogTrigger>
           <DialogContent className="border-border bg-popover sm:max-w-md">
             <DialogHeader>
@@ -219,12 +283,13 @@ export function Step4ScheduleSend({
               <Button
                 onClick={() => {
                   setShowConfirm(false);
-                  onSend();
+                  if (mode === 'schedule' && onSchedule) onSchedule(scheduleIso);
+                  else onSend();
                 }}
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 <Send className="h-4 w-4" />
-                Confirmar e enviar
+                {mode === 'schedule' ? 'Confirmar agendamento' : 'Confirmar e enviar'}
               </Button>
             </DialogFooter>
           </DialogContent>
