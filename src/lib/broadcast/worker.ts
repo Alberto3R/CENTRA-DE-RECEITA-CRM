@@ -264,14 +264,19 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
     await admin.from("broadcasts").update({ status: "sending" }).eq("id", b.id);
   }
 
-  // Candidatos a dreno: sending ocioso (takeover) OU recém-promovidos acima.
+  // Candidatos a dreno (status 'sending'):
+  //   - scheduled_at NÃO nulo → foi agendado/rascunho promovido pelo worker
+  //     (sem cliente ativo) → drena já;
+  //   - scheduled_at nulo (é um "Enviar agora" client-side) → só drena se
+  //     ficou OCIOSO > 2min (a aba fechou no meio) — takeover, sem colidir
+  //     com o cliente que está enviando.
   const { data: sending } = await admin
     .from("broadcasts")
     .select(
       "id, account_id, template_name, template_language, template_variables, status, updated_at",
     )
     .eq("status", "sending")
-    .lte("updated_at", staleIso)
+    .or(`scheduled_at.not.is.null,updated_at.lte.${staleIso}`)
     .order("updated_at", { ascending: true })
     .limit(20);
 
