@@ -44,6 +44,7 @@ export default function NewBroadcastPage() {
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
+  const [channelId, setChannelId] = useState('');
 
   async function handleSend() {
     if (!template) return;
@@ -61,6 +62,7 @@ export default function NewBroadcastPage() {
         },
         variables,
         headerMediaUrl,
+        channelId: channelId || undefined,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -88,6 +90,7 @@ export default function NewBroadcastPage() {
           },
           variables,
           headerMediaUrl,
+          channelId: channelId || undefined,
         },
         whenIso,
       );
@@ -131,6 +134,7 @@ export default function NewBroadcastPage() {
     const { error } = await supabase.from('broadcasts').insert({
       user_id: user.id,
       account_id: accountId,
+      channel_id: channelId || null,
       name: name.trim(),
       template_name: template.name,
       template_language: template.language ?? 'en_US',
@@ -253,6 +257,8 @@ export default function NewBroadcastPage() {
               onSend={handleSend}
               onSchedule={handleSchedule}
               onSaveDraft={handleSaveDraft}
+              channelId={channelId}
+              onChannelChange={setChannelId}
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
               progress={progress}

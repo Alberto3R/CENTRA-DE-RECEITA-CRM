@@ -34,6 +34,16 @@ interface Step4Props {
   onBack: () => void;
   isProcessing: boolean;
   progress: number;
+  /** Multi-canal: canal de onde o disparo sai (vazio = primário). */
+  channelId?: string;
+  onChannelChange?: (id: string) => void;
+}
+
+interface ChannelLite {
+  id: string;
+  label: string | null;
+  phone_number_id: string;
+  is_primary: boolean | null;
 }
 
 /** datetime-local (hora local) → ISO UTC. '' se vazio. */
@@ -54,10 +64,28 @@ export function Step4ScheduleSend({
   onBack,
   isProcessing,
   progress,
+  channelId,
+  onChannelChange,
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
+  const [channels, setChannels] = useState<ChannelLite[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, label, phone_number_id, is_primary')
+        .order('is_primary', { ascending: false });
+      const rows = (data ?? []) as ChannelLite[];
+      setChannels(rows);
+      // Default: canal primário (se o pai ainda não escolheu).
+      if (!channelId && rows[0] && onChannelChange) onChannelChange(rows[0].id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [mode, setMode] = useState<'now' | 'schedule'>('now');
   const [scheduleAt, setScheduleAt] = useState('');
 
@@ -125,6 +153,27 @@ export function Step4ScheduleSend({
           className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
         />
       </div>
+
+      {/* Canal de envio (multi-canal) */}
+      {channels.length > 1 && (
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-foreground">
+            Enviar do canal
+          </label>
+          <select
+            value={channelId ?? ''}
+            onChange={(e) => onChannelChange?.(e.target.value)}
+            className="h-9 w-full max-w-sm rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
+          >
+            {channels.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                {ch.label || ch.phone_number_id}
+                {ch.is_primary ? ' (primário)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Summary Card */}
       <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">

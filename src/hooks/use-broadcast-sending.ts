@@ -46,6 +46,8 @@ interface BroadcastPayload {
    * falls back to the template's stored URL only when this is empty.
    */
   headerMediaUrl?: string;
+  /** Canal (whatsapp_config.id) de onde o disparo sai. Vazio = primário. */
+  channelId?: string;
 }
 
 interface UseBroadcastSendingReturn {
@@ -367,6 +369,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         .insert({
           user_id: user.id,
           account_id: accountId,
+          channel_id: payload.channelId || null,
           name: payload.name,
           template_name: payload.template.name,
           template_language: payload.template.language ?? 'en_US',
@@ -490,6 +493,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
               recipients: apiRecipients,
               template_name: payload.template.name,
               template_language: payload.template.language ?? 'en_US',
+              channelId: payload.channelId || undefined,
             }),
           });
 
@@ -610,6 +614,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         .insert({
           user_id: user.id,
           account_id: accountId,
+          channel_id: payload.channelId || null,
           name: payload.name,
           template_name: payload.template.name,
           template_language: payload.template.language ?? 'en_US',
