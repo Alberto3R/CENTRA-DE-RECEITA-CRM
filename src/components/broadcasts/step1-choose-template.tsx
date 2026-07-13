@@ -17,9 +17,11 @@ interface Step1Props {
   onSelect: (template: MessageTemplate) => void;
   onNext: () => void;
   onBack: () => void;
+  /** Canal escolhido — mostra só os modelos daquele número (WABA). */
+  channelId?: string;
 }
 
-export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack }: Step1Props) {
+export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack, channelId }: Step1Props) {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,15 +29,20 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   useEffect(() => {
     async function fetchTemplates() {
       try {
+        setLoading(true);
         const supabase = createClient();
         // Only APPROVED templates can be sent via Meta — anything else
         // would 400 at broadcast time. Hide them rather than letting
         // the user pick a template that will fail.
-        const { data, error: fetchError } = await supabase
+        let q = supabase
           .from('message_templates')
           .select('*')
-          .eq('status', 'APPROVED')
-          .order('created_at', { ascending: false });
+          .eq('status', 'APPROVED');
+        // Multi-canal: só os modelos do canal de envio (WABA dele).
+        if (channelId) q = q.eq('channel_id', channelId);
+        const { data, error: fetchError } = await q.order('created_at', {
+          ascending: false,
+        });
 
         if (fetchError) throw fetchError;
         setTemplates(data ?? []);
@@ -47,7 +54,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     }
 
     fetchTemplates();
-  }, []);
+  }, [channelId]);
 
   if (loading) {
     return (

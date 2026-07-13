@@ -210,13 +210,21 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     // actually be sent (anything else 400s at send time), matching the
     // broadcast picker.
     void (async () => {
+      // Multi-canal: automações enviam pelo canal PRIMÁRIO — mostra só os
+      // templates dele (WABA do primário). Fallback: account-wide.
+      const { data: primaryCh } = await supabase
+        .from("whatsapp_config")
+        .select("id")
+        .eq("is_primary", true)
+        .maybeSingle()
+      let templatesQuery = supabase
+        .from("message_templates")
+        .select("*")
+        .eq("status", "APPROVED")
+      if (primaryCh?.id) templatesQuery = templatesQuery.eq("channel_id", primaryCh.id)
       const [tagsRes, templatesRes, customFieldsRes] = await Promise.all([
         supabase.from("tags").select("*").order("name"),
-        supabase
-          .from("message_templates")
-          .select("*")
-          .eq("status", "APPROVED")
-          .order("name"),
+        templatesQuery.order("name"),
         supabase.from("custom_fields").select("*").order("field_name"),
       ])
       if (cancelled) return

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -45,6 +45,28 @@ export default function NewBroadcastPage() {
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
   const [channelId, setChannelId] = useState('');
+  // Multi-canal: o canal é escolhido AQUI (no topo) porque os templates são
+  // por canal — o Step1 filtra por ele.
+  const [channels, setChannels] = useState<
+    { id: string; label: string | null; phone_number_id: string; is_primary: boolean | null }[]
+  >([]);
+
+  useEffect(() => {
+    if (!accountId) return;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, label, phone_number_id, is_primary')
+        .eq('account_id', accountId)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true });
+      const rows = (data ?? []) as typeof channels;
+      setChannels(rows);
+      setChannelId((prev) => prev || rows[0]?.id || '');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   async function handleSend() {
     if (!template) return;
@@ -172,6 +194,32 @@ export default function NewBroadcastPage() {
         </p>
       </div>
 
+      {/* Canal de envio (multi-canal) — escolhido no início: os modelos são
+          por canal. Trocar o canal reinicia a escolha de modelo. */}
+      {channels.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/50 px-3 py-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            Enviar do canal
+          </span>
+          <select
+            value={channelId}
+            onChange={(e) => {
+              setChannelId(e.target.value);
+              setTemplate(null);
+              setCurrentStep(0);
+            }}
+            className="h-8 rounded-lg border border-border bg-muted px-2 text-sm text-foreground outline-none focus:border-primary"
+          >
+            {channels.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                {ch.label || ch.phone_number_id}
+                {ch.is_primary ? ' (primário)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Step Indicator */}
       <div className="flex items-center justify-between">
         {steps.map((step, index) => {
@@ -227,6 +275,7 @@ export default function NewBroadcastPage() {
               onSelect={setTemplate}
               onNext={() => setCurrentStep(1)}
               onBack={() => router.push('/broadcasts')}
+              channelId={channelId || undefined}
             />
           )}
           {currentStep === 1 && (
@@ -257,8 +306,6 @@ export default function NewBroadcastPage() {
               onSend={handleSend}
               onSchedule={handleSchedule}
               onSaveDraft={handleSaveDraft}
-              channelId={channelId}
-              onChannelChange={setChannelId}
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
               progress={progress}
