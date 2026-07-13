@@ -110,7 +110,7 @@ async function drainBroadcast(
   const { data: rawTemplate } = await admin
     .from("message_templates")
     .select("*")
-    .eq("account_id", b.account_id)
+    .eq("channel_id", config.id)
     .eq("name", b.template_name)
     .eq("language", b.template_language || "en_US")
     .maybeSingle();

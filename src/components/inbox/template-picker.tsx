@@ -34,6 +34,8 @@ interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
+  /** Canal da conversa — mostra só os templates daquele número (WABA). */
+  channelId?: string | null;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -78,6 +80,7 @@ export function TemplatePicker({
   open,
   onOpenChange,
   onSelect,
+  channelId,
 }: TemplatePickerProps) {
   const { accountId } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -106,12 +109,14 @@ export function TemplatePicker({
         return;
       }
 
-      const { data, error } = await supabase
+      let q = supabase
         .from("message_templates")
         .select("*")
         .eq("account_id", accountId)
-        .eq("status", "APPROVED")
-        .order("created_at", { ascending: false });
+        .eq("status", "APPROVED");
+      // Multi-canal: só os templates do canal da conversa (WABA dele).
+      if (channelId) q = q.eq("channel_id", channelId);
+      const { data, error } = await q.order("created_at", { ascending: false });
 
       if (cancelled) return;
       if (error) {
@@ -126,7 +131,7 @@ export function TemplatePicker({
     return () => {
       cancelled = true;
     };
-  }, [open, accountId]);
+  }, [open, accountId, channelId]);
 
   function resetSelection() {
     setSelected(null);

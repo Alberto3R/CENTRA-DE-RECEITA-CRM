@@ -164,7 +164,7 @@ export async function POST(request: Request) {
     const { data: rawTemplateRow } = await supabase
       .from('message_templates')
       .select('*')
-      .eq('account_id', accountId)
+      .eq('channel_id', config.id)
       .eq('name', template_name)
       .eq('language', template_language || 'en_US')
       .maybeSingle()

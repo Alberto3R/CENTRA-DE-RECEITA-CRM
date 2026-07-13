@@ -123,7 +123,7 @@ function extractSampleValues(
   return sv
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
@@ -151,8 +151,13 @@ export async function POST() {
       )
     }
 
-    // Multi-canal: sincroniza os templates do canal primário (WABA dele).
-    const config = await resolveChannelConfig(supabase, accountId)
+    // Multi-canal: sincroniza os templates do canal escolhido (?channelId) ou
+    // do primário — cada número tem sua própria WABA/templates.
+    const config = await resolveChannelConfig(
+      supabase,
+      accountId,
+      new URL(request.url).searchParams.get('channelId'),
+    )
 
     if (!config) {
       return NextResponse.json(
@@ -235,6 +240,7 @@ export async function POST() {
         // route. account_id is NOT NULL on message_templates
         // post-017, so an INSERT without it errors.
         account_id: accountId,
+        channel_id: config.id,
         user_id: user.id,
         name: t.name,
         category: normalizeCategory(t.category),
@@ -255,7 +261,7 @@ export async function POST() {
       const { data: existing, error: lookupErr } = await supabase
         .from('message_templates')
         .select('id')
-        .eq('account_id', accountId)
+        .eq('channel_id', config.id)
         .eq('name', t.name)
         .eq('language', t.language)
         .maybeSingle()

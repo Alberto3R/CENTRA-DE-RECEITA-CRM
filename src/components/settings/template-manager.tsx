@@ -138,10 +138,15 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
 
 export function TemplateManager() {
   const supabase = createClient();
-  const { user, loading: authLoading } = useAuth();
+  const { user, accountId, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  // Multi-canal: cada número (canal) tem seus templates (WABA própria).
+  const [channels, setChannels] = useState<
+    { id: string; label: string | null; phone_number_id: string; is_primary: boolean | null }[]
+  >([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -189,22 +194,38 @@ export function TemplateManager() {
   }, [bodyVarCount]);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
+    if (authLoading || !user || !accountId) {
+      if (!authLoading) setLoading(false);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, label, phone_number_id, is_primary')
+        .eq('account_id', accountId)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true });
+      const rows = (data ?? []) as typeof channels;
+      setChannels(rows);
+      const first = rows[0]?.id ?? null;
+      setSelectedChannelId(first);
+      await fetchTemplates(first);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.id, accountId]);
+
+  async function fetchTemplates(channelId: string | null) {
+    if (!channelId) {
+      setTemplates([]);
       setLoading(false);
       return;
     }
-    fetchTemplates(user.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user?.id]);
-
-  async function fetchTemplates(userId: string) {
     try {
       setLoading(true);
       const { data, error } = await supabase
         .from('message_templates')
         .select('*')
-        .eq('user_id', userId)
+        .eq('channel_id', channelId)
         .order('created_at', { ascending: false });
       if (error) throw error;
       setTemplates(data || []);
@@ -214,6 +235,11 @@ export function TemplateManager() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function selectChannel(id: string) {
+    setSelectedChannelId(id);
+    void fetchTemplates(id);
   }
 
   function buildSubmitPayload() {
@@ -289,7 +315,11 @@ export function TemplateManager() {
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSubmitPayload()),
+        body: JSON.stringify(
+          isEdit
+            ? buildSubmitPayload()
+            : { ...buildSubmitPayload(), channelId: selectedChannelId },
+        ),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -300,7 +330,7 @@ export function TemplateManager() {
       }
       // Refresh first, then close — re-opening the dialog
       // immediately should not show a stale list.
-      if (user) await fetchTemplates(user.id);
+      await fetchTemplates(selectedChannelId);
       toast.success(
         data.dry_run
           ? isEdit
@@ -325,7 +355,10 @@ export function TemplateManager() {
     if (!user) return;
     setSyncing(true);
     try {
-      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+      const res = await fetch(
+        `/api/whatsapp/templates/sync${selectedChannelId ? `?channelId=${selectedChannelId}` : ''}`,
+        { method: 'POST' },
+      );
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data?.error || `Falha na sincronização (HTTP ${res.status})`);
@@ -354,7 +387,7 @@ export function TemplateManager() {
           { duration: 10000 },
         );
       }
-      await fetchTemplates(user.id);
+      await fetchTemplates(selectedChannelId);
     } catch (err) {
       console.error('Template sync error:', err);
       toast.error(err instanceof Error ? err.message : 'Falha ao sincronizar os modelos');
@@ -526,6 +559,28 @@ export function TemplateManager() {
           </div>
         }
       />
+
+      {/* Barra de canais — templates são por número (WABA). */}
+      {channels.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Canal</span>
+          {channels.map((ch) => (
+            <button
+              key={ch.id}
+              type="button"
+              onClick={() => selectChannel(ch.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                ch.id === selectedChannelId
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-muted text-muted-foreground hover:bg-muted/70'
+              }`}
+            >
+              {ch.label || ch.phone_number_id}
+              {ch.is_primary && <span className="text-amber-400">★</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       {templates.length === 0 ? (
         <Card>

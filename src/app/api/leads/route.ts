@@ -162,16 +162,16 @@ async function maybeSendWelcome(
 ) {
   if (!templateName) return
 
+  const wa = await resolveChannelConfig(db, accountId)
+  if (!wa?.phone_number_id || !wa?.access_token) return
+
   const { data: tpl } = await db
     .from('message_templates')
     .select('status, language')
-    .eq('account_id', accountId)
+    .eq('channel_id', wa.id)
     .eq('name', templateName)
     .maybeSingle()
   if (!tpl || tpl.status !== 'APPROVED') return
-
-  const wa = await resolveChannelConfig(db, accountId)
-  if (!wa?.phone_number_id || !wa?.access_token) return
 
   let token: string
   try {

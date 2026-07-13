@@ -1182,6 +1182,9 @@ export function MessageThread({
         open={templateModalOpen}
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
+        channelId={
+          (conversation as { channel_id?: string | null } | null)?.channel_id
+        }
       />
     </div>
   );

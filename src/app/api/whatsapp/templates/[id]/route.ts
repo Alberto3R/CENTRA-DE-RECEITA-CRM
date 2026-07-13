@@ -92,7 +92,7 @@ export async function PATCH(
     // meta_template_id and status — fetch explicitly.
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, status, meta_template_id, language')
+      .select('id, name, status, meta_template_id, language, channel_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -139,7 +139,7 @@ export async function PATCH(
     }
 
     if (!isDryRun()) {
-      const config = await resolveChannelConfig(supabase, accountId)
+      const config = await resolveChannelConfig(supabase, accountId, existing.channel_id)
       if (!config) {
         return NextResponse.json(
           { error: 'WhatsApp not configured.' },
@@ -266,7 +266,7 @@ export async function DELETE(
 
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, meta_template_id')
+      .select('id, name, meta_template_id, channel_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -275,7 +275,7 @@ export async function DELETE(
     }
 
     if (existing.meta_template_id && !isDryRun()) {
-      const config = await resolveChannelConfig(supabase, accountId)
+      const config = await resolveChannelConfig(supabase, accountId, existing.channel_id)
       if (!config || !config.waba_id) {
         return NextResponse.json(
           { error: 'WhatsApp not configured — cannot delete on Meta.' },
