@@ -320,7 +320,9 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // the admin who saved the WhatsApp config.
           config.user_id,
           decryptedAccessToken,
-          phoneNumberId
+          phoneNumberId,
+          // Canal: a própria linha de config casada pelo phone_number_id.
+          config.id
         )
       }
     }
@@ -557,7 +559,10 @@ async function processMessage(
   accessToken: string,
   // The brand's own number id — needed so the AI agent can send its
   // reply back out through the same line.
-  phoneNumberId: string
+  phoneNumberId: string,
+  // Canal (whatsapp_config.id) em que a mensagem chegou — amarra a conversa
+  // ao número certo (multi-canal).
+  channelId: string
 ) {
   // Fase 4 (BSUID): com WhatsApp usernames, o remetente pode chegar
   // identificado por um BSUID ("BR.13491208…") em vez do telefone. Olhamos
@@ -594,7 +599,8 @@ async function processMessage(
   const conversation = await findOrCreateConversation(
     accountId,
     configOwnerUserId,
-    contactRecord.id
+    contactRecord.id,
+    channelId
   )
   if (!conversation) return
 
@@ -1076,17 +1082,40 @@ async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
+  // Canal (whatsapp_config.id) em que a mensagem chegou. Multi-canal: um
+  // mesmo contato falando em dois números vira DUAS conversas.
+  channelId: string,
 ) {
-  // Look for existing conversation in this account
+  // Look for existing conversation in this account + channel.
   const { data: existing, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    .eq('channel_id', channelId)
     .single()
 
   if (!findError && existing) {
     return existing
+  }
+
+  // Retrocompatibilidade: conversa legada (channel_id ainda nulo) do mesmo
+  // contato → adota o canal atual em vez de criar uma duplicata.
+  const { data: legacy } = await supabaseAdmin()
+    .from('conversations')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+    .is('channel_id', null)
+    .maybeSingle()
+  if (legacy) {
+    const { data: adopted } = await supabaseAdmin()
+      .from('conversations')
+      .update({ channel_id: channelId })
+      .eq('id', legacy.id)
+      .select()
+      .single()
+    return adopted ?? legacy
   }
 
   // Create new conversation. Same tenancy + audit split as
@@ -1097,6 +1126,7 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: configOwnerUserId,
       contact_id: contactId,
+      channel_id: channelId,
     })
     .select()
     .single()

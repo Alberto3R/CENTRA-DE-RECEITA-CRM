@@ -8,6 +8,7 @@ import {
 } from '@/lib/whatsapp/meta-api'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -165,14 +166,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    // Resolve o CANAL desta conversa (multi-canal) — a resposta sai pelo mesmo
+    // número em que a conversa acontece; fallback pro canal primário.
+    const config = await resolveChannelConfig(
+      supabase,
+      accountId,
+      (conversation as { channel_id?: string | null }).channel_id,
+    )
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
         { status: 400 }
