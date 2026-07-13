@@ -15,6 +15,7 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 | Função | O que faz | Problema comercial que resolve |
 |---|---|---|
 | **WhatsApp oficial centralizado por marca** | Toda conversa do time comercial no número oficial (API da Meta), num só painel. | A conversa sai do **celular pessoal** de cada vendedor: o empresário passa a **enxergar e controlar todo o comercial num lugar só** — e o histórico **não vai embora quando o vendedor sai**. |
+| **Vários números + 1 agente de IA por número** | A conta pode ter **múltiplos números** (canais); cada um com sua persona de IA e seus templates (ex.: SDR num, Onboarding noutro). | **Separar frentes** (pré-venda, onboarding, suporte) por número, cada uma com atendimento automático próprio — sem misturar conversas nem depender de um número só. |
 | **Análise das conversas pelo próprio CRM** | O CRM lê e avalia as conversas dos vendedores e entrega a leitura pro dono. | O empresário **sabe como o time está vendendo** sem ter que ler conversa por conversa — qualidade de atendimento vira dado. |
 | **Envio de texto, mídia e documentos** | Responder com texto, imagem, áudio, PDF. | Atendimento completo sem sair da ferramenta. |
 | **Gravar e enviar áudio (mensagem de voz)** | Botão de microfone no compositor grava e envia o áudio na hora (na cor do tema). | Responder por **voz sem trocar de app** — mais rápido e mais humano, tudo registrado no CRM. |

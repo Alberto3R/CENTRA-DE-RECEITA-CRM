@@ -78,6 +78,10 @@ Escritas sensíveis são protegidas por **RLS no banco**; o menu é a camada vis
 
 ## 5. WhatsApp — conexão, modelos e ligação
 
+- **Multi-canal + multi-agente (novo):** a conta pode ter **vários números** de
+  WhatsApp, cada um um "canal" com seu próprio **agente de IA** e **conjunto de
+  templates** (ex.: SDR num número, Onboarding noutro). Inbox/disparos/ligações
+  separam por canal. Detalhes em `docs/MULTICANAL-MULTIAGENTE.md` (migrations 056–059).
 - **Conexão:** cada marca tem número oficial na **Cloud API** (token de system user
   criptografado AES-256-GCM no `whatsapp_config`; webhook fan-out pro CRM).
 - **Aviso "Não registrado" — resolvido:** números conectados reaproveitando token
@@ -131,10 +135,13 @@ Escritas sensíveis são protegidas por **RLS no banco**; o menu é a camada vis
 ## 8. Deploy & banco
 
 - **Código:** `main` publicada na Vercel a cada push.
-- **Migrations aplicadas até 054:**
+- **Migrations aplicadas até 059:**
   - `050_checkout_leads`, `051_call_recordings`, `052_call_transcript`,
     `053_message_transcript` (cache de transcrição de áudio), `054_user_funcao_comercial`
     (`profiles.funcao` + `account_invitations.funcao` + redeem copia a função).
+  - `055_broadcast_worker` (worker de disparo + pg_cron), `056_multichannel_phase1`
+    (canais + `conversations.channel_id`), `057_agent_per_channel`, `058_multichannel_phase2`
+    (`broadcasts`/`whatsapp_calls`.channel_id), `059_templates_per_channel`.
 
 ---
 
