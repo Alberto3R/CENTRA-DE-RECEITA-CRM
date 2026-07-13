@@ -23,8 +23,35 @@ const DEFAULTS = {
   handoff_message: 'Vou te passar pro nosso time, um instante 🙂',
 }
 
-/** GET /api/ai-agent/config — config do agente da conta ativa. */
-export async function GET() {
+/**
+ * Resolve o canal-alvo: o `channelId` dado (se da conta) ou o primário.
+ * Multi-agente: cada canal tem sua própria config de agente.
+ */
+async function resolveChannelId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  accountId: string,
+  channelId: string | null,
+): Promise<string | null> {
+  if (channelId) {
+    const { data } = await supabase
+      .from('whatsapp_config')
+      .select('id')
+      .eq('id', channelId)
+      .eq('account_id', accountId)
+      .maybeSingle()
+    if (data) return data.id as string
+  }
+  const { data: primary } = await supabase
+    .from('whatsapp_config')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('is_primary', true)
+    .maybeSingle()
+  return (primary?.id as string) ?? null
+}
+
+/** GET /api/ai-agent/config?channelId= — config do agente DAQUELE canal. */
+export async function GET(request: Request) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -37,14 +64,23 @@ export async function GET() {
   if (!accountId) {
     return NextResponse.json({ error: 'No account' }, { status: 400 })
   }
+  const channelId = await resolveChannelId(
+    supabase,
+    accountId,
+    new URL(request.url).searchParams.get('channelId'),
+  )
+  if (!channelId) {
+    // Conta sem canal ainda — devolve os defaults pra UI não quebrar.
+    return NextResponse.json({ config: DEFAULTS, channelId: null })
+  }
   const { data } = await supabase
     .from('ai_agent_config')
     .select(
-      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message',
+      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message, name',
     )
-    .eq('account_id', accountId)
+    .eq('channel_id', channelId)
     .maybeSingle()
-  return NextResponse.json({ config: data ?? DEFAULTS })
+  return NextResponse.json({ config: data ?? DEFAULTS, channelId })
 }
 
 /** PUT /api/ai-agent/config — salva (upsert). RLS exige admin+. */
@@ -69,9 +105,26 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const channelId = await resolveChannelId(
+    supabase,
+    accountId,
+    typeof body.channelId === 'string' ? body.channelId : null,
+  )
+  if (!channelId) {
+    return NextResponse.json(
+      { error: 'Conecte um canal de WhatsApp antes de configurar o agente.' },
+      { status: 400 },
+    )
+  }
+
   const rawTokens = Number(body.max_tokens)
   const update = {
     account_id: accountId,
+    channel_id: channelId,
+    name:
+      typeof body.name === 'string' && body.name.trim()
+        ? body.name.trim().slice(0, 60)
+        : 'Agente',
     enabled: body.enabled === true,
     system_prompt: typeof body.system_prompt === 'string' ? body.system_prompt : '',
     model:
@@ -94,9 +147,9 @@ export async function PUT(request: Request) {
 
   const { data, error } = await supabase
     .from('ai_agent_config')
-    .upsert(update, { onConflict: 'account_id' })
+    .upsert(update, { onConflict: 'channel_id' })
     .select(
-      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message',
+      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message, name',
     )
     .maybeSingle()
 

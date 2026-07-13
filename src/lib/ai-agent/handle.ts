@@ -109,27 +109,29 @@ export async function maybeRunAgent(params: {
   contactWaId: string
   /** Número da marca (origem do envio). */
   phoneNumberId: string
+  /** Canal (whatsapp_config.id) — define QUAL agente responde. */
+  channelId: string
   /** Token de acesso da marca, já descriptografado. */
   accessToken: string
   inboundText: string
 }): Promise<void> {
   const {
     supabase,
-    accountId,
     conversationId,
     contactWaId,
     phoneNumberId,
+    channelId,
     accessToken,
     inboundText,
   } = params
 
   if (!inboundText.trim()) return // v1: responde só a texto
 
-  // 1. Config do agente da conta
+  // 1. Config do agente DO CANAL (multi-agente: 1 persona por número).
   const { data: cfg } = await supabase
     .from('ai_agent_config')
     .select('enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message')
-    .eq('account_id', accountId)
+    .eq('channel_id', channelId)
     .maybeSingle()
   if (!cfg || !cfg.enabled || !cfg.system_prompt?.trim()) return
 

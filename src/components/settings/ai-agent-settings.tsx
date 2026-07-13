@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Bot, KeyRound, Loader2 } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
+import { createClient } from "@/lib/supabase/client";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -37,6 +38,7 @@ import { SettingsPanelHead } from "./settings-panel-head";
  */
 
 interface AgentConfig {
+  name: string;
   enabled: boolean;
   system_prompt: string;
   model: string;
@@ -45,11 +47,19 @@ interface AgentConfig {
   handoff_message: string;
 }
 
+interface ChannelLite {
+  id: string;
+  label: string | null;
+  phone_number_id: string;
+  is_primary: boolean | null;
+}
+
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MIN_TOKENS = 256;
 const MAX_TOKENS = 4000;
 
 const EMPTY: AgentConfig = {
+  name: "",
   enabled: false,
   system_prompt: "",
   model: DEFAULT_MODEL,
@@ -58,55 +68,89 @@ const EMPTY: AgentConfig = {
   handoff_message: "Vou te passar pro nosso time, um instante 🙂",
 };
 
+function normalizeConfig(config: Partial<AgentConfig> | null): AgentConfig {
+  return {
+    name: typeof config?.name === "string" ? config.name : "",
+    enabled: config?.enabled === true,
+    system_prompt:
+      typeof config?.system_prompt === "string" ? config.system_prompt : "",
+    model:
+      typeof config?.model === "string" && config.model.trim()
+        ? config.model
+        : DEFAULT_MODEL,
+    max_tokens:
+      typeof config?.max_tokens === "number" && Number.isFinite(config.max_tokens)
+        ? config.max_tokens
+        : EMPTY.max_tokens,
+    handoff_keyword:
+      typeof config?.handoff_keyword === "string" ? config.handoff_keyword : "",
+    handoff_message:
+      typeof config?.handoff_message === "string"
+        ? config.handoff_message
+        : EMPTY.handoff_message,
+  };
+}
+
 export function AiAgentSettings() {
-  const { canEditSettings } = useAuth();
+  const { canEditSettings, accountId } = useAuth();
+  const supabase = createClient();
 
   const [form, setForm] = useState<AgentConfig>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Multi-agente: 1 agente por canal.
+  const [channels, setChannels] = useState<ChannelLite[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
 
-  // Pull the saved config once on mount. The endpoint always returns a
-  // config object (its own defaults when no row exists yet), so we can
-  // populate the form unconditionally and just guard the field types.
+  // Carrega a config do agente de UM canal.
+  async function loadAgent(channelId: string) {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/ai-agent/config?channelId=${channelId}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const { config } = (await res.json()) as {
+        config: Partial<AgentConfig> | null;
+      };
+      setForm(normalizeConfig(config));
+    } catch {
+      toast.error("Falha ao carregar a configuração do agente");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // No mount: lista os canais, seleciona o primário e carrega o agente dele.
   useEffect(() => {
+    if (!accountId) return;
     let active = true;
     (async () => {
-      try {
-        const res = await fetch("/api/ai-agent/config");
-        if (!res.ok) throw new Error(String(res.status));
-        const { config } = (await res.json()) as { config: Partial<AgentConfig> | null };
-        if (!active || !config) return;
-        setForm({
-          enabled: config.enabled === true,
-          system_prompt:
-            typeof config.system_prompt === "string" ? config.system_prompt : "",
-          model:
-            typeof config.model === "string" && config.model.trim()
-              ? config.model
-              : DEFAULT_MODEL,
-          max_tokens:
-            typeof config.max_tokens === "number" && Number.isFinite(config.max_tokens)
-              ? config.max_tokens
-              : EMPTY.max_tokens,
-          // handoff_keyword arrives as null when unset — narrow to "" so
-          // the controlled input never goes uncontrolled.
-          handoff_keyword:
-            typeof config.handoff_keyword === "string" ? config.handoff_keyword : "",
-          handoff_message:
-            typeof config.handoff_message === "string"
-              ? config.handoff_message
-              : EMPTY.handoff_message,
-        });
-      } catch {
-        if (active) toast.error("Falha ao carregar a configuração do agente");
-      } finally {
-        if (active) setLoading(false);
+      const { data } = await supabase
+        .from("whatsapp_config")
+        .select("id, label, phone_number_id, is_primary")
+        .eq("account_id", accountId)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (!active) return;
+      const rows = (data ?? []) as ChannelLite[];
+      setChannels(rows);
+      const first = rows[0]?.id ?? null;
+      setSelectedChannelId(first);
+      if (first) {
+        await loadAgent(first);
+      } else {
+        setLoading(false);
       }
     })();
     return () => {
       active = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  function selectChannel(id: string) {
+    setSelectedChannelId(id);
+    void loadAgent(id);
+  }
 
   function set<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -120,6 +164,8 @@ export function AiAgentSettings() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          channelId: selectedChannelId,
+          name: form.name.trim(),
           enabled: form.enabled,
           system_prompt: form.system_prompt,
           model: form.model.trim() || DEFAULT_MODEL,
@@ -134,34 +180,13 @@ export function AiAgentSettings() {
         return;
       }
       if (!res.ok) {
-        toast.error("Falha ao salvar a configuração do agente");
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || "Falha ao salvar a configuração do agente");
         return;
       }
 
       const { config } = (await res.json()) as { config: Partial<AgentConfig> | null };
-      if (config) {
-        // Reflect the server-normalized values (clamped tokens, trimmed
-        // model, null→"" keyword) so the form matches what was stored.
-        setForm({
-          enabled: config.enabled === true,
-          system_prompt:
-            typeof config.system_prompt === "string" ? config.system_prompt : "",
-          model:
-            typeof config.model === "string" && config.model.trim()
-              ? config.model
-              : DEFAULT_MODEL,
-          max_tokens:
-            typeof config.max_tokens === "number" && Number.isFinite(config.max_tokens)
-              ? config.max_tokens
-              : form.max_tokens,
-          handoff_keyword:
-            typeof config.handoff_keyword === "string" ? config.handoff_keyword : "",
-          handoff_message:
-            typeof config.handoff_message === "string"
-              ? config.handoff_message
-              : form.handoff_message,
-        });
-      }
+      if (config) setForm(normalizeConfig(config));
       toast.success("Configuração do agente salva");
     } catch {
       toast.error("Falha ao salvar a configuração do agente");
@@ -176,8 +201,36 @@ export function AiAgentSettings() {
     <section className="max-w-2xl animate-in fade-in-50 duration-200">
       <SettingsPanelHead
         title="Agente IA"
-        description="A persona e o comportamento do agente de IA que responde automaticamente as conversas desta conta."
+        description="A persona e o comportamento do agente de IA de cada canal. Cada número de WhatsApp tem seu próprio agente (ex.: SDR num, Onboarding noutro)."
       />
+
+      {channels.length > 1 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Canal</span>
+          {channels.map((ch) => {
+            const active = ch.id === selectedChannelId;
+            return (
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => selectChannel(ch.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                {ch.label || ch.phone_number_id}
+                {ch.is_primary && (
+                  <span title="Canal primário" className="text-amber-400">
+                    ★
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -192,6 +245,21 @@ export function AiAgentSettings() {
         </CardHeader>
 
         <CardContent className="space-y-6">
+          {/* Nome do agente */}
+          <div className="grid gap-2">
+            <Label htmlFor="ai-agent-name" className="text-muted-foreground">
+              Nome do agente
+            </Label>
+            <Input
+              id="ai-agent-name"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              disabled={disabled}
+              maxLength={60}
+              placeholder="ex.: SDR, Onboarding, Suporte"
+            />
+          </div>
+
           {/* Ativar agente */}
           <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/30 p-4">
             <div className="space-y-1">

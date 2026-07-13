@@ -829,6 +829,8 @@ async function processMessage(
       conversationId: conversation.id,
       contactWaId: contact.wa_id,
       phoneNumberId,
+      // Canal: define QUAL agente de IA responde (multi-agente por número).
+      channelId,
       accessToken,
       inboundText,
     })
