@@ -8,6 +8,7 @@ import {
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -77,12 +78,9 @@ export async function engineSendText(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
+  // Multi-canal: usa o canal primário da conta (flows não escolhem número).
+  const config = await resolveChannelConfig(db, args.accountId)
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 
@@ -186,12 +184,9 @@ export async function engineSendMedia(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
+  // Multi-canal: usa o canal primário da conta (flows não escolhem número).
+  const config = await resolveChannelConfig(db, args.accountId)
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 
@@ -338,12 +333,9 @@ async function sendInteractiveViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', input.accountId)
-    .single()
-  if (configErr || !config) {
+  // Multi-canal: usa o canal primário da conta (flows não escolhem número).
+  const config = await resolveChannelConfig(db, input.accountId)
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 

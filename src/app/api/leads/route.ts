@@ -4,6 +4,7 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { fireWebLead } from '@/lib/conversions/capi'
 import { notifyTeamNewLead } from '@/lib/notifications/lead-alert'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 
 // ============================================================
@@ -169,11 +170,7 @@ async function maybeSendWelcome(
     .maybeSingle()
   if (!tpl || tpl.status !== 'APPROVED') return
 
-  const { data: wa } = await db
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', accountId)
-    .maybeSingle()
+  const wa = await resolveChannelConfig(db, accountId)
   if (!wa?.phone_number_id || !wa?.access_token) return
 
   let token: string

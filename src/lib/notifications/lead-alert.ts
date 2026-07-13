@@ -7,6 +7,7 @@
 //   {{2}} = resumo da qualificação (faturamento • consciência • ângulo)
 
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 
 // Número do time que recebe o alerta (mesmo do cenário do Make).
 const TEAM_ALERT_PHONE = '5561982742727'
@@ -27,12 +28,8 @@ export async function notifyTeamNewLead(params: {
 }): Promise<{ ok: boolean; reason?: string }> {
   const { supabase, accountId } = params
 
-  // WhatsApp da conta de captação (envia o template a partir do número dela)
-  const { data: wa } = await supabase
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', accountId)
-    .maybeSingle()
+  // WhatsApp da conta de captação — canal primário (multi-canal).
+  const wa = await resolveChannelConfig(supabase, accountId)
   if (!wa?.phone_number_id || !wa.access_token) {
     return { ok: false, reason: 'whatsapp_not_configured' }
   }

@@ -12,6 +12,7 @@
 
 import crypto from 'node:crypto'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 
 const GRAPH = 'https://graph.facebook.com/v22.0'
 
@@ -102,8 +103,8 @@ export async function fireConversion(params: {
   if (!ctwaClid) return { ok: false, reason: 'no_ctwa_clid' }
 
   // WABA da conta + telefone do contato (hash pra matching)
-  const [{ data: wa }, { data: contact }] = await Promise.all([
-    supabase.from('whatsapp_config').select('waba_id').eq('account_id', accountId).maybeSingle(),
+  const [wa, { data: contact }] = await Promise.all([
+    resolveChannelConfig(supabase, accountId),
     supabase.from('contacts').select('phone_normalized').eq('id', contactId).maybeSingle(),
   ])
 

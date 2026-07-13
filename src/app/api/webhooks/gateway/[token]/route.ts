@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 
 // ============================================================
 // POST /api/webhooks/gateway/[token] — webhook de gateway (Voomp etc.)
@@ -97,11 +98,7 @@ async function sendRecoveryTemplate(p: {
 }): Promise<{ ok: boolean; reason?: string }> {
   const to = p.phoneRaw.replace(/\D/g, '')
   if (!to) return { ok: false, reason: 'no_phone' }
-  const { data: wa } = await p.db
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', p.accountId)
-    .maybeSingle()
+  const wa = await resolveChannelConfig(p.db, p.accountId)
   if (!wa?.phone_number_id || !wa.access_token) return { ok: false, reason: 'whatsapp_not_configured' }
   let token: string
   try {

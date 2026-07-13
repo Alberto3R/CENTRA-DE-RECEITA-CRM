@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { resolveChannelConfig } from "@/lib/whatsapp/channel";
 import {
   initiateCall,
   terminateCall,
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
       dealId?: string;
       to?: string;
       sdp?: string;
+      channelId?: string;
     } | null;
     if (!body) {
       return NextResponse.json({ error: "payload inválido" }, { status: 400 });
@@ -40,12 +42,12 @@ export async function POST(request: Request) {
 
     const admin = supabaseAdmin();
 
-    // Config WhatsApp da conta (token + phone_number_id).
-    const { data: config } = await admin
-      .from("whatsapp_config")
-      .select("phone_number_id, access_token, status")
-      .eq("account_id", ctx.accountId)
-      .maybeSingle();
+    // Canal (multi-canal): liga pelo número escolhido; fallback pro primário.
+    const config = await resolveChannelConfig(
+      admin,
+      ctx.accountId,
+      body.channelId ?? null,
+    );
     if (!config?.phone_number_id || !config?.access_token) {
       return NextResponse.json(
         { error: "WhatsApp não conectado nesta conta." },
@@ -236,6 +238,7 @@ export async function POST(request: Request) {
       .from("whatsapp_calls")
       .insert({
         account_id: ctx.accountId,
+        channel_id: config.id,
         user_id: ctx.userId,
         contact_id: contactId,
         deal_id: body.dealId ?? null,

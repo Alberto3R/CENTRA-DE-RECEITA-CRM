@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { resolveChannelConfig } from "@/lib/whatsapp/channel";
 import { sendTemplateMessage } from "@/lib/whatsapp/meta-api";
 import { isMessageTemplate } from "@/lib/whatsapp/template-row-guard";
 import {
@@ -77,6 +78,7 @@ async function fetchCustomValues(
 interface BroadcastRow {
   id: string;
   account_id: string;
+  channel_id: string | null;
   template_name: string;
   template_language: string | null;
   template_variables: Record<string, VariableMapping> | null;
@@ -92,12 +94,9 @@ async function drainBroadcast(
   b: BroadcastRow,
   maxSend: number,
 ): Promise<number> {
-  // Config + token da conta.
-  const { data: config } = await admin
-    .from("whatsapp_config")
-    .select("phone_number_id, access_token")
-    .eq("account_id", b.account_id)
-    .maybeSingle();
+  // Canal do disparo (multi-canal) — envia pelo número escolhido; fallback
+  // pro primário.
+  const config = await resolveChannelConfig(admin, b.account_id, b.channel_id);
   if (!config?.access_token || !config.phone_number_id) return 0;
 
   let accessToken: string;
@@ -273,7 +272,7 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
   const { data: sending } = await admin
     .from("broadcasts")
     .select(
-      "id, account_id, template_name, template_language, template_variables, status, updated_at",
+      "id, account_id, channel_id, template_name, template_language, template_variables, status, updated_at",
     )
     .eq("status", "sending")
     .or(`scheduled_at.not.is.null,updated_at.lte.${staleIso}`)

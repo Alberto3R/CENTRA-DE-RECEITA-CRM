@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { getMediaUrl, downloadMedia } from "@/lib/whatsapp/meta-api";
 import { transcribeAudio } from "@/lib/ai/transcribe";
+import { resolveChannelConfig } from "@/lib/whatsapp/channel";
 
 /**
  * Monta o texto de uma conversa de WhatsApp para análise no Gestor.
@@ -82,11 +83,7 @@ export async function POST(req: Request) {
     // Só busca config/token se houver áudio novo para transcrever.
     let accessToken: string | null = null;
     if (audios.length > 0) {
-      const { data: config } = await admin
-        .from("whatsapp_config")
-        .select("access_token")
-        .eq("account_id", ctx.accountId)
-        .maybeSingle();
+      const config = await resolveChannelConfig(admin, ctx.accountId);
       if (config?.access_token) {
         try {
           accessToken = decrypt(config.access_token);
