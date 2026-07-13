@@ -60,7 +60,7 @@ function supabaseAdmin() {
  *   { connected: false, reason: 'token_corrupted',  message: '...', needs_reset: true }
  *   { connected: false, reason: 'meta_api_error',   message: '...' }
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient()
 
@@ -85,11 +85,17 @@ export async function GET() {
       )
     }
 
-    const { data: config, error: configError } = await supabase
+    // Multi-canal: checa a saúde de um canal específico (?channelId=) ou do
+    // primário. Antes era .maybeSingle() por conta — quebraria com >1 canal.
+    const channelId = new URL(request.url).searchParams.get('channelId')
+    let cfgQuery = supabase
       .from('whatsapp_config')
       .select('phone_number_id, access_token, status')
       .eq('account_id', accountId)
-      .maybeSingle()
+    cfgQuery = channelId
+      ? cfgQuery.eq('id', channelId)
+      : cfgQuery.eq('is_primary', true)
+    const { data: config, error: configError } = await cfgQuery.maybeSingle()
 
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
@@ -186,6 +192,16 @@ export async function POST(request: Request) {
 
     const body = await request.json()
     const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    // Multi-canal: `channelId` = editar um canal existente; `isNew` = adicionar
+    // um novo canal; `label` = rótulo do canal. Sem nenhum → edita o primário
+    // (retrocompatível com o fluxo de 1 canal).
+    const channelId: string | null =
+      typeof body.channelId === 'string' ? body.channelId : null
+    const isNew: boolean = body.isNew === true
+    const label: string | null =
+      typeof body.label === 'string' && body.label.trim()
+        ? body.label.trim().slice(0, 60)
+        : null
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -269,14 +285,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // Look up any pre-existing row for this account so we know whether
-    // this number is already registered with Meta — if so we can skip
-    // /register when the user didn't provide a PIN this time around.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    // Resolve o canal-alvo (multi-canal):
+    //   - channelId → edita aquele canal;
+    //   - isNew → força novo canal (insert);
+    //   - senão → edita o canal primário (retrocompatível com 1 canal).
+    let existing: { id: string; registered_at: string | null; phone_number_id: string } | null = null
+    if (isNew) {
+      existing = null
+    } else if (channelId) {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id')
+        .eq('id', channelId)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      existing = data ?? null
+    } else {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id')
+        .eq('account_id', accountId)
+        .eq('is_primary', true)
+        .maybeSingle()
+      existing = data ?? null
+    }
 
     const sameNumber =
       existing?.phone_number_id === phone_number_id &&
@@ -369,8 +401,8 @@ export async function POST(request: Request) {
     if (existing) {
       const { error: updateError } = await supabase
         .from('whatsapp_config')
-        .update(baseRow)
-        .eq('account_id', accountId)
+        .update(label ? { ...baseRow, label } : baseRow)
+        .eq('id', existing.id)
 
       if (updateError) {
         console.error('Error updating whatsapp_config:', updateError)
@@ -380,15 +412,20 @@ export async function POST(request: Request) {
         )
       }
     } else {
-      // Insert with both columns: `account_id` is the tenancy key
-      // (NOT NULL post-017, UNIQUE so duplicates trip the constraint
-      // up-front), `user_id` is the audit column identifying which
-      // member of the account saved the config.
+      // Novo canal. É primário se for o PRIMEIRO da conta (senão, secundário).
+      const { count: existingCount } = await supabase
+        .from('whatsapp_config')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+      const isFirst = (existingCount ?? 0) === 0
+
       const { error: insertError } = await supabase
         .from('whatsapp_config')
         .insert({
           account_id: accountId,
           user_id: user.id,
+          is_primary: isFirst,
+          label: label ?? (isFirst ? 'Principal' : 'Novo canal'),
           ...baseRow,
         })
 
@@ -432,13 +469,13 @@ export async function POST(request: Request) {
 }
 
 /**
- * DELETE /api/whatsapp/config
+ * DELETE /api/whatsapp/config[?channelId=...]
  *
- * Removes the authenticated user's WhatsApp configuration row.
- * Used by the "Reset Configuration" button to recover from a corrupted
- * encrypted token (mismatched ENCRYPTION_KEY across environments).
+ * Com `channelId`: remove aquele canal (multi-canal). Sem: remove TODOS os
+ * canais da conta (reset, usado pra recuperar de token corrompido). Se o
+ * removido era o primário e sobram canais, promove um a primário.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
     const supabase = await createClient()
 
@@ -459,10 +496,11 @@ export async function DELETE() {
       )
     }
 
-    const { error: deleteError } = await supabase
-      .from('whatsapp_config')
-      .delete()
-      .eq('account_id', accountId)
+    const channelId = new URL(request.url).searchParams.get('channelId')
+
+    let del = supabase.from('whatsapp_config').delete().eq('account_id', accountId)
+    if (channelId) del = del.eq('id', channelId)
+    const { error: deleteError } = await del
 
     if (deleteError) {
       console.error('Error deleting whatsapp_config:', deleteError)
@@ -472,9 +510,82 @@ export async function DELETE() {
       )
     }
 
+    // Garante um primário se ainda houver canais.
+    if (channelId) {
+      const { data: rest } = await supabase
+        .from('whatsapp_config')
+        .select('id, is_primary')
+        .eq('account_id', accountId)
+        .order('created_at', { ascending: true })
+      if (rest && rest.length > 0 && !rest.some((r) => r.is_primary)) {
+        await supabase
+          .from('whatsapp_config')
+          .update({ is_primary: true })
+          .eq('id', rest[0].id)
+      }
+    }
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error in WhatsApp config DELETE:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
+ * PATCH /api/whatsapp/config — define o canal primário da conta.
+ * Body: { channelId, makePrimary: true }.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const accountId = await resolveAccountId(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'Your profile is not linked to an account.' },
+        { status: 403 },
+      )
+    }
+    const body = await request.json().catch(() => ({}))
+    const channelId = typeof body.channelId === 'string' ? body.channelId : null
+    if (!channelId || body.makePrimary !== true) {
+      return NextResponse.json(
+        { error: 'Informe channelId e makePrimary: true.' },
+        { status: 400 },
+      )
+    }
+    // Confere que o canal é da conta.
+    const { data: target } = await supabase
+      .from('whatsapp_config')
+      .select('id')
+      .eq('id', channelId)
+      .eq('account_id', accountId)
+      .maybeSingle()
+    if (!target) {
+      return NextResponse.json({ error: 'Canal não encontrado.' }, { status: 404 })
+    }
+    // Desmarca todos, depois marca o alvo (o índice único parcial exige 1 só).
+    await supabase
+      .from('whatsapp_config')
+      .update({ is_primary: false })
+      .eq('account_id', accountId)
+    const { error: setErr } = await supabase
+      .from('whatsapp_config')
+      .update({ is_primary: true })
+      .eq('id', channelId)
+    if (setErr) {
+      return NextResponse.json({ error: 'Falha ao definir primário.' }, { status: 500 })
+    }
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error in WhatsApp config PATCH:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

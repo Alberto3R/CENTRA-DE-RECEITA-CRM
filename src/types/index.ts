@@ -234,6 +234,12 @@ export interface WhatsAppConfig {
   subscribed_apps_at?: string;
   /** Last error from /register; cleared on success. */
   last_registration_error?: string;
+  /** Multi-canal: rótulo humano do canal (ex.: "SDR", "Onboarding"). */
+  label?: string;
+  /** Multi-canal: canal primário da conta (fallback de envio). */
+  is_primary?: boolean;
+  account_id?: string;
+  created_at?: string;
 }
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)

@@ -61,6 +61,20 @@ export function WhatsAppConfig() {
   const [pin, setPin] = useState('');
   const [tokenEdited, setTokenEdited] = useState(false);
 
+  // Multi-canal: lista de canais da conta + qual está selecionado no formulário.
+  // `mode` = 'edit' edita o canal selecionado; 'new' adiciona um canal.
+  const [channels, setChannels] = useState<WhatsAppConfigType[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'edit' | 'new'>('edit');
+  const [label, setLabel] = useState('');
+  // Ref espelhando a seleção — lido dentro de fetchConfig (deps [supabase])
+  // sem virar dependência (evita closure velha e re-render em loop).
+  const selRef = useRef<string | null>(null);
+  const setSelected = (id: string | null) => {
+    selRef.current = id;
+    setSelectedChannelId(id);
+  };
+
   // True once /register has succeeded on Meta's side (timestamp set
   // in the row). When false, the saved config is metadata-only and
   // Meta will silently drop every inbound event — that's the
@@ -88,34 +102,46 @@ export function WhatsAppConfig() {
   const fetchConfig = useCallback(async (acctId: string) => {
     setLoading(true);
     try {
-      // Load form values from Supabase (shows what's in DB).
-      // Switched from `user_id` (which would only match the row's
-      // original author) to `account_id` so every member of the
-      // account sees the same saved configuration. UNIQUE(account_id)
-      // on the table guarantees the .maybeSingle() return type
-      // remains accurate.
-      const { data, error } = await supabase
+      // Multi-canal: carrega a LISTA de canais da conta (primário primeiro).
+      const { data: list, error } = await supabase
         .from('whatsapp_config')
         .select('*')
         .eq('account_id', acctId)
-        .maybeSingle();
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Failed to load config row:', error);
+        console.error('Failed to load config rows:', error);
       }
 
-      if (data) {
-        setConfig(data);
-        setPhoneNumberId(data.phone_number_id || '');
-        setWabaId(data.waba_id || '');
+      const rows = (list ?? []) as WhatsAppConfigType[];
+      setChannels(rows);
+
+      // Mantém o canal selecionado se ainda existir; senão pega o primário/1º.
+      const chosen =
+        rows.find((r) => r.id === selRef.current) ?? rows[0] ?? null;
+
+      if (chosen) {
+        setSelected(chosen.id);
+        setMode('edit');
+        setConfig(chosen);
+        setPhoneNumberId(chosen.phone_number_id || '');
+        setWabaId(chosen.waba_id || '');
+        setLabel(
+          (chosen as unknown as { label?: string }).label || '',
+        );
         setAccessToken(MASKED_TOKEN);
         setVerifyToken('');
         setPin('');
         setTokenEdited(false);
       } else {
+        // Conta sem nenhum canal → formulário de primeiro cadastro.
+        setSelected(null);
+        setMode('edit');
         setConfig(null);
         setPhoneNumberId('');
         setWabaId('');
+        setLabel('');
         setAccessToken('');
         setVerifyToken('');
         setPin('');
@@ -125,9 +151,12 @@ export function WhatsAppConfig() {
       setRegistrationProbe(null);
 
       // Then verify health via the API (decrypts token + pings Meta)
-      if (data) {
+      if (chosen) {
         try {
-          const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+          const res = await fetch(
+            `/api/whatsapp/config?channelId=${chosen.id}`,
+            { method: 'GET' },
+          );
           const payload = await res.json();
 
           if (payload.connected) {
@@ -170,6 +199,49 @@ export function WhatsAppConfig() {
     fetchConfig(accountId);
   }, [authLoading, profileLoading, user, accountId, fetchConfig]);
 
+  // Seleciona um canal existente (recarrega os dados dele no formulário).
+  function selectChannel(id: string) {
+    selRef.current = id;
+    if (accountId) fetchConfig(accountId);
+  }
+
+  // Prepara o formulário para ADICIONAR um novo canal (form em branco).
+  function startNewChannel() {
+    setSelected(null);
+    setMode('new');
+    setConfig(null);
+    setPhoneNumberId('');
+    setWabaId('');
+    setLabel('');
+    setAccessToken('');
+    setVerifyToken('');
+    setPin('');
+    setTokenEdited(false);
+    setConnectionStatus('unknown');
+    setResetReason(null);
+    setStatusMessage('');
+    setRegistrationProbe(null);
+  }
+
+  async function handleSetPrimary(id: string) {
+    try {
+      const res = await fetch('/api/whatsapp/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: id, makePrimary: true }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || 'Falha ao definir canal primário');
+        return;
+      }
+      toast.success('Canal primário atualizado');
+      if (accountId) await fetchConfig(accountId);
+    } catch {
+      toast.error('Erro de rede');
+    }
+  }
+
   async function handleSave() {
     if (!phoneNumberId.trim()) {
       toast.error('O ID do número de telefone é obrigatório');
@@ -195,6 +267,10 @@ export function WhatsAppConfig() {
         // requires it on first save or when changing numbers; for a
         // simple token rotation, leaving it blank skips re-register.
         pin: pin.trim() || null,
+        // Multi-canal: qual canal salvar.
+        channelId: mode === 'edit' ? selectedChannelId : null,
+        isNew: mode === 'new',
+        label: label.trim() || null,
       };
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
@@ -349,13 +425,24 @@ export function WhatsAppConfig() {
   }, [config, connectionStatus]);
 
   async function handleReset() {
-    if (!confirm('Isso vai excluir a configuração atual do WhatsApp para você reinseri-la. Continuar?')) {
+    const multi = channels.length > 1;
+    if (
+      !confirm(
+        multi
+          ? 'Remover este canal? As conversas dele passam a usar o canal primário.'
+          : 'Isso vai excluir a configuração atual do WhatsApp para você reinseri-la. Continuar?',
+      )
+    ) {
       return;
     }
 
     try {
       setResetting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'DELETE' });
+      const qs =
+        mode === 'edit' && selectedChannelId
+          ? `?channelId=${selectedChannelId}`
+          : '';
+      const res = await fetch(`/api/whatsapp/config${qs}`, { method: 'DELETE' });
       const data = await res.json();
 
       if (!res.ok) {
@@ -363,16 +450,9 @@ export function WhatsAppConfig() {
         return;
       }
 
-      toast.success('Configuração limpa. Agora você pode reinserir suas credenciais.');
-      setConfig(null);
-      setPhoneNumberId('');
-      setWabaId('');
-      setAccessToken('');
-      setVerifyToken('');
-      setTokenEdited(false);
-      setConnectionStatus('disconnected');
-      setResetReason(null);
-      setStatusMessage('');
+      toast.success(multi ? 'Canal removido.' : 'Configuração limpa. Agora você pode reinserir suas credenciais.');
+      selRef.current = null;
+      if (accountId) await fetchConfig(accountId);
     } catch (err) {
       console.error('Reset error:', err);
       toast.error('Falha ao redefinir a configuração');
@@ -406,8 +486,61 @@ export function WhatsAppConfig() {
     <section className="animate-in fade-in-50 duration-200">
       <SettingsPanelHead
         title="Conexão do WhatsApp"
-        description="Conecte sua API do WhatsApp Business da Meta. Credenciais, webhook e etapas de configuração ficam todos aqui."
+        description="Conecte sua API do WhatsApp Business da Meta. Cada número é um canal — use vários para separar SDR, Onboarding, etc."
       />
+
+      {/* Barra de canais (multi-canal) */}
+      {channels.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Canais</span>
+          {channels.map((ch) => {
+            const active = mode === 'edit' && ch.id === selectedChannelId;
+            return (
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => selectChannel(ch.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                  active
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-muted text-muted-foreground hover:bg-muted/70'
+                }`}
+              >
+                {(ch as unknown as { label?: string }).label ||
+                  ch.phone_number_id}
+                {ch.is_primary && (
+                  <span title="Canal primário" className="text-amber-400">
+                    ★
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={startNewChannel}
+            className={`inline-flex items-center gap-1 rounded-full border border-dashed px-3 py-1 text-xs font-medium ${
+              mode === 'new'
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            + Adicionar canal
+          </button>
+          {mode === 'edit' &&
+          selectedChannelId &&
+          !channels.find((c) => c.id === selectedChannelId)?.is_primary ? (
+            <button
+              type="button"
+              onClick={() => handleSetPrimary(selectedChannelId)}
+              className="text-xs text-primary hover:underline"
+            >
+              Tornar primário
+            </button>
+          ) : null}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">
@@ -583,6 +716,20 @@ export function WhatsAppConfig() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Nome do canal</Label>
+              <Input
+                placeholder="ex.: SDR, Onboarding, Suporte"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                maxLength={60}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Só um rótulo pra você identificar este número no CRM.
+              </p>
+            </div>
+
             <div className="space-y-2">
               <Label className="text-muted-foreground">ID do número de telefone</Label>
               <Input
