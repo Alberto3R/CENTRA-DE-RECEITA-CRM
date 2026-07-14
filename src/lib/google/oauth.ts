@@ -18,6 +18,19 @@ export const GOOGLE_SCOPES = [
   "email",
 ];
 
+/**
+ * Origem PÚBLICA da requisição (https + host real), lida dos headers de proxy.
+ * Atrás do Vercel, `new URL(request.url)` costuma vir com scheme `http://`
+ * (TLS termina na borda) e host interno — o que quebra o match do redirect_uri
+ * no Google. x-forwarded-host + x-forwarded-proto dão o domínio público certo.
+ */
+export function publicOrigin(request: Request): string {
+  const h = request.headers;
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto")?.split(",")[0]?.trim() ?? "https";
+  return `${proto}://${host}`;
+}
+
 export function googleClientId(): string {
   const id = process.env.GOOGLE_CLIENT_ID;
   if (!id) throw new Error("GOOGLE_CLIENT_ID não configurado");

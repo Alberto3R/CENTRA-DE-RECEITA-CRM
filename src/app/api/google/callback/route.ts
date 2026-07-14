@@ -6,12 +6,13 @@ import { cookies } from "next/headers";
 import { requireRole } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { encrypt } from "@/lib/whatsapp/encryption";
-import { exchangeCode, fetchGoogleEmail } from "@/lib/google/oauth";
+import { exchangeCode, fetchGoogleEmail, publicOrigin } from "@/lib/google/oauth";
 
 const DEST = (origin: string, s: string) => `${origin}/settings?tab=agenda&google=${s}`;
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  const origin = publicOrigin(request);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
 

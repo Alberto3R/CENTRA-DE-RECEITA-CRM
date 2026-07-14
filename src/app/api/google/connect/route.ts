@@ -5,12 +5,12 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
-import { buildAuthUrl } from "@/lib/google/oauth";
+import { buildAuthUrl, publicOrigin } from "@/lib/google/oauth";
 
 export async function GET(request: Request) {
   try {
     await requireRole("admin");
-    const origin = new URL(request.url).origin;
+    const origin = publicOrigin(request);
     const state = randomUUID();
     const res = NextResponse.redirect(buildAuthUrl(state, origin));
     res.cookies.set("g_oauth_state", state, {
