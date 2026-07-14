@@ -42,11 +42,17 @@ function papel(senderType: string | null): string {
   return senderType === "customer" ? "Cliente" : "Vendedor";
 }
 
-// media_url é o proxy interno `/api/whatsapp/media/<mediaId>`.
+// media_url legado = proxy interno `/api/whatsapp/media/<mediaId>` (Meta).
+// media_url atual = URL absoluta do Supabase Storage (o webhook baixa e salva
+// a mídia lá). Distinguimos pelos dois formatos ao baixar os bytes do áudio.
 function mediaIdFromUrl(url: string | null): string | null {
   if (!url) return null;
   const id = url.split("/").filter(Boolean).pop();
   return id || null;
+}
+
+function isAbsoluteUrl(url: string | null): boolean {
+  return !!url && /^https?:\/\//i.test(url);
 }
 
 export async function POST(req: Request) {
@@ -80,9 +86,12 @@ export async function POST(req: Request) {
       (m) => m.content_type === "audio" && !m.transcript,
     );
 
-    // Só busca config/token se houver áudio novo para transcrever.
+    // O token da Meta só é necessário para os áudios LEGADOS (proxy
+    // /api/whatsapp/media/<id>). Os atuais ficam no Supabase Storage (URL
+    // absoluta) e são baixados direto, sem token.
+    const precisaMeta = audios.some((m) => !isAbsoluteUrl(m.media_url));
     let accessToken: string | null = null;
-    if (audios.length > 0) {
+    if (precisaMeta) {
       const config = await resolveChannelConfig(admin, ctx.accountId);
       if (config?.access_token) {
         try {
@@ -93,19 +102,41 @@ export async function POST(req: Request) {
       }
     }
 
+    // Baixa os bytes do áudio, escolhendo a fonte pela forma da media_url:
+    //  - URL absoluta  → Supabase Storage (fetch direto, sem token);
+    //  - caminho proxy → Meta Graph API (getMediaUrl + downloadMedia).
+    async function baixarAudio(
+      m: MsgRow,
+    ): Promise<{ buffer: ArrayBuffer | Buffer; type: string } | null> {
+      if (isAbsoluteUrl(m.media_url)) {
+        const res = await fetch(m.media_url as string);
+        if (!res.ok) {
+          throw new Error(`storage fetch ${res.status}`);
+        }
+        return {
+          buffer: await res.arrayBuffer(),
+          type: res.headers.get("content-type") || "audio/ogg",
+        };
+      }
+      const mediaId = mediaIdFromUrl(m.media_url);
+      if (!accessToken || !mediaId) return null;
+      const info = await getMediaUrl({ mediaId, accessToken });
+      const { buffer, contentType } = await downloadMedia({
+        downloadUrl: info.url,
+        accessToken,
+      });
+      return { buffer, type: contentType || info.mimeType || "audio/ogg" };
+    }
+
     // Transcreve os áudios ainda sem transcrição (sequencial: poucos por
     // conversa) e cacheia. Falhas não derrubam a análise — viram marcador.
+    let transcritos = 0;
     for (const m of audios) {
-      const mediaId = mediaIdFromUrl(m.media_url);
-      if (!accessToken || !mediaId) continue;
       try {
-        const info = await getMediaUrl({ mediaId, accessToken });
-        const { buffer, contentType } = await downloadMedia({
-          downloadUrl: info.url,
-          accessToken,
-        });
-        const blob = new Blob([new Uint8Array(buffer)], {
-          type: contentType || info.mimeType || "audio/ogg",
+        const audio = await baixarAudio(m);
+        if (!audio) continue;
+        const blob = new Blob([new Uint8Array(audio.buffer as ArrayBuffer)], {
+          type: audio.type,
         });
         const texto = await transcribeAudio(blob, "voz.ogg");
         if (texto && texto.trim()) {
@@ -114,6 +145,7 @@ export async function POST(req: Request) {
             .from("messages")
             .update({ transcript: m.transcript })
             .eq("id", m.id);
+          transcritos += 1;
         }
       } catch (e) {
         console.error("[conversa-transcricao] falha ao transcrever áudio", m.id, e);
@@ -142,7 +174,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       texto: linhas.join("\n"),
       total: linhas.length,
-      audios: audios.length,
+      audios: audios.length, // áudios que precisavam de transcrição
+      transcritos, // quantos REALMENTE foram transcritos agora
+      falhas: audios.length - transcritos, // não transcritos (viram marcador)
     });
   } catch (err) {
     return toErrorResponse(err);

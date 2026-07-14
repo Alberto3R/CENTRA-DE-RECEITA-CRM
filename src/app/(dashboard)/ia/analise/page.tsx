@@ -253,9 +253,14 @@ export default function AnaliseCallPage() {
       setTexto(j.texto);
       setOrigem(c.name || c.phone);
       setBuscaAberta(false);
-      if (j.audios > 0) {
+      if (j.transcritos > 0) {
         toast.success(
-          `${j.audios} áudio(s) transcrito(s) e incluído(s) na conversa.`,
+          `${j.transcritos} áudio(s) transcrito(s) e incluído(s) na conversa.`,
+        );
+      }
+      if (j.falhas > 0) {
+        toast.warning(
+          `${j.falhas} áudio(s) não puderam ser transcritos (entraram como "[áudio não transcrito]").`,
         );
       }
     } catch {
