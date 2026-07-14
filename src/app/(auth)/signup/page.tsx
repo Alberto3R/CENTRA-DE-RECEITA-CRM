@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,14 +34,12 @@ function SignupPageInner() {
   // points back at /join/<token> so the user lands on the redeem
   // step after verifying instead of being dropped on /dashboard.
   const inviteToken = searchParams.get("invite");
-  const router = useRouter();
 
-  // Cadastro é SÓ por convite (ou compra). Sem token de convite, não há
-  // auto-criação de conta — manda pro login. Fecha o buraco de "criar conta
-  // avulsa" que confundia quem era convidado.
-  useEffect(() => {
-    if (!inviteToken) router.replace("/login");
-  }, [inviteToken, router]);
+  // Cadastro cria um LOGIN — não uma conta. Sem convite, o usuário cai no
+  // /comecar pós-verificação para escolher um plano (a conta nasce na compra).
+  // Com convite, cai no /join/<token> para entrar na conta de quem convidou.
+  // "Conta é o produto pago" continua valendo: login só ganha acesso ao CRM
+  // depois de comprar ou aceitar um convite.
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -83,11 +81,9 @@ function SignupPageInner() {
     // Após confirmar o e-mail, o Supabase redireciona para /auth/callback,
     // que troca o ?code por sessão e leva ao destino. `next` retoma o fluxo
     // de convite quando houver; sem token, cai no /dashboard.
-    const emailRedirectTo = `${window.location.origin}/auth/callback${
-      inviteToken
-        ? `?next=${encodeURIComponent(`/join/${inviteToken}`)}`
-        : ""
-    }`;
+    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(
+      inviteToken ? `/join/${inviteToken}` : "/comecar",
+    )}`;
 
     const { error } = await supabase.auth.signUp({
       email,
@@ -109,9 +105,6 @@ function SignupPageInner() {
     setSuccess(true);
     setLoading(false);
   };
-
-  // Sem convite: nada a renderizar — o efeito acima já redirecionou ao login.
-  if (!inviteToken) return null;
 
   if (success) {
     return (
