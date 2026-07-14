@@ -1,5 +1,6 @@
 import {
   Bot,
+  CalendarClock,
   Coins,
   CreditCard,
   FileText,
@@ -34,6 +35,7 @@ export const SETTINGS_SECTIONS = [
   'fields',
   'deals',
   'ai-agent',
+  'agenda',
   'webhooks',
   'members',
   'api',
@@ -68,6 +70,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },
   deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace', adminOnly: true },
   'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace', adminOnly: true },
+  agenda: { id: 'agenda', label: 'Agenda (Google)', icon: CalendarClock, group: 'workspace', adminOnly: true },
   webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', adminOnly: true },
   members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace', adminOnly: true },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', adminOnly: true },
