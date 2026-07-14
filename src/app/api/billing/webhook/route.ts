@@ -19,11 +19,38 @@ function planoEfetivo(status: string, plan: string): string {
   return "free";
 }
 
-async function aplicarAssinatura(sub: Stripe.Subscription): Promise<void> {
+/**
+ * Descobre a conta desta assinatura. Na PRIMEIRA compra a session carrega só
+ * `user_id` (o comprador ainda não tinha conta) — aí provisionamos a conta
+ * (provision_account: cria conta + profile owner) e devolvemos o id. Em upgrade
+ * a assinatura já traz `account_id`.
+ */
+async function resolveAccountId(
+  meta: Stripe.Metadata | null | undefined,
+): Promise<string | null> {
+  if (meta?.account_id) return meta.account_id;
+  if (meta?.user_id) {
+    const admin = supabaseAdmin();
+    const { data, error } = await admin.rpc("provision_account", {
+      p_user_id: meta.user_id,
+    });
+    if (error) {
+      console.error("[stripe webhook] provision_account falhou:", error);
+      return null;
+    }
+    return (data as string | null) ?? null;
+  }
+  return null;
+}
+
+async function aplicarAssinatura(
+  sub: Stripe.Subscription,
+  accountIdOverride?: string | null,
+): Promise<void> {
   const admin = supabaseAdmin();
-  const accountId = sub.metadata?.account_id;
+  const accountId = accountIdOverride ?? (await resolveAccountId(sub.metadata));
   if (!accountId) {
-    console.error("[stripe webhook] subscription sem account_id no metadata");
+    console.error("[stripe webhook] subscription sem account_id/user_id no metadata");
     return;
   }
   const plan = sub.metadata?.plan ?? "pro";
@@ -96,11 +123,29 @@ export async function POST(request: Request) {
               ? session.subscription
               : session.subscription.id;
           const sub = await getStripe().subscriptions.retrieve(subId);
-          // Garante o account_id no metadata (vem da checkout session).
-          if (!sub.metadata?.account_id && session.metadata?.account_id) {
-            sub.metadata = { ...sub.metadata, ...session.metadata };
+          // O metadata da SESSION é a fonte da verdade (account_id em upgrade OU
+          // user_id na primeira compra). Resolve a conta — provisionando se for
+          // a primeira compra.
+          const accountId = await resolveAccountId(
+            session.metadata ?? sub.metadata,
+          );
+          // Carimba o account_id resolvido na assinatura no Stripe, para que os
+          // eventos futuros (updated/deleted) já venham com ele.
+          if (accountId && sub.metadata?.account_id !== accountId) {
+            try {
+              await getStripe().subscriptions.update(subId, {
+                metadata: {
+                  ...sub.metadata,
+                  account_id: accountId,
+                  plan: session.metadata?.plan ?? sub.metadata?.plan ?? "pro",
+                },
+              });
+              sub.metadata = { ...sub.metadata, account_id: accountId };
+            } catch (e) {
+              console.error("[stripe webhook] falha ao carimbar account_id:", e);
+            }
           }
-          await aplicarAssinatura(sub);
+          await aplicarAssinatura(sub, accountId);
         }
         break;
       }
