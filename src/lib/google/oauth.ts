@@ -29,13 +29,20 @@ function googleClientSecret(): string {
   return s;
 }
 
-/** URI de callback do produto. Override por env; senão, deriva do site. */
+/**
+ * URI de callback do produto. Ordem: override explícito (GOOGLE_REDIRECT_URI) >
+ * origem da requisição (o domínio em que o usuário está AGORA) > site padrão.
+ * Preferir a origem garante que connect e callback caiam no MESMO domínio — o
+ * CRM roda em vários (www.centraldereceita.com.br, vendas.sales3r.com.br), e o
+ * cookie de state + a sessão são por-domínio. Basta cadastrar cada domínio nos
+ * "redirect URIs autorizados" do Google.
+ */
 export function googleRedirectUri(requestOrigin?: string): string {
   const explicit = process.env.GOOGLE_REDIRECT_URI;
   if (explicit) return explicit;
   const base =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ??
     requestOrigin?.replace(/\/$/, "") ??
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ??
     "";
   return `${base}/api/google/callback`;
 }
