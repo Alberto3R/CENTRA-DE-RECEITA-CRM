@@ -155,13 +155,25 @@ export async function DELETE(
 
     const { userId } = await params;
 
-    const { data, error } = await ctx.supabase.rpc("remove_account_member", {
+    // Remove do CRM (apaga o profile — corta o acesso a dados na hora; sem
+    // conta pessoal nova).
+    const { error } = await ctx.supabase.rpc("remove_account_member", {
       p_user_id: userId,
     });
 
     if (error) return rpcErrorToResponse(error);
 
-    return NextResponse.json({ ok: true, newPersonalAccountId: data });
+    // Suspende o login (banido) — regra do negócio: quem é removido não acessa
+    // mais nada. Best-effort: a remoção do profile já cortou o acesso a dados.
+    try {
+      await supabaseAdmin().auth.admin.updateUserById(userId, {
+        ban_duration: "876600h", // ~100 anos (reversível: ban_duration: 'none')
+      });
+    } catch (banErr) {
+      console.error("[members DELETE] falha ao suspender login:", banErr);
+    }
+
+    return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);
   }
