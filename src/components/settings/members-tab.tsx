@@ -667,8 +667,8 @@ export function MembersTab() {
               <span className="font-medium text-muted-foreground">
                 {removingMember?.full_name || 'este colega de equipe'}
               </span>{' '}
-              da conta? Ele será desconectado desta conta e receberá uma nova
-              conta pessoal no próximo acesso. O login dele não é excluído.
+              desta conta? Ele perde o acesso a todos os dados e conversas desta
+              conta imediatamente. Você pode convidá-lo de novo quando quiser.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="bg-popover border-border">
