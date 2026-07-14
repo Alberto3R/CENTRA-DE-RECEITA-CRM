@@ -8,10 +8,79 @@
 // para de responder até um humano reabrir.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { runAgent, type AgentTurn } from './respond'
+import { runAgent, type AgentTurn, type AgentTool, type ToolExecutor } from './respond'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { availableSlots, createMeetEvent, type SchedulingConfig } from '@/lib/google/calendar'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
+
+// Ferramentas de agenda Google do agente. Só existem quando a conta conectou a
+// agenda e o agendamento está habilitado — aí o agente vê horários livres,
+// cria o evento com Meet e manda o link, tudo dentro da conversa.
+function buildSchedulingTools(
+  accountId: string,
+  cfg: SchedulingConfig,
+  leadName: string,
+  leadEmail: string | null,
+): { tools: AgentTool[]; executors: Record<string, ToolExecutor> } {
+  const fmt = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: cfg.timezone,
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const tools: AgentTool[] = [
+    {
+      name: 'ver_horarios',
+      description:
+        'Lista os próximos horários livres na agenda do Especialista. Use quando o lead topar a call, ANTES de agendar.',
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    },
+    {
+      name: 'agendar_call',
+      description:
+        'Agenda a call com o Especialista num horário livre e gera o link do Google Meet. Passe startISO e endISO EXATAMENTE como vieram de ver_horarios.',
+      input_schema: {
+        type: 'object',
+        properties: { startISO: { type: 'string' }, endISO: { type: 'string' } },
+        required: ['startISO', 'endISO'],
+        additionalProperties: false,
+      },
+    },
+  ]
+  const executors: Record<string, ToolExecutor> = {
+    ver_horarios: async () => {
+      const slots = await availableSlots(accountId, cfg, 5)
+      if (!slots.length) return 'Sem horários livres nos próximos dias. Peça outra preferência ao lead.'
+      const lines = slots.map(
+        (s, i) => `${i + 1}) ${fmt.format(new Date(s.startISO))} [startISO=${s.startISO} endISO=${s.endISO}]`,
+      )
+      return (
+        'Horários livres:\n' +
+        lines.join('\n') +
+        '\nPara agendar, chame agendar_call com o startISO e endISO do horário escolhido.'
+      )
+    },
+    agendar_call: async (input) => {
+      const startISO = String(input.startISO ?? '')
+      const endISO = String(input.endISO ?? '')
+      if (!startISO || !endISO) return 'Erro: informe startISO e endISO vindos de ver_horarios.'
+      const r = await createMeetEvent(accountId, cfg, {
+        startISO,
+        endISO,
+        summary: `Call — ${leadName}`,
+        description: 'Call agendada pelo agente de prospecção via WhatsApp.',
+        attendeeEmail: leadEmail,
+      })
+      if (!r.meetLink) return 'Evento criado, mas sem link do Meet. Confirme com o time.'
+      return `Call agendada para ${fmt.format(new Date(startISO))}. Envie ao lead o link do Meet: ${r.meetLink}`
+    },
+  }
+  return { tools, executors }
+}
 
 // Monta o bloco de contexto do lead da calculadora (se houver) pra injetar na
 // mensagem do agente — assim a IA já chega sabendo a dor, sem perguntar de novo.
@@ -192,16 +261,62 @@ export async function maybeRunAgent(params: {
     )
   }
 
+  // 4c. Ferramentas de agenda (se a conta conectou o Google e habilitou o
+  //     agendamento). Silencioso se não houver — o agente segue sem ferramentas.
+  let tools: AgentTool[] | undefined
+  let toolExecutors: Record<string, ToolExecutor> | undefined
+  let systemPrompt = cfg.system_prompt
+  try {
+    const admin = supabaseAdmin()
+    const [{ data: gconn }, { data: sched }] = await Promise.all([
+      admin.from('google_connections').select('account_id').eq('account_id', params.accountId).maybeSingle(),
+      admin
+        .from('scheduling_config')
+        .select('enabled, timezone, slot_minutes, buffer_minutes, advance_days, business_hours')
+        .eq('account_id', params.accountId)
+        .maybeSingle(),
+    ])
+    if (gconn && (sched?.enabled ?? true)) {
+      const schedCfg: SchedulingConfig = {
+        timezone: sched?.timezone ?? 'America/Sao_Paulo',
+        slot_minutes: sched?.slot_minutes ?? 20,
+        buffer_minutes: sched?.buffer_minutes ?? 10,
+        advance_days: sched?.advance_days ?? 7,
+        business_hours: sched?.business_hours ?? { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' },
+      }
+      let leadName = 'Lead'
+      let leadEmail: string | null = null
+      if (contactId) {
+        const { data: c } = await admin
+          .from('contacts')
+          .select('name, email')
+          .eq('id', contactId)
+          .maybeSingle()
+        leadName = (c?.name as string) || 'Lead'
+        leadEmail = (c?.email as string) ?? null
+      }
+      const built = buildSchedulingTools(params.accountId, schedCfg, leadName, leadEmail)
+      tools = built.tools
+      toolExecutors = built.executors
+      systemPrompt +=
+        '\n\n# AGENDA (ferramentas)\nVocê PODE marcar a call sozinho. Quando o lead topar e der (ou aceitar) um horário, chame `ver_horarios`, escolha um slot livre e chame `agendar_call` com o startISO/endISO — depois mande a mensagem confirmando com o link do Meet. Não faça handoff humano só para marcar; o handoff fica só para casos fora do escopo.'
+    }
+  } catch (e) {
+    console.error('[ai-agent] tools de agenda indisponíveis:', e)
+  }
+
   // 5. Roda o agente
   const result = await runAgent({
     config: {
-      system_prompt: cfg.system_prompt,
+      system_prompt: systemPrompt,
       model: cfg.model,
       max_tokens: cfg.max_tokens,
     },
     history,
     incomingText: inboundText,
     leadContext,
+    tools,
+    toolExecutors,
   })
   if (!result || !result.reply.trim()) {
     // Falha da IA (erro de API, parse inválido ou resposta vazia): em vez
