@@ -9,13 +9,17 @@ const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo";
 
-// calendar.events = criar/editar evento (em qualquer agenda da conta).
-// calendar.readonly = ler livre/ocupado + LISTAR as agendas (pra escolher em
-// qual marcar, ex.: uma agenda "Comercial" dedicada). openid+email = identificar
-// qual conta Google foi conectada (mostrar na UI).
+// Escopos MÍNIMOS (menos atrito na verificação do Google):
+//   calendar.events   — SENSÍVEL: criar o evento (com Meet) na agenda escolhida.
+//                       É o único que exige justificativa + vídeo na verificação.
+//   calendar.freebusy — NÃO sensível: ler só livre/ocupado pra ofertar horário.
+//   openid + email    — identificar qual conta Google foi conectada (mostrar na UI).
+// NÃO pedimos calendar.readonly de propósito: é amplo demais (lê todos os eventos)
+// e complica a verificação. O seletor de agenda funciona colando o ID da agenda
+// (listCalendars dá 403 sem readonly → a UI cai no modo manual, já tratado).
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.freebusy",
   "openid",
   "email",
 ];
