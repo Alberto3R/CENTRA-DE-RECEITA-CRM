@@ -18,12 +18,16 @@ const HISTORY_LIMIT = 20
 // Ferramentas de agenda Google do agente. Só existem quando a conta conectou a
 // agenda e o agendamento está habilitado — aí o agente vê horários livres,
 // cria o evento com Meet e manda o link, tudo dentro da conversa.
-function buildSchedulingTools(
-  accountId: string,
-  cfg: SchedulingConfig,
-  leadName: string,
-  leadEmail: string | null,
-): { tools: AgentTool[]; executors: Record<string, ToolExecutor> } {
+function buildSchedulingTools(opts: {
+  accountId: string
+  cfg: SchedulingConfig
+  conversationId: string
+  channelId: string
+  contactId: string | null
+  leadName: string
+  leadEmail: string | null
+}): { tools: AgentTool[]; executors: Record<string, ToolExecutor> } {
+  const { accountId, cfg, conversationId, channelId, contactId, leadName, leadEmail } = opts
   const fmt = new Intl.DateTimeFormat('pt-BR', {
     timeZone: cfg.timezone,
     weekday: 'short',
@@ -32,6 +36,7 @@ function buildSchedulingTools(
     hour: '2-digit',
     minute: '2-digit',
   })
+  const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)
   const tools: AgentTool[] = [
     {
       name: 'ver_horarios',
@@ -42,10 +47,14 @@ function buildSchedulingTools(
     {
       name: 'agendar_call',
       description:
-        'Agenda a call com o Especialista num horário livre e gera o link do Google Meet. Passe startISO e endISO EXATAMENTE como vieram de ver_horarios.',
+        'Agenda a call com o Especialista num horário livre e gera o link do Google Meet. Passe startISO e endISO EXATAMENTE como vieram de ver_horarios. Se o lead informou o e-mail, passe em `email` pra ele receber o convite com lembrete.',
       input_schema: {
         type: 'object',
-        properties: { startISO: { type: 'string' }, endISO: { type: 'string' } },
+        properties: {
+          startISO: { type: 'string' },
+          endISO: { type: 'string' },
+          email: { type: 'string', description: 'E-mail do lead pra enviar o convite de agenda (opcional).' },
+        },
         required: ['startISO', 'endISO'],
         additionalProperties: false,
       },
@@ -68,13 +77,40 @@ function buildSchedulingTools(
       const startISO = String(input.startISO ?? '')
       const endISO = String(input.endISO ?? '')
       if (!startISO || !endISO) return 'Erro: informe startISO e endISO vindos de ver_horarios.'
+      const emailRaw = typeof input.email === 'string' ? input.email.trim() : ''
+      const attendeeEmail = isEmail(emailRaw) ? emailRaw : leadEmail
       const r = await createMeetEvent(accountId, cfg, {
         startISO,
         endISO,
         summary: `Call — ${leadName}`,
         description: 'Call agendada pelo agente de prospecção via WhatsApp.',
-        attendeeEmail: leadEmail,
+        attendeeEmail,
       })
+      // Registra a call DENTRO do CRM (best-effort) e guarda o e-mail no contato
+      // se ele ainda não tinha — assim o agendamento aparece na sidebar da conversa.
+      try {
+        const admin = supabaseAdmin()
+        await admin.from('scheduled_calls').insert({
+          account_id: accountId,
+          contact_id: contactId,
+          conversation_id: conversationId,
+          channel_id: channelId,
+          google_event_id: r.eventId,
+          calendar_id: r.calendarId,
+          meet_link: r.meetLink,
+          html_link: r.htmlLink,
+          summary: `Call — ${leadName}`,
+          attendee_email: attendeeEmail,
+          starts_at: startISO,
+          ends_at: endISO,
+          status: 'scheduled',
+        })
+        if (attendeeEmail && contactId) {
+          await admin.from('contacts').update({ email: attendeeEmail }).eq('id', contactId).is('email', null)
+        }
+      } catch (e) {
+        console.error('[ai-agent] registrar scheduled_call falhou:', e)
+      }
       if (!r.meetLink) return 'Evento criado, mas sem link do Meet. Confirme com o time.'
       return `Call agendada para ${fmt.format(new Date(startISO))}. Envie ao lead o link do Meet: ${r.meetLink}`
     },
@@ -295,11 +331,19 @@ export async function maybeRunAgent(params: {
         leadName = (c?.name as string) || 'Lead'
         leadEmail = (c?.email as string) ?? null
       }
-      const built = buildSchedulingTools(params.accountId, schedCfg, leadName, leadEmail)
+      const built = buildSchedulingTools({
+        accountId: params.accountId,
+        cfg: schedCfg,
+        conversationId,
+        channelId,
+        contactId: contactId ?? null,
+        leadName,
+        leadEmail,
+      })
       tools = built.tools
       toolExecutors = built.executors
       systemPrompt +=
-        '\n\n# AGENDA (ferramentas)\nVocê PODE marcar a call sozinho. Quando o lead topar e der (ou aceitar) um horário, chame `ver_horarios`, escolha um slot livre e chame `agendar_call` com o startISO/endISO — depois mande a mensagem confirmando com o link do Meet. Não faça handoff humano só para marcar; o handoff fica só para casos fora do escopo.'
+        '\n\n# AGENDA (ferramentas)\nVocê PODE marcar a call sozinho — não faça handoff humano só para isso. Fluxo:\n1. Quando o lead topar, chame `ver_horarios` e ofereça 2-3 horários CONCRETOS.\n2. Quando ele escolher um horário, pergunte (UMA pergunta curta) o melhor e-mail pra você mandar o convite com lembrete.\n3. Chame `agendar_call` com o startISO/endISO do horário e o `email` informado.\n4. Confirme com uma mensagem curta e o link do Meet.\nSe o lead não quiser dar e-mail, agende assim mesmo (sem o email) e mande o link do Meet na conversa.'
     }
   } catch (e) {
     console.error('[ai-agent] tools de agenda indisponíveis:', e)

@@ -9,11 +9,13 @@ const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo";
 
-// calendar.events = ver livre/ocupado + criar evento. openid+email = identificar
+// calendar.events = criar/editar evento (em qualquer agenda da conta).
+// calendar.readonly = ler livre/ocupado + LISTAR as agendas (pra escolher em
+// qual marcar, ex.: uma agenda "Comercial" dedicada). openid+email = identificar
 // qual conta Google foi conectada (mostrar na UI).
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/calendar.freebusy",
+  "https://www.googleapis.com/auth/calendar.readonly",
   "openid",
   "email",
 ];

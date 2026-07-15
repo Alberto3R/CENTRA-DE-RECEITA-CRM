@@ -16,6 +16,8 @@ import {
   StickyNote,
   Plus,
   PhoneCall,
+  CalendarClock,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CallHistory } from "@/components/whatsapp/call-history";
@@ -32,6 +34,9 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [calls, setCalls] = useState<
+    { id: string; starts_at: string; meet_link: string | null; status: string }[]
+  >([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -40,8 +45,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    // Fetch deals, notes, tags and scheduled calls in parallel
+    const [dealsRes, notesRes, tagsRes, callsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -56,10 +61,17 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      supabase
+        .from("scheduled_calls")
+        .select("id, starts_at, meet_link, status")
+        .eq("contact_id", contact.id)
+        .eq("status", "scheduled")
+        .order("starts_at", { ascending: true }),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
+    if (callsRes.data) setCalls(callsRes.data);
     if (tagsRes.data) {
       const mapped = tagsRes.data
         .filter((ct: Record<string, unknown>) => ct.tags)
@@ -243,6 +255,40 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                         </span>
                       )}
                     </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Calls agendadas (pelo agente de IA) */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <CalendarClock className="h-3 w-3" />
+              Calls agendadas
+            </div>
+            <div className="mt-2 space-y-2">
+              {calls.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">Nenhuma call marcada</p>
+              ) : (
+                calls.map((call) => (
+                  <div key={call.id} className="rounded-lg bg-muted px-3 py-2">
+                    <p className="text-sm font-medium text-foreground">
+                      {format(new Date(call.starts_at), "EEE, d 'de' MMM 'às' HH:mm")}
+                    </p>
+                    {call.meet_link && (
+                      <a
+                        href={call.meet_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        <Video className="h-3 w-3" /> Entrar no Meet
+                      </a>
+                    )}
                   </div>
                 ))
               )}

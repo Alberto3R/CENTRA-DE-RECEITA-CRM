@@ -158,6 +158,31 @@ export function computeSlots(
   return slots;
 }
 
+/** Agendas visíveis na conta Google conectada (pra escolher em qual marcar).
+ *  Exige escopo de leitura de calendarList (calendar.readonly). Se a conexão foi
+ *  autorizada antes desse escopo, o Google devolve 403 — retornamos null e a UI
+ *  cai pro modo "digite o ID da agenda". */
+export async function listCalendars(
+  accountId: string,
+): Promise<{ id: string; summary: string; primary: boolean }[] | null> {
+  const conn = await getAccountCalendar(accountId);
+  if (!conn) return null;
+  const res = await fetch(
+    `${CAL_API}/users/me/calendarList?minAccessRole=writer&fields=items(id,summary,summaryOverride,primary,accessRole)`,
+    { headers: { Authorization: `Bearer ${conn.accessToken}` } },
+  );
+  if (res.status === 403) return null; // escopo insuficiente → modo manual
+  if (!res.ok) throw new Error(`calendarList falhou (${res.status}): ${await res.text().catch(() => "")}`.slice(0, 300));
+  const data = (await res.json()) as {
+    items?: { id: string; summary?: string; summaryOverride?: string; primary?: boolean }[];
+  };
+  return (data.items ?? []).map((c) => ({
+    id: c.id,
+    summary: c.summaryOverride || c.summary || c.id,
+    primary: !!c.primary,
+  }));
+}
+
 /** Slots livres da conta prontos pra ofertar (junta getAccountCalendar+freeBusy+computeSlots). */
 export async function availableSlots(
   accountId: string,
@@ -177,7 +202,7 @@ export async function createMeetEvent(
   accountId: string,
   cfg: SchedulingConfig,
   args: { startISO: string; endISO: string; summary: string; description?: string; attendeeEmail?: string | null },
-): Promise<{ meetLink: string | null; htmlLink: string | null; eventId: string }> {
+): Promise<{ meetLink: string | null; htmlLink: string | null; eventId: string; calendarId: string }> {
   const conn = await getAccountCalendar(accountId);
   if (!conn) throw new Error("Agenda Google não conectada nesta conta.");
 
@@ -208,5 +233,5 @@ export async function createMeetEvent(
     throw new Error(`Falha ao criar evento (${res.status}): ${await res.text().catch(() => "")}`.slice(0, 300));
   }
   const ev = (await res.json()) as { id: string; htmlLink?: string; hangoutLink?: string };
-  return { meetLink: ev.hangoutLink ?? null, htmlLink: ev.htmlLink ?? null, eventId: ev.id };
+  return { meetLink: ev.hangoutLink ?? null, htmlLink: ev.htmlLink ?? null, eventId: ev.id, calendarId: conn.calendarId };
 }
