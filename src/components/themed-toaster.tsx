@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { Toaster } from "sonner";
+import { CircleCheck, CircleX, Info, TriangleAlert } from "lucide-react";
 
 import { useTheme } from "@/hooks/use-theme";
 import { DEFAULT_MODE } from "@/lib/themes";
@@ -39,11 +40,28 @@ export function ThemedToaster() {
     <Toaster
       theme={isClient ? mode : DEFAULT_MODE}
       position="top-right"
+      // richColors = fundo tênue por status (verde/vermelho/âmbar), que já
+      // adapta a claro/escuro. Ícones próprios (círculo cheio) e cantos/sombra
+      // mais caprichados dão o acabamento — pra não ter cara de template.
+      richColors
+      icons={{
+        success: <CircleCheck className="h-[18px] w-[18px]" strokeWidth={2.25} />,
+        error: <CircleX className="h-[18px] w-[18px]" strokeWidth={2.25} />,
+        warning: <TriangleAlert className="h-[18px] w-[18px]" strokeWidth={2.25} />,
+        info: <Info className="h-[18px] w-[18px]" strokeWidth={2.25} />,
+      }}
       toastOptions={{
         style: {
-          background: "var(--popover)",
-          border: "1px solid var(--border)",
-          color: "var(--popover-foreground)",
+          borderRadius: "13px",
+          padding: "13px 15px",
+          gap: "11px",
+          fontFamily: "var(--font-sans)",
+          fontSize: "13.5px",
+          boxShadow:
+            "0 10px 30px -14px rgb(0 0 0 / 0.28), 0 2px 6px -3px rgb(0 0 0 / 0.10)",
+        },
+        classNames: {
+          title: "font-medium leading-snug",
         },
       }}
     />
