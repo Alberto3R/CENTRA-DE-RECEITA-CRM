@@ -376,16 +376,39 @@ async function handleStatusUpdate(status: {
   status: string
   timestamp: string
   recipient_id: string
+  // Em status=failed a Meta manda o motivo aqui (code + title/details).
+  errors?: Array<{
+    code?: number
+    title?: string
+    message?: string
+    error_data?: { details?: string }
+  }>
 }) {
+  // Motivo da falha (quando houver): guardamos code + texto legível pra
+  // mostrar na UI em vez de um "X vermelho" mudo.
+  const err = status.errors?.[0]
+  const errorCode = err?.code != null ? String(err.code) : null
+  const errorTitle = err
+    ? err.error_data?.details || err.title || err.message || (errorCode ? `Erro ${errorCode}` : 'Falha no envio')
+    : null
+
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status.
+  //    already match the CHECK constraint on messages.status. Em falha,
+  //    grava o motivo; em qualquer avanço de status, limpa o erro antigo.
+  const patch: Record<string, unknown> = { status: status.status }
+  if (status.status === 'failed') {
+    patch.error_code = errorCode
+    patch.error_title = errorTitle
+  }
   const { error: msgErr } = await supabaseAdmin()
     .from('messages')
-    .update({ status: status.status })
+    .update(patch)
     .eq('message_id', status.id)
 
   if (msgErr) {
     console.error('Error updating message status:', msgErr)
+  } else if (status.status === 'failed') {
+    console.warn(`[webhook] envio falhou msg=${status.id} code=${errorCode} motivo="${errorTitle}"`)
   }
 
   // 2) Mirror onto broadcast_recipients via whatsapp_message_id

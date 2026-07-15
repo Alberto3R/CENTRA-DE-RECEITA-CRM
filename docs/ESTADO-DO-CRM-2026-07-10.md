@@ -1,3 +1,5 @@
+> ⚠️ **Retrato substituído.** Versão atual: [`ESTADO-DO-CRM-2026-07-14.md`](./ESTADO-DO-CRM-2026-07-14.md). Este documento fica como histórico do dia 10/jul.
+
 # Estado do CRM — Central de Receita · 10/jul/2026
 
 Documento-retrato de como o CRM está **hoje**: o que é, o que faz, quem usa,

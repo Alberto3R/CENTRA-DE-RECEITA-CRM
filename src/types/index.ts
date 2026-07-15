@@ -192,6 +192,9 @@ export interface Message {
   template_name?: string;
   message_id?: string;
   status: MessageStatus;
+  /** Motivo da falha (status='failed') — código e texto legível da Meta. */
+  error_code?: string | null;
+  error_title?: string | null;
   created_at: string;
   reply_to_message_id?: string;
   /**

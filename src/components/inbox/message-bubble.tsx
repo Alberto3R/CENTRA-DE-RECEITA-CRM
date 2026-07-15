@@ -297,6 +297,12 @@ export function MessageBubble({
           {isAgent && <StatusIcon status={message.status} />}
         </div>
       </div>
+      {isAgent && message.status === "failed" && (
+        <p className="mt-0.5 max-w-[85%] text-right text-[10px] leading-tight text-red-500">
+          Não entregue{message.error_title ? `: ${message.error_title}` : ""}
+          {message.error_code ? ` (Meta ${message.error_code})` : ""}
+        </p>
+      )}
       {reactions && reactions.length > 0 && onToggleReaction && (
         <MessageReactions
           reactions={reactions}

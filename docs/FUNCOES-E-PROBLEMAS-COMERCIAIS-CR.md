@@ -116,6 +116,26 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 
 ---
 
+## 9b. Agente de IA — atende, qualifica e **marca a call sozinho**
+
+> Um **vendedor de IA por número**: responde o lead na hora, no tom da marca, qualifica, contorna objeção e **marca a reunião sozinho na agenda** — sem humano no meio até o "vamos conversar". (Em operação real na AUGRA, com 2 agentes: recrutamento e prospecção.)
+
+| Função | O que faz | Problema comercial que resolve |
+|---|---|---|
+| **1 agente por canal, com persona própria** | Cada número tem seu agente (prompt e objetivo próprios): um qualifica prospecção fria, outro faz recrutamento/onboarding. | Atendimento automático **específico por frente**, no tom certo — sem um bot genérico pra tudo. |
+| **Atende e qualifica 24/7** | Responde na hora, faz **uma pergunta por vez**, valida a dor **antes** de oferecer a reunião. | **Não perde lead por demora** nem queima o lead oferecendo call cedo demais — qualifica antes de ocupar o closer. |
+| **Marca a call sozinho (Google Agenda)** | Vê horário livre, **oferece 2-3 horários concretos**, cria o evento com **Google Meet** e manda o link — tudo dentro da conversa. | Acaba o **vai-e-volta de agenda**: o lead sai da conversa com reunião marcada e link na mão, sem depender de humano. |
+| **Convite + lembrete pro lead** | Pergunta o e-mail e adiciona o lead ao evento → o Google manda convite e lembrete. | **Reduz no-show** — o lead é lembrado da reunião automaticamente. |
+| **Escolhe em qual agenda marcar** | O dono aponta uma agenda dedicada (ex.: "Comercial"), separada da pessoal. | As calls do time **não se misturam** com a agenda pessoal de ninguém. |
+| **Call registrada no CRM** | Cada agendamento aparece na **sidebar da conversa** (data + link do Meet). | **Visibilidade**: o time vê o que está marcado sem abrir o Google. |
+| **Handoff pro humano** | Passa pro time quando o lead pede pessoa, quer negociar valor ou foge do escopo. | O humano entra **só quando agrega** — o resto o agente resolve. |
+
+> Dor central: qualificar e agendar **na mão**, lead por lead, trava o time e perde o timing.
+> O agente faz a **primeira milha inteira** — atender, qualificar e marcar — e entrega o lead
+> quente, com a reunião **já no calendário**.
+
+---
+
 ## 10. Ligação WhatsApp (VoIP) — voz no mesmo número
 
 > Deixando claro: a ligação que entregamos é a **ligação da Meta (do WhatsApp)** — VoIP pelo próprio número oficial verificado, dentro do CRM. Não é telefonia comum nem discador externo.
@@ -150,7 +170,8 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 | **Modelos (gestão)** | Criar/sincronizar templates aprovados. | Manter o **arsenal de mensagens** pronto e conforme a Meta. |
 | **Campos e tags** | Modelar o processo e o ICP. | O CRM **fala a língua do negócio** do cliente. |
 | **Negócios e moeda** | Padrão de moeda/forecast por conta. | Números **comparáveis** e forecast consistente. |
-| **Agente IA** | Configurar respostas automáticas por IA. | Atendimento de 1ª linha **sem humano**, no tom da marca. |
+| **Agente IA (por canal)** | Configurar a persona, o objetivo e o handoff do agente de cada número (§9b). | Atendimento e **agendamento** de 1ª linha **sem humano**, no tom da marca, diferente por frente. |
+| **Agenda (Google)** | Conectar a agenda da conta, escolher em qual calendário marcar e definir as regras (fuso, duração, buffer, horários). | Habilita o agente a **marcar a call sozinho** na agenda certa (§9b) — cada conta liga a sua. |
 | **Webhooks e Chaves de API** | Integrar com outras ferramentas. | Encaixar o CRM na **stack** (dados, Make, landing pages, etc.). |
 | **Assinatura (billing self-service)** | Plano, assentos e pagamento via Stripe. | Cliente **se vira sozinho** — menos fricção comercial e operacional. |
 
@@ -175,6 +196,7 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 - **Painel Outbound:** gere **atividade** (não só resultado) e garante follow-up.
 - **Disparos/Automações/Fluxos:** comunicação e atendimento **em escala**, 24/7.
 - **Gestor Comercial (IA):** a **melhor função** — um gestor nos seus dados **em tempo real, que não dorme nem tira férias**.
+- **Agente de IA:** um **vendedor de IA por número** que atende, qualifica e **marca a call sozinho** (Google Meet + convite ao lead), e entrega o lead quente.
 - **Ligação da Meta (WhatsApp):** **voz no mesmo número oficial**, dentro do CRM, com **gravação, transcrição e coaching** por IA.
 - **Multi-marca + plataforma:** operar **várias marcas com segurança** num só lugar.
 
@@ -186,7 +208,8 @@ comercial ela ataca**. Serve para vendas, onboarding e posicionamento.
 - **Gravação:** vale a partir da entrada do recurso — **ligações antigas (anteriores) não têm gravação** e aparecem como "sem gravação" na página Ligações. Só chamadas novas gravam.
 - **Transcrição:** usa a **ElevenLabs Scribe** (a assinatura ElevenLabs que a operação já paga), em PT-BR com diarização. Roda **sob demanda** (botão "Analisar"), não automaticamente — controla custo e só transcreve o que o gestor quer analisar. Requer a env `ELEVENLABS_API_KEY` no ambiente; sem ela, o player continua funcionando e só a transcrição fica indisponível.
 - **Página Ligações e "Analisar":** restritas a **admin/gestor** (agente/visualizador não acessam).
-- **Onboarding:** modelo **só convite + compra**; criação avulsa de conta foi removida da maioria dos pontos (inclusive o botão "Começar" da página de vendas).
+- **Onboarding:** modelo **Stripe-first** — `signup` cria só um login; a **conta nasce na compra** (webhook Stripe) ou no **convite**. Criação avulsa de conta removida; remoção de membro é **total** (sem conta pessoal de brinde).
+- **Agente + Agenda (Google):** o agente marca a call na **agenda Google da conta** (cada conta liga a sua). A **verificação do app Google** está em curso — enquanto não aprova, aparece o aviso "app não verificado" e há teto de 100 usuários por conta conectada.
 
 ---
-*Documento de posicionamento — Central de Receita, jul/2026. Atualizado com o módulo de Ligação completo (gravar/ouvir/transcrever/analisar), onboarding por convite e checkout Stripe.*
+*Documento de posicionamento — Central de Receita, jul/2026. Atualizado com o **agente de IA que marca a call sozinho** (Google Agenda + Meet + convite ao lead, §9b), agente por canal em operação real (AUGRA), onboarding Stripe-first, e o módulo de Ligação completo (gravar/ouvir/transcrever/analisar).*
