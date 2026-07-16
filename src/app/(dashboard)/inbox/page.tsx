@@ -166,12 +166,8 @@ export default function InboxPage() {
 
       if (!user) return;
 
-      // whatsapp_config is one-row-per-account post-multi-user, so
-      // the previous `.eq('user_id', user.id)` would miss the row
-      // for any teammate who didn't personally save the config —
-      // the "WhatsApp not connected" banner would show in the
-      // shared inbox even though the admin had it configured.
-      // Resolve account_id via the profile and query by that.
+      // Resolve account_id via the profile and query by that (a teammate
+      // who didn't personally save the config still sees the shared status).
       const { data: profile } = await supabase
         .from("profiles")
         .select("account_id")
@@ -183,13 +179,20 @@ export default function InboxPage() {
         return;
       }
 
+      // Multi-canal: a conta pode ter VÁRIOS canais (WhatsApp + Instagram).
+      // O banner é sobre o WhatsApp, então checamos se há ao menos UM canal
+      // de WhatsApp conectado. (Antes usava .maybeSingle(), que passou a dar
+      // erro de "múltiplas linhas" assim que a conta ganhou um 2º canal —
+      // ex.: o canal do Instagram — e o banner acusava desconectado à toa.)
       const { data } = await supabase
         .from("whatsapp_config")
-        .select("status")
+        .select("id")
         .eq("account_id", accountId)
-        .maybeSingle();
+        .eq("channel_type", "whatsapp")
+        .eq("status", "connected")
+        .limit(1);
 
-      setWhatsappConnected(data?.status === "connected");
+      setWhatsappConnected((data?.length ?? 0) > 0);
     };
 
     checkConnection();

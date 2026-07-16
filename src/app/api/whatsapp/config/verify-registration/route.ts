@@ -56,10 +56,15 @@ export async function GET() {
     })
   }
 
+  // Multi-canal: verifica o canal primário de WhatsApp da conta (o registro
+  // é por número). .maybeSingle() por conta dava erro de múltiplas linhas
+  // com >1 canal — ex.: quando a conta também tem um canal de Instagram.
   const { data: config } = await supabase
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', accountId)
+    .eq('channel_type', 'whatsapp')
+    .eq('is_primary', true)
     .maybeSingle()
 
   if (!config) {

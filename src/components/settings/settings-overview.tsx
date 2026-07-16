@@ -117,10 +117,16 @@ export function SettingsOverview({
     (async () => {
       setWhatsappLoading(true);
       const [row, health] = await Promise.allSettled([
+        // Multi-canal: só canais de WhatsApp (a conta pode ter Instagram
+        // também). .maybeSingle() por conta dava erro de múltiplas linhas
+        // assim que surgia um 2º canal → card acusava "não configurado".
         supabase
           .from('whatsapp_config')
           .select('phone_number_id')
           .eq('account_id', acctId)
+          .eq('channel_type', 'whatsapp')
+          .order('is_primary', { ascending: false })
+          .limit(1)
           .maybeSingle(),
         fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) => r.json()),
       ]);
