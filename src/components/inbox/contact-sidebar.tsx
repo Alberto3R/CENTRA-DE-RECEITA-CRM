@@ -23,6 +23,13 @@ import { Button } from "@/components/ui/button";
 import { CallHistory } from "@/components/whatsapp/call-history";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
+import {
+  InstagramGlyph,
+  isInstagramContact,
+  contactDisplayName,
+  contactInitial,
+  contactSubtitle,
+} from "./channel-display";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -91,8 +98,10 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   }, [fetchContactData]);
 
   const handleCopyPhone = useCallback(async () => {
-    if (!contact?.phone) return;
-    await navigator.clipboard.writeText(contact.phone);
+    // Copia a identidade do canal: telefone (WhatsApp) ou @username (IG).
+    const value = contactSubtitle(contact);
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     // Dep is the whole `contact` object (not `contact?.phone`) so the
@@ -137,8 +146,12 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     );
   }
 
-  const displayName = contact.name || contact.phone;
-  const initials = displayName.charAt(0).toUpperCase();
+  // Robusto p/ Instagram: contato IG não tem telefone (name/phone null) —
+  // usa os helpers de canal (nome > @username > telefone > fallback).
+  const displayName = contactDisplayName(contact);
+  const initials = contactInitial(contact);
+  const isInstagram = isInstagramContact(contact);
+  const identity = contactSubtitle(contact); // telefone (WhatsApp) ou @username (IG)
 
   return (
     <div className="flex h-full w-70 flex-col border-l border-border bg-card">
@@ -171,8 +184,12 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               onClick={handleCopyPhone}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
             >
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">{contact.phone}</span>
+              {isInstagram ? (
+                <InstagramGlyph className="h-4 w-4 text-[#E1306C]" />
+              ) : (
+                <Phone className="h-4 w-4 text-muted-foreground" />
+              )}
+              <span className="flex-1 text-left">{identity || "—"}</span>
               {copied ? (
                 <Check className="h-3 w-3 text-primary" />
               ) : (

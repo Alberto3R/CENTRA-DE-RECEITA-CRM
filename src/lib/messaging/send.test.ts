@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock só as camadas de rede (senders da Meta) + decrypt. phone-utils é real
 // (queremos exercitar sanitização/variantes de verdade).
-const waSend = vi.fn(async () => ({ messageId: 'wa-1' }))
-const igPageToken = vi.fn(async () => 'PAGE_TOKEN')
-const igSend = vi.fn(async () => ({ messageId: 'ig-1' }))
+const waSend = vi.fn<(a: unknown) => Promise<{ messageId: string }>>(
+  async () => ({ messageId: 'wa-1' }),
+)
+const igPageToken = vi.fn<(a: unknown) => Promise<string>>(async () => 'PAGE_TOKEN')
+const igSend = vi.fn<(a: unknown) => Promise<{ messageId: string }>>(
+  async () => ({ messageId: 'ig-1' }),
+)
 
 vi.mock('@/lib/whatsapp/meta-api', () => ({
   sendTextMessage: (a: unknown) => waSend(a),

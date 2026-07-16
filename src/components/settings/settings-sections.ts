@@ -1,4 +1,5 @@
 import {
+  AtSign,
   Bot,
   CalendarClock,
   Coins,
@@ -31,6 +32,7 @@ export const SETTINGS_SECTIONS = [
   'appearance',
   'billing',
   'whatsapp',
+  'instagram',
   'templates',
   'fields',
   'deals',
@@ -66,6 +68,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
   billing: { id: 'billing', label: 'Assinatura', icon: CreditCard, group: 'account', adminOnly: true },
   whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace', adminOnly: true },
+  instagram: { id: 'instagram', label: 'Instagram', icon: AtSign, group: 'workspace', adminOnly: true },
   templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace', adminOnly: true },
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },
   deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace', adminOnly: true },

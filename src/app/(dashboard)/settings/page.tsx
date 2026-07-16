@@ -12,6 +12,7 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { BillingSettings } from '@/components/settings/billing-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { InstagramSettings } from '@/components/settings/instagram-settings';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
@@ -67,6 +68,7 @@ export default function SettingsPage() {
     appearance: <AppearancePanel />,
     billing: <BillingSettings />,
     whatsapp: <WhatsAppConfig />,
+    instagram: <InstagramSettings />,
     templates: <TemplateManager />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,

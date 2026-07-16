@@ -103,10 +103,14 @@ export function WhatsAppConfig() {
     setLoading(true);
     try {
       // Multi-canal: carrega a LISTA de canais da conta (primário primeiro).
+      // Só canais de WhatsApp — o Instagram tem sua própria seção (senão o
+      // painel tentaria verificar um canal sem phone_number_id na Graph API
+      // do WhatsApp → erro "Object with ID 'null'").
       const { data: list, error } = await supabase
         .from('whatsapp_config')
         .select('*')
         .eq('account_id', acctId)
+        .eq('channel_type', 'whatsapp')
         .order('is_primary', { ascending: false })
         .order('created_at', { ascending: true });
 
