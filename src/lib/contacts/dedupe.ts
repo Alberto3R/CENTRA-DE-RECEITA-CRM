@@ -56,6 +56,31 @@ export async function findExistingContact(
 }
 
 /**
+ * Find an existing contact in `accountId` by Instagram identity (IGSID),
+ * or null. Instagram DMs have no phone, so the canonical key is the
+ * `instagram_id` — deduped by the partial unique index
+ * `contacts_account_igsid_unique (account_id, instagram_id)`. Mirrors
+ * `findExistingContact` for the WhatsApp/phone path.
+ */
+export async function findContactByInstagramId(
+  db: SupabaseClient,
+  accountId: string,
+  instagramId: string,
+): Promise<ExistingContact | null> {
+  if (!instagramId) return null
+
+  const { data, error } = await db
+    .from('contacts')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('instagram_id', instagramId)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return data as ExistingContact
+}
+
+/**
  * True when an existing contact is an *exact* normalized match for
  * `phone` (vs only a fuzzy trunk-variant match). The form hard-blocks
  * exact matches but only warns on fuzzy ones.

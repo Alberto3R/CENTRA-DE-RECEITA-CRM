@@ -50,6 +50,13 @@ import {
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { buildReplyPreview } from "./reply-quote";
+import {
+  InstagramGlyph,
+  isInstagramContact,
+  contactDisplayName,
+  contactSubtitle,
+  contactInitial,
+} from "./channel-display";
 import { toast } from "sonner";
 
 interface ReplyDraft {
@@ -681,17 +688,17 @@ export function MessageThread({
     return map;
   }, [reactions]);
 
-  const contactDisplayName = contact?.name || contact?.phone || "Cliente";
+  const senderContactLabel = contactDisplayName(contact);
 
   // Author label for a quoted message: "You" when we sent the parent,
-  // contact name when the customer sent it.
+  // contact name (ou @username no Instagram) when the customer sent it.
   const authorLabelFor = useCallback(
     (m: Message): string => {
       const isAgentMsg =
         m.sender_type === "agent" || m.sender_type === "bot";
-      return isAgentMsg ? "Você" : contactDisplayName;
+      return isAgentMsg ? "Você" : senderContactLabel;
     },
-    [contactDisplayName],
+    [senderContactLabel],
   );
 
   const handleStartReply = useCallback(
@@ -843,7 +850,9 @@ export function MessageThread({
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const displayName = contactDisplayName(contact);
+  const contactSubtitleText = contactSubtitle(contact);
+  const isInstagram = isInstagramContact(contact);
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
@@ -883,12 +892,22 @@ export function MessageThread({
               <ArrowLeft className="h-5 w-5" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
-            {displayName.charAt(0).toUpperCase()}
+          <div className="relative flex-shrink-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+              {contactInitial(contact)}
+            </div>
+            {isInstagram && (
+              <span
+                className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-card text-[#E1306C] ring-2 ring-card"
+                title="Instagram Direct"
+              >
+                <InstagramGlyph className="h-3 w-3" />
+              </span>
+            )}
           </div>
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            <p className="truncate text-xs text-muted-foreground">{contactSubtitleText}</p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
@@ -907,8 +926,9 @@ export function MessageThread({
         <div className="flex shrink-0 items-center gap-1">
           {/* Ligação WhatsApp (business-initiated). Ícone no header; abre
               o softphone WebRTC. Requer calling habilitado + permissão do
-              lead + tier — senão avisa via tooltip/estado. */}
-          <WaCallButton contactId={contact.id} compact />
+              lead + tier — senão avisa via tooltip/estado. Não faz sentido
+              no Instagram (sem telefone) — escondido nesse canal. */}
+          {!isInstagram && <WaCallButton contactId={contact.id} compact />}
 
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
@@ -1176,6 +1196,7 @@ export function MessageThread({
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+        isInstagram={isInstagram}
       />
 
       <TemplatePicker

@@ -11,6 +11,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { runAgent, type AgentTurn, type AgentTool, type ToolExecutor } from './respond'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { availableSlots, createMeetEvent, type SchedulingConfig } from '@/lib/google/calendar'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -248,10 +250,46 @@ export async function maybeRunAgent(params: {
     .maybeSingle()
   if (conv?.ai_handoff) return
 
+  // Canal desta conversa — decide WhatsApp vs Instagram no envio. O webhook
+  // (e o /api/instagram/process) passam o admin client, então
+  // resolveChannelConfig enxerga qualquer canal da conta.
+  const channel = await resolveChannelConfig(supabase, params.accountId, channelId)
+  let contactInstagramId: string | null = null
+  const convContactId = (conv as { contact_id?: string } | null)?.contact_id
+  if (isInstagramChannel(channel) && convContactId) {
+    const { data: c } = await supabase
+      .from('contacts')
+      .select('instagram_id')
+      .eq('id', convContactId)
+      .maybeSingle()
+    contactInstagramId =
+      (c as { instagram_id?: string | null } | null)?.instagram_id ?? null
+  }
+
+  // Envio agnóstico de canal: WhatsApp mantém o fetch nativo (contactWaId +
+  // token vindo do webhook, comportamento intacto); Instagram sai pelo
+  // Messenger Platform via o canal resolvido. Grava sempre como 'bot'.
+  const send = async (text: string): Promise<string | null> => {
+    if (isInstagramChannel(channel)) {
+      try {
+        const r = await sendTextViaChannel({
+          channel,
+          contact: { instagram_id: contactInstagramId },
+          text,
+        })
+        return r.providerMessageId
+      } catch (e) {
+        console.error('[ai-agent] envio Instagram falhou', e)
+        return null
+      }
+    }
+    return sendText(phoneNumberId, accessToken, contactWaId, text)
+  }
+
   // 3. Handoff por palavra-chave do cliente
   const kw = (cfg.handoff_keyword ?? '').trim().toLowerCase()
   if (kw && inboundText.toLowerCase().includes(kw)) {
-    const mid = await sendText(phoneNumberId, accessToken, contactWaId, cfg.handoff_message)
+    const mid = await send(cfg.handoff_message)
     await insertBotMessage(supabase, conversationId, cfg.handoff_message, mid)
     await supabase
       .from('conversations')
@@ -379,7 +417,7 @@ export async function maybeRunAgent(params: {
   // cada balão gravado como mensagem do bot.
   const parts = splitReply(result.reply)
   for (const part of parts) {
-    const mid = await sendText(phoneNumberId, accessToken, contactWaId, part)
+    const mid = await send(part)
     await insertBotMessage(supabase, conversationId, part, mid)
   }
   await supabase

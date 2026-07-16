@@ -5,6 +5,12 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
 import { Search, ChevronDown } from "lucide-react";
+import {
+  InstagramGlyph,
+  isInstagramContact,
+  contactDisplayName,
+  contactInitial,
+} from "./channel-display";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -242,8 +248,9 @@ function ConversationItem({
   onSelect,
 }: ConversationItemProps) {
   const contact = conversation.contact;
-  const displayName = contact?.name || contact?.phone || "Desconhecido";
-  const initials = displayName.charAt(0).toUpperCase();
+  const displayName = contactDisplayName(contact);
+  const initials = contactInitial(contact);
+  const isInstagram = isInstagramContact(contact);
 
   const handleClick = useCallback(() => {
     onSelect(conversation);
@@ -263,16 +270,26 @@ function ConversationItem({
         isActive && "border-l-2 border-primary bg-muted/70"
       )}
     >
-      {/* Avatar */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
-        {contact?.avatar_url ? (
-          <img
-            src={contact.avatar_url}
-            alt={displayName}
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          initials
+      {/* Avatar — com selo do canal Instagram quando aplicável */}
+      <div className="relative shrink-0">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+          {contact?.avatar_url ? (
+            <img
+              src={contact.avatar_url}
+              alt={displayName}
+              className="h-10 w-10 rounded-full object-cover"
+            />
+          ) : (
+            initials
+          )}
+        </div>
+        {isInstagram && (
+          <span
+            className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-card text-[#E1306C] ring-2 ring-background"
+            title="Instagram Direct"
+          >
+            <InstagramGlyph className="h-3 w-3" />
+          </span>
         )}
       </div>
 

@@ -9,6 +9,7 @@ import {
 } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -65,23 +66,66 @@ export async function engineSendText(
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, instagram_id')
     .eq('id', args.contactId)
     .eq('account_id', args.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
 
+  // Multi-canal: resolve o canal DESTA conversa (channel_id) com fallback pro
+  // primário — decide WhatsApp vs Instagram.
+  const { data: convRow } = await db
+    .from('conversations')
+    .select('channel_id')
+    .eq('id', args.conversationId)
+    .maybeSingle()
+  const config = await resolveChannelConfig(
+    db,
+    args.accountId,
+    (convRow as { channel_id?: string | null } | null)?.channel_id,
+  )
+  if (!config) {
+    throw new Error('canal não configurado para esta conta')
+  }
+
+  // ── Instagram: texto pelo Messenger Platform (send_message / collect_input) ──
+  if (isInstagramChannel(config)) {
+    const { providerMessageId } = await sendTextViaChannel({
+      channel: config,
+      contact: { instagram_id: contact.instagram_id },
+      text: args.text,
+    })
+    const { error: igMsgErr } = await db.from('messages').insert({
+      conversation_id: args.conversationId,
+      sender_type: 'bot',
+      content_type: 'text',
+      content_text: args.text,
+      message_id: providerMessageId,
+      status: 'sent',
+    })
+    if (igMsgErr) {
+      throw new Error(`sent to Meta but DB insert failed: ${igMsgErr.message}`)
+    }
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: args.text,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', args.conversationId)
+    return { whatsapp_message_id: providerMessageId }
+  }
+
+  // ── WhatsApp (comportamento original) ──
+  if (!contact.phone) {
+    throw new Error('contact phone missing for WhatsApp send')
+  }
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) {
     throw new Error(`contact phone invalid: ${contact.phone}`)
-  }
-
-  // Multi-canal: usa o canal primário da conta (flows não escolhem número).
-  const config = await resolveChannelConfig(db, args.accountId)
-  if (!config) {
-    throw new Error('WhatsApp not configured for this account')
   }
 
   const accessToken = decrypt(config.access_token)

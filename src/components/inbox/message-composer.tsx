@@ -98,6 +98,9 @@ interface MessageComposerProps {
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  /** Canal Instagram: esconde mídia e modelos (WhatsApp-only) — Fase 1 é
+   *  só texto. */
+  isInstagram?: boolean;
 }
 
 function formatDuration(seconds: number): string {
@@ -119,6 +122,7 @@ export function MessageComposer({
   onOpenTemplates,
   replyTo,
   onClearReply,
+  isInstagram = false,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -472,56 +476,62 @@ export function MessageComposer({
         </div>
       ) : (
         <div className="flex items-end gap-2">
-          {/* Attach menu — photo / video / document / voice. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={inputsDisabled || busy}
-              title={
-                readOnly
-                  ? "Somente leitura — seu perfil não pode enviar mensagens"
-                  : inputsDisabled
-                    ? undefined
-                    : "Anexar mídia"
-              }
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Paperclip className="h-4 w-4" />
-              )}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="border-border bg-popover">
-              <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
-                <ImageIcon className="mr-2 h-4 w-4" />
-                Foto
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
-                <Video className="mr-2 h-4 w-4" />
-                Vídeo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
-                <FileText className="mr-2 h-4 w-4" />
-                Documento
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
-                <Mic className="mr-2 h-4 w-4" />
-                Mensagem de voz
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Mídia e modelos são específicos do WhatsApp. No Instagram
+              (Fase 1 = só texto) essas ações ficam escondidas. */}
+          {!isInstagram && (
+            <>
+              {/* Attach menu — photo / video / document / voice. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={inputsDisabled || busy}
+                  title={
+                    readOnly
+                      ? "Somente leitura — seu perfil não pode enviar mensagens"
+                      : inputsDisabled
+                        ? undefined
+                        : "Anexar mídia"
+                  }
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-4 w-4" />
+                  )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="border-border bg-popover">
+                  <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+                    <ImageIcon className="mr-2 h-4 w-4" />
+                    Foto
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
+                    <Video className="mr-2 h-4 w-4" />
+                    Vídeo
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Documento
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void startRecording()}>
+                    <Mic className="mr-2 h-4 w-4" />
+                    Mensagem de voz
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-          <GatedButton
-            variant="ghost"
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            title={readOnly ? undefined : "Enviar modelo"}
-            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="h-4 w-4" />
-          </GatedButton>
+              <GatedButton
+                variant="ghost"
+                size="sm"
+                canAct={!readOnly}
+                gateReason="send messages"
+                title={readOnly ? undefined : "Enviar modelo"}
+                className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                onClick={onOpenTemplates}
+              >
+                <LayoutTemplate className="h-4 w-4" />
+              </GatedButton>
+            </>
+          )}
 
           <textarea
             ref={textareaRef}

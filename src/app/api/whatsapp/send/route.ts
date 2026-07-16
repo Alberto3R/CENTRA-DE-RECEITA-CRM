@@ -9,6 +9,7 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { sendInstagramReply } from '@/lib/instagram/send'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -150,6 +151,60 @@ export async function POST(request: Request) {
     }
 
     const contact = conversation.contact
+
+    // ── Instagram Direct ────────────────────────────────────────────────
+    // Canal sem telefone: se o contato tem identidade Instagram (IGSID),
+    // roteia para o sender do IG ANTES das validações de telefone do
+    // WhatsApp. Fase 1: só texto, dentro da janela de 24h.
+    const instagramId = (contact as { instagram_id?: string | null } | null)
+      ?.instagram_id
+    if (instagramId) {
+      if (message_type !== 'text') {
+        return NextResponse.json(
+          { error: 'Instagram: apenas mensagens de texto são suportadas nesta fase.' },
+          { status: 400 },
+        )
+      }
+      const ig = await sendInstagramReply({
+        supabase,
+        accountId,
+        conversation: conversation as { id: string; channel_id?: string | null },
+        contact: contact as { id: string; instagram_id?: string | null },
+        text: content_text,
+      })
+      if (!ig.ok) {
+        return NextResponse.json({ error: ig.error }, { status: ig.status })
+      }
+      // Auto-log da atividade do SDR (best-effort, igual ao WhatsApp).
+      try {
+        void supabaseAdmin()
+          .from('sdr_activities')
+          .insert({
+            account_id: accountId,
+            user_id: user.id,
+            contact_id: contact.id,
+            tipo: 'instagram',
+          })
+          .then(({ error }: { error: unknown }) => {
+            if (error)
+              console.warn(
+                '[sdr_activities] instagram auto-log failed:',
+                (error as { message?: string })?.message ?? error,
+              )
+          })
+      } catch (err) {
+        console.warn(
+          '[sdr_activities] instagram auto-log threw:',
+          err instanceof Error ? err.message : err,
+        )
+      }
+      return NextResponse.json({
+        success: true,
+        message_id: ig.messageId,
+        instagram_message_id: ig.igMessageId,
+      })
+    }
+
     if (!contact?.phone) {
       return NextResponse.json(
         { error: 'Contact phone number not found' },
