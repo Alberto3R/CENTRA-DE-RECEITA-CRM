@@ -6,27 +6,41 @@ Plano para receber e responder **DMs do Instagram** dentro do CRM (Central de Re
 
 ---
 
-## ✅ STATUS / ponto de partida (provado em 16/jul/2026)
+## ✅ STATUS — Fases 1 e 2 ENTREGUES E NO AR (16/jul/2026)
 
-**A viabilidade está 100% PROVADA ao vivo, em Standard access, SEM App Review.** O que falta é só o build no wacrm.
+**Inbox de DM do Instagram completo em produção** (`sales-3r-crm.vercel.app`), testado ao vivo com a conversa real da @augra.rt. Viabilidade + build + deploy feitos. As seções 1–9 abaixo são o registro do plano original (referência técnica ainda válida); esta seção documenta o que efetivamente shipou.
 
-| Capacidade | Estado | Como foi provado |
-|---|---|---|
-| **Enviar DM** | ✅ funciona | `POST /{PAGE_ID}/messages` (Messenger Platform). Testado: private-reply de comentário (augra.rt, karol) + resposta na janela de 24h (augra.rt). |
-| **Receber DM** | ✅ funciona | Campo `messages` do webhook JÁ assinado. DM da AUGRA chegou e foi logado em `ig_dm_events`. |
-| **Responder dentro de 24h** | ✅ funciona | Resposta enviada pro IGSID da AUGRA (`recipient.id`), retornou `message_id`. |
-| **Responder depois de 24h** (human_agent) | ⚠️ precisa App Review | Só pra retomar conversa fria. App Review está montado mas **NÃO enviado** (parado, opcional). |
+### Fase 1 — inbox manual ✅ (no ar)
+| Capacidade | Estado |
+|---|---|
+| Receber DM → vira conversa no inbox (contato `@username` + foto, selo IG) | ✅ no ar |
+| Responder DM em texto dentro da janela de 24h | ✅ no ar |
+| Responder depois de 24h (human_agent) | ⚠️ precisa App Review (parado) — Fase 2b |
 
-**Descoberta-chave:** o erro `(#3) Application does not have the capability` era **endpoint errado**, não falta de acesso. O app é Facebook-Login/Página → envio pelo **Messenger Platform `/{PAGE_ID}/messages`**, NUNCA `/{IG_ID}/messages` (esse é da variante Instagram-Login). O erro `(#10) fora do período` = só janela, não permissão.
+- **Migration `066_instagram_channel.sql`**: `whatsapp_config` ganhou `channel_type` ('whatsapp'|'instagram') / `ig_user_id` / `ig_page_id` (phone_number_id → nullable); `contacts` ganhou `instagram_id` / `instagram_username` (phone → nullable), dedupe por IGSID no índice parcial `contacts_account_igsid_unique` (espelha `wa_user_id`).
+- **Canal IG semeado** na conta Sales 3R (`fd9b374f…`), NÃO-primário. Token de system user 3R cifrado no `access_token` (mesmo AES-256-GCM do WhatsApp).
+- **Ingestão = Forma A**: a Edge Function `ig-comment-webhook` (**v6**) grava a DM em `contacts`/`conversations`/`messages` (resolve canal por `recipient.id`, enriquece `@username`+foto via Graph, idempotente por `mid`). Mantém comment-to-DM + `ig_dm_events`. Escolhida porque o webhook do objeto `instagram` é por-app com **callback único** — não dá pra mandar só `messages` pro Vercel sem quebrar o comment-to-DM.
+- **Envio**: `src/lib/instagram/meta-api.ts` (page token + `POST /{ig_page_id}/messages`) + `src/lib/instagram/send.ts` (janela 24h). `/api/whatsapp/send` roteia por `contact.instagram_id`.
+- **Inbox UI**: `src/components/inbox/channel-display.tsx` (glifo IG inline — o lucide-react vendado **não** exporta `Instagram` — + `@username` no lugar do telefone; esconde ligação/mídia/modelos WhatsApp-only). Badge de 24h já era agnóstico.
+- **Configurações → Instagram**: seção própria (`src/components/settings/instagram-settings.tsx`, ícone `AtSign`), read-only. O painel de WhatsApp passou a listar só `channel_type='whatsapp'`.
 
-### Já montado no Supabase (mesmo projeto do CRM: `uymmbqockiqcpporluxk`)
-- **Webhook `instagram`** assinado nos campos `comments, live_comments, mentions, messages` (ativo). Callback = Edge Function `ig-comment-webhook`.
-- **Edge Function `ig-comment-webhook` (v4)** — trata `entry[].changes[]` (comentários → comment-to-DM) E `entry[].messaging[]` (DMs → loga em `ig_dm_events`). Valida HMAC. Token via secret `IG_TOKEN` → page token.
-- **Tabela `ig_dm_events`** (`mid, sender_id, text, is_echo, raw, created_at`) — hoje só loga as DMs recebidas (fundação da ingestão).
-- Send helper de referência: `POST https://graph.facebook.com/v22.0/{PAGE_ID}/messages?access_token={PAGE_TOKEN}` com `{recipient:{id:<IGSID>}, message:{text}}`. Page token = `GET /{PAGE_ID}?fields=access_token&access_token={IG_TOKEN}`.
+### Fase 2 — automação + IA ✅ (core no ar)
+- **`src/lib/messaging/send.ts`**: sender de texto agnóstico de canal (+ testes). Automations (`automations/meta-send.ts`), flows (`flows/meta-send.ts` `engineSendText`) e agente de IA (`ai-agent/handle.ts`) roteiam o envio por `channel_type` — caminho WhatsApp intacto. Bônus: resolvem o canal por `conversation.channel_id` (corrige multi-canal WhatsApp), com fallback pro primário.
+- **`/api/instagram/process`**: roda flows → automations → agente para a DM recebida (auth por `ig_app_config.ingest_secret`, header `x-ig-secret`). A Edge Function v6 chama esse endpoint após gravar a DM (Forma A → engines vivem no Next).
+- Flows de **mídia/botões/lista** no IG ainda não têm equivalente (falham com segurança em contato sem telefone) → Fase 2b.
 
-### O que falta (o build no wacrm)
-Trazer o DM pra dentro das tabelas do CRM (`contacts`/`conversations`/`messages`) e mostrar/responder no inbox. Seções 2–5 e 9.
+### Ajustes pós-teste real (commits `27ee0c3` / `edcd056`)
+- **Crash ao abrir a DM**: contato IG (sem nome/telefone) quebrava `(name||phone).charAt(0)` no contact-sidebar → passou a usar os helpers de canal.
+- **Banner/cards "WhatsApp não conectado" à toa**: o 2º canal (IG) fazia `whatsapp_config.eq(account_id).maybeSingle()` dar erro de múltiplas linhas → filtrar `channel_type='whatsapp'` (inbox, Configurações → Visão geral, "Verificar com a Meta").
+
+### Infra / deploy
+- Supabase (mesmo projeto do CRM `uymmbqockiqcpporluxk`): webhook `instagram` assinado (`comments,messages`), Edge Function `ig-comment-webhook` **v6**, `ig_app_config` com `crm_url` + `ingest_secret`.
+- Deploy: repo **Alberto3R/wacrm** (main → prod na Vercel, projeto `prj_qZ8Zn…`). Fases 1+2 em `93d40ca` + fixes.
+
+### Pendente
+- **Agente de IA do canal IG**: o canal ainda NÃO tem `ai_agent_config` → só automations/flows respondem no IG até criar um (clonar a persona do WhatsApp num passo).
+- **Fase 2b**: anexos/mídia (in/out), human_agent >24h (App Review parado), botões/lista no IG.
+- **Fase 3**: DM nascida de comentário vira conversa no inbox.
 
 ---
 
@@ -144,17 +158,17 @@ Estado atual (confirmado): objeto `instagram` ativo com `comments, live_comments
 ## 7. Fases
 
 - **Fase 0 — provar viabilidade:** ✅ **FEITO** (receber+responder em Standard access; webhook messages assinado; DMs logando em `ig_dm_events`).
-- **Fase 1 — inbox manual:** migrations 2.1–2.3 · gravar DM recebida em `contacts`/`conversations`/`messages` (via forma A da seção 3) · sender de texto (seção 4) · inbox mostra e responde DM dentro de 24h.
-- **Fase 2 — automação + IA:** rotear automations/flows/agente pro sender IG · anexos · (human_agent 7d se/quando o App Review sair).
-- **Fase 3 — convergência com comment-to-DM:** a DM nascida de comentário também vira conversa no inbox.
+- **Fase 1 — inbox manual:** ✅ **FEITO E NO AR** — migration 066 · DM gravada em `contacts`/`conversations`/`messages` (forma A) · sender de texto · inbox mostra e responde DM ≤24h. Ver a seção de STATUS no topo.
+- **Fase 2 — automação + IA:** ✅ **FEITO E NO AR (core)** — automations/flows/agente roteados pro sender IG via `src/lib/messaging/send.ts` + `/api/instagram/process`. **Pendente (2b):** anexos/mídia, botões/lista no IG, human_agent >24h (App Review parado). ⚠️ o canal IG ainda precisa de um `ai_agent_config` próprio pra IA responder.
+- **Fase 3 — convergência com comment-to-DM:** ⏳ pendente — a DM nascida de comentário também vira conversa no inbox.
 
 ---
 
 ## 8. Relação com o comment-to-DM
 
-A Edge Function **`ig-comment-webhook`** (v4) já faz os dois: comentário→resposta pública+DM (private-reply com botão→`wa.me`) E loga DMs recebidas em `ig_dm_events`. Tabelas: `ig_keyword_rules`, `ig_comment_events`, `ig_dm_events`. Memória do projeto: `ig-comment-to-dm-automation`.
+A Edge Function **`ig-comment-webhook`** (v6) já faz os dois: comentário→resposta pública+DM (private-reply com botão→`wa.me`) E, agora, grava a DM recebida no CRM (Fase 1) além de logar em `ig_dm_events`. Tabelas: `ig_keyword_rules`, `ig_comment_events`, `ig_dm_events`. Memória do projeto: `ig-comment-to-dm-automation`.
 
-| | Comment-to-DM (no ar) | Inbox de DM (a construir) |
+| | Comment-to-DM (no ar) | Inbox de DM (no ar) |
 |---|---|---|
 | Gatilho | Comentário c/ palavra-chave | DM recebida |
 | Webhook field | `comments` | `messages` |
