@@ -48,7 +48,7 @@ Plano para receber e responder **DMs do Instagram** dentro do CRM (Central de Re
 
 - App "Sales 3R API" (`1005742594569109`) publicado (Ao vivo). Token de system user com os scopes (`instagram_manage_messages`, `pages_messaging`, etc.).
 - Conta IG comercial `@albertooliveiran` (`17841439327821349`) conectada via Página `152902442083026`. "Permitir acesso a mensagens" ligado.
-- Webhook `instagram`/`messages` **já assinado** (seção 6). App Secret 3R (`***REMOVED-APP-SECRET***`) já está no `META_APP_SECRET` da Vercel.
+- Webhook `instagram`/`messages` **já assinado** (seção 6). O App Secret 3R vive em `META_APP_SECRET` (Vercel) e em `ig_app_config.ig_app_secret` (Supabase) — **NUNCA colar o valor aqui** (repo público). ⚠️ o valor que estava neste doc VAZOU num commit público (GitGuardian, 16/jul) → precisa ser ROTACIONADO no painel da Meta.
 - **App Review NÃO é pré-requisito** do inbox básico (receber + responder ≤24h). Só necessário pro human_agent (>24h). Kit do review (se quiserem retomar depois) em `Conteúdos Instagram/app-review/KIT-APP-REVIEW.md`.
 
 ---
@@ -149,7 +149,7 @@ Já executado:
 ```
 POST /{APP_ID}/subscriptions  object=instagram  fields=comments,messages
   callback_url=https://uymmbqockiqcpporluxk.supabase.co/functions/v1/ig-comment-webhook
-  verify_token=***REMOVED-VERIFY-TOKEN***  access_token=APP_ID|APP_SECRET
+  verify_token=<ig_app_config.ig_verify_token>  access_token=APP_ID|APP_SECRET
 ```
 Estado atual (confirmado): objeto `instagram` ativo com `comments, live_comments, mentions, messages`. Webhooks do objeto `instagram` são por-app; comment e DM chegam no mesmo callback e são roteados por `field`/`messaging` dentro do handler.
 
