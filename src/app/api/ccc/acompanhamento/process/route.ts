@@ -1,23 +1,20 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { detectarGatilhos, montarResumoGestor } from '@/lib/ccc/acompanhamento'
-import { enviarAlertaGestor } from '@/lib/ccc/enviar-alerta'
+import { enviarAlertaGestor, cobrarVendedor } from '@/lib/ccc/enviar-alerta'
 
 // ============================================================
 // POST /api/ccc/acompanhamento/process — o agente 3R de acompanhamento.
 //
-// Varre o funil das contas ATIVAS (ccc_acompanhamento_config.ativo = true),
-// detecta os pontos de atenção (deals parados, fechamentos vencidos) e envia
-// o resumo pro WhatsApp do gestor via o template HSM `ccc_alerta_gestor`.
-// Chamado por um pg_cron diário (migration 070). Auth por x-cron-secret
-// (segredo em app_config, padrão da migration 055).
+// Varre as contas ATIVAS (ccc_acompanhamento_config.ativo=true), detecta os
+// pontos de atenção (deals parados, fechamentos vencidos) e:
+//   - envia o RESUMO pro WhatsApp do gestor (ccc_alerta_gestor);
+//   - COBRA cada vendedor no WhatsApp dele (ccc_followup_atrasado), quando o
+//     vendedor tem telefone em sellers.whatsapp.
+// Chamado por um pg_cron diário. Auth por x-cron-secret (app_config).
 //
-// Segurança: só envia quando a conta está `ativo` E tem `gestor_whatsapp` E há
-// algo a reportar. Contas nascem inativas → nada é enviado sem opt-in.
-//
+// Segurança: só envia quando a conta está `ativo`; contas nascem inativas.
 // Body: { account_id?, dry_run? }
-//   - account_id ausente → varre todas as contas ativas (uso do cron).
-//   - dry_run: true      → detecta e retorna, sem enviar (teste).
 // ============================================================
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,7 +57,6 @@ export async function POST(req: Request) {
       body && typeof body.account_id === 'string' ? body.account_id : null
     const dryRun = body?.dry_run === true
 
-    // Contas a processar.
     let contas: ContaConfig[]
     if (accountId) {
       const { data } = await admin()
@@ -88,22 +84,36 @@ export async function POST(req: Request) {
       })
       const mensagem = montarResumoGestor(resumo)
 
-      let envio: { enviado: boolean; motivo?: string } = {
-        enviado: false,
-        motivo: dryRun ? 'dry_run' : 'inativo_ou_sem_gestor_ou_nada_a_reportar',
-      }
+      const podeEnviar = !dryRun && c.ativo && resumo.total > 0
+      const envios: { destino: string; enviado: boolean; motivo?: string }[] = []
 
-      const podeEnviar =
-        !dryRun && c.ativo && !!c.gestor_whatsapp && resumo.total > 0
       if (podeEnviar) {
-        const r = await enviarAlertaGestor({
-          supabase: admin(),
-          accountId: c.account_id,
-          gestorWhatsapp: c.gestor_whatsapp as string,
-          resumo: mensagem,
-        })
-        envio = { enviado: r.ok, motivo: r.reason }
-        if (r.ok) {
+        // resumo pro gestor
+        if (c.gestor_whatsapp) {
+          const r = await enviarAlertaGestor({
+            supabase: admin(),
+            accountId: c.account_id,
+            gestorWhatsapp: c.gestor_whatsapp,
+            resumo: mensagem,
+          })
+          envios.push({ destino: `gestor:${c.gestor_whatsapp}`, enviado: r.ok, motivo: r.reason })
+        }
+
+        // cobrança individual por vendedor (quem tem WhatsApp cadastrado)
+        for (const v of resumo.por_vendedor) {
+          const qtd = v.parados + v.vencidos
+          if (!v.whatsapp || qtd === 0) continue
+          const r = await cobrarVendedor({
+            supabase: admin(),
+            accountId: c.account_id,
+            vendedorWhatsapp: v.whatsapp,
+            vendedorNome: v.vendedor,
+            quantidade: qtd,
+          })
+          envios.push({ destino: `vendedor:${v.vendedor}`, enviado: r.ok, motivo: r.reason })
+        }
+
+        if (envios.some((e) => e.enviado)) {
           await admin()
             .from('ccc_acompanhamento_config')
             .update({ ultimo_envio_at: new Date().toISOString() })
@@ -115,7 +125,8 @@ export async function POST(req: Request) {
         account_id: c.account_id,
         total: resumo.total,
         mensagem_gestor: mensagem,
-        envio,
+        por_vendedor: resumo.por_vendedor,
+        envios: dryRun ? 'dry_run' : envios,
       })
     }
 

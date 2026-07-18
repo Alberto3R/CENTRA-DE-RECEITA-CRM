@@ -1,7 +1,7 @@
 // Agente 3R de Acompanhamento (Sprint 1) — DETECÇÃO de gatilhos.
 // Função pura: lê o CRM de uma conta e devolve os alertas (deals parados,
-// fechamentos vencidos) já agrupados por vendedor. Quem envia (WhatsApp) e
-// quem agenda (pg_cron) é o caller — este módulo só detecta e resume.
+// fechamentos vencidos) agrupados por vendedor, com o WhatsApp de cada um
+// (pra cobrança individual). Quem envia e agenda é o caller.
 
 export type TipoAlerta = 'deal_parado' | 'fechamento_vencido'
 
@@ -16,7 +16,9 @@ export interface AlertaAcompanhamento {
 }
 
 export interface ResumoVendedor {
+  vendedor_id: string | null
   vendedor: string
+  whatsapp: string | null
   parados: number
   vencidos: number
 }
@@ -45,16 +47,16 @@ export async function detectarGatilhos(args: {
   const { supabase, accountId } = args
   const diasParado = args.diasParado ?? 5
   const agoraMs = Date.now()
-  const hojeISO = new Date(agoraMs).toISOString().slice(0, 10) // YYYY-MM-DD
+  const hojeISO = new Date(agoraMs).toISOString().slice(0, 10)
 
-  // Deals ABERTOS da conta (closed_at nulo é mais confiável que o texto de status).
+  // Deals ABERTOS da conta (closed_at nulo).
   const { data: deals } = await supabase
     .from('deals')
     .select('id, title, assigned_to, updated_at, expected_close_date, closed_at')
     .eq('account_id', accountId)
     .is('closed_at', null)
 
-  // Nomes dos vendedores (assigned_to pode ser o id OU o user_id do profile).
+  // Nome do vendedor (assigned_to pode ser o id OU o user_id do profile).
   const { data: profs } = await supabase
     .from('profiles')
     .select('id, user_id, full_name')
@@ -70,8 +72,29 @@ export async function detectarGatilhos(args: {
     if (p.id) nomePorId.set(p.id, nome)
     if (p.user_id) nomePorId.set(p.user_id, nome)
   }
+
+  // WhatsApp do vendedor (sellers.linked_user_id = assigned_to).
+  const { data: sellers } = await supabase
+    .from('sellers')
+    .select('linked_user_id, whatsapp, nome')
+    .eq('account_id', accountId)
+
+  const whatsappPorId = new Map<string, string>()
+  const nomeSellerPorId = new Map<string, string>()
+  for (const s of (sellers ?? []) as {
+    linked_user_id?: string
+    whatsapp?: string
+    nome?: string
+  }[]) {
+    if (s.linked_user_id) {
+      if (s.whatsapp) whatsappPorId.set(s.linked_user_id, s.whatsapp)
+      if (s.nome) nomeSellerPorId.set(s.linked_user_id, s.nome)
+    }
+  }
+
   const nomeDoVendedor = (id: string | null): string =>
-    (id ? nomePorId.get(id) : undefined) ?? 'Sem responsável'
+    (id ? nomePorId.get(id) ?? nomeSellerPorId.get(id) : undefined) ??
+    'Sem responsável'
 
   const alertas: AlertaAcompanhamento[] = []
 
@@ -84,7 +107,6 @@ export async function detectarGatilhos(args: {
   }[]) {
     const vendedor_nome = nomeDoVendedor(d.assigned_to)
 
-    // Fechamento vencido tem prioridade sobre "parado".
     if (d.expected_close_date && d.expected_close_date < hojeISO) {
       const dias = diasDesde(d.expected_close_date, agoraMs)
       alertas.push({
@@ -113,17 +135,20 @@ export async function detectarGatilhos(args: {
     }
   }
 
-  // Resumo por vendedor (pro placar do gestor).
+  // Resumo por vendedor (com o WhatsApp de cada um).
   const mapa = new Map<string, ResumoVendedor>()
   for (const a of alertas) {
-    const cur = mapa.get(a.vendedor_nome) ?? {
+    const chave = a.vendedor_id ?? '__sem_responsavel__'
+    const cur = mapa.get(chave) ?? {
+      vendedor_id: a.vendedor_id,
       vendedor: a.vendedor_nome,
+      whatsapp: a.vendedor_id ? whatsappPorId.get(a.vendedor_id) ?? null : null,
       parados: 0,
       vencidos: 0,
     }
     if (a.tipo === 'deal_parado') cur.parados++
     else cur.vencidos++
-    mapa.set(a.vendedor_nome, cur)
+    mapa.set(chave, cur)
   }
 
   return {
@@ -137,7 +162,7 @@ export async function detectarGatilhos(args: {
   }
 }
 
-/** Monta o texto do resumo que o gestor receberia (WhatsApp/painel). */
+/** Monta o texto do resumo que o gestor receberia. */
 export function montarResumoGestor(r: ResumoAcompanhamento): string {
   if (r.total === 0) return 'Tudo em dia — nenhum deal parado ou fechamento vencido. 👏'
   const linhas: string[] = [
