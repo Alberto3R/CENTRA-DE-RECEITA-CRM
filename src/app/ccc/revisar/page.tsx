@@ -133,7 +133,7 @@ export default function RevisarPage() {
             disabled={carregando}
             className="mt-1 rounded-xl bg-gradient-to-b from-[#34D399] to-[#10B981] px-6 py-3.5 text-base font-bold text-[#04231A] transition-transform hover:-translate-y-0.5 disabled:opacity-60"
           >
-            {carregando ? 'Um agente 3R está gerando…' : 'Gerar e revisar →'}
+            {carregando ? 'Um agente 3R está trabalhando nisso agora…' : 'Gerar e revisar →'}
           </button>
         </section>
 
