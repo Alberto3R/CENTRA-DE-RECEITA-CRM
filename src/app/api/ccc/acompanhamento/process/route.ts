@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { detectarGatilhos, montarResumoGestor } from '@/lib/ccc/acompanhamento'
-import { enviarAlertaGestor, cobrarVendedor } from '@/lib/ccc/enviar-alerta'
+import {
+  detectarGatilhos,
+  montarResumoGestor,
+  detectarCadencia,
+} from '@/lib/ccc/acompanhamento'
+import {
+  enviarAlertaGestor,
+  cobrarVendedor,
+  cobrarToqueCadencia,
+} from '@/lib/ccc/enviar-alerta'
 
 // ============================================================
 // POST /api/ccc/acompanhamento/process — o agente 3R de acompanhamento.
@@ -121,12 +129,71 @@ export async function POST(req: Request) {
         }
       }
 
+      // Motor de cadência: os toques D+N da régua APROVADA que já venceram
+      // por negócio. O agente 3R cobra o vendedor o toque certo na hora certa.
+      const toquesDevidos = await detectarCadencia({
+        supabase: admin(),
+        accountId: c.account_id,
+      })
+      const cadenciaEnvios: {
+        deal: string
+        toque: string
+        vendedor: string
+        enviado: boolean
+        motivo?: string
+      }[] = []
+      if (!dryRun && c.ativo) {
+        for (const t of toquesDevidos) {
+          if (!t.vendedor_whatsapp) continue
+          const r = await cobrarToqueCadencia({
+            supabase: admin(),
+            accountId: c.account_id,
+            vendedorWhatsapp: t.vendedor_whatsapp,
+            vendedorNome: t.vendedor_nome,
+            lead: t.titulo,
+            quando: t.quando,
+            acao: t.acao,
+          })
+          if (r.ok) {
+            await admin().from('ccc_cadencia_log').insert({
+              account_id: c.account_id,
+              deal_id: t.deal_id,
+              stage_id: t.stage_id,
+              dia_toque: t.dia_toque,
+              vendedor_id: t.vendedor_id,
+            })
+          }
+          cadenciaEnvios.push({
+            deal: t.titulo,
+            toque: t.quando,
+            vendedor: t.vendedor_nome,
+            enviado: r.ok,
+            motivo: r.reason,
+          })
+        }
+        if (cadenciaEnvios.some((e) => e.enviado)) {
+          await admin()
+            .from('ccc_acompanhamento_config')
+            .update({ ultimo_envio_at: new Date().toISOString() })
+            .eq('account_id', c.account_id)
+        }
+      }
+
       resultados.push({
         account_id: c.account_id,
         total: resumo.total,
         mensagem_gestor: mensagem,
         por_vendedor: resumo.por_vendedor,
         envios: dryRun ? 'dry_run' : envios,
+        cadencia_devida: toquesDevidos.map((t) => ({
+          deal: t.titulo,
+          vendedor: t.vendedor_nome,
+          toque: t.quando,
+          acao: t.acao,
+          dias_na_etapa: t.dias_na_etapa,
+          tem_whatsapp: Boolean(t.vendedor_whatsapp),
+        })),
+        cadencia_envios: dryRun ? 'dry_run' : cadenciaEnvios,
       })
     }
 
