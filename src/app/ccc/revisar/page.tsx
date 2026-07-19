@@ -35,6 +35,10 @@ export default function RevisarPage() {
   const [salvando, setSalvando] = useState(false)
   const [feedback, setFeedback] = useState('')
 
+  // setup dos templates HSM na Meta
+  const [criandoTpl, setCriandoTpl] = useState(false)
+  const [tplMsg, setTplMsg] = useState('')
+
   // carrega o entregável mais recente de um diagnóstico (se já existe)
   const carregarExistente = useCallback(async (id: string) => {
     if (!id.trim()) return
@@ -125,6 +129,35 @@ export default function RevisarPage() {
       setFeedback(e instanceof Error ? e.message : 'Erro ao salvar.')
     } finally {
       setSalvando(false)
+    }
+  }
+
+  async function criarTemplates() {
+    setCriandoTpl(true)
+    setTplMsg('')
+    try {
+      const res = await fetch('/api/ccc/criar-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Erro ao criar templates.')
+      const r = ((data.resultados ?? [])[0] ?? {}) as {
+        ok?: boolean
+        template?: string
+        status?: string
+        erro?: string
+      }
+      setTplMsg(
+        r.ok
+          ? `Template ${r.template} enviado pra Meta (${r.status ?? 'submitted'}). Aprovação leva de minutos a horas.`
+          : `Meta recusou: ${r.erro ?? 'sem detalhe'}`,
+      )
+    } catch (e) {
+      setTplMsg(e instanceof Error ? e.message : 'Erro ao criar templates.')
+    } finally {
+      setCriandoTpl(false)
     }
   }
 
@@ -305,6 +338,27 @@ export default function RevisarPage() {
             </div>
           </section>
         )}
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-[#0B1712] p-5">
+          <h2 className="font-mono text-xs uppercase tracking-[0.16em] text-[#6E857A]">
+            Setup · templates da Meta
+          </h2>
+          <p className="mt-2 text-sm text-[#9FB4A8]">
+            Cria o template HSM <code className="text-[#EAF3EC]">ccc_toque_cadencia</code>{' '}
+            (usado pelo motor de cadência pra cobrar o vendedor) na Meta, com o
+            WhatsApp já conectado no CRM. Faça uma vez.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={criarTemplates}
+              disabled={criandoTpl}
+              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-[#EAF3EC] transition-colors hover:border-[#34D399] disabled:opacity-50"
+            >
+              {criandoTpl ? 'Enviando pra Meta…' : 'Criar template de cadência na Meta'}
+            </button>
+            {tplMsg && <span className="text-sm text-[#9FB4A8]">{tplMsg}</span>}
+          </div>
+        </section>
       </div>
     </main>
   )
