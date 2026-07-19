@@ -80,9 +80,15 @@ export async function middleware(request: NextRequest) {
   // API routes that need auth. Exceptions (autenticam por conta própria, sem
   // sessão de usuário): o /webhook (verificação da Meta) e o /broadcast/process
   // (dreno do worker, autenticado pelo segredo do cron via header).
-  if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
+  const precisaAuthApi =
+    (request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook') &&
-      !request.nextUrl.pathname.includes('/broadcast/process')) {
+      !request.nextUrl.pathname.includes('/broadcast/process')) ||
+    // /api/ccc/* (console do consultor) exige usuário logado, exceto o cron de
+    // acompanhamento, que se autentica pelo próprio segredo via header.
+    (request.nextUrl.pathname.startsWith('/api/ccc/') &&
+      !request.nextUrl.pathname.startsWith('/api/ccc/acompanhamento/process'))
+  if (!user && precisaAuthApi) {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )
