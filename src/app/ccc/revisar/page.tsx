@@ -11,6 +11,7 @@ interface Funil {
   pipeline_id?: string
   nome?: string
   etapas?: { name: string; is_connection: boolean }[]
+  reused?: boolean
   error?: string
 }
 
@@ -68,6 +69,12 @@ export default function RevisarPage() {
   return (
     <main className="min-h-screen bg-[#08120E] text-[#EAF3EC]">
       <div className="mx-auto max-w-3xl px-5 py-12">
+        <a
+          href="/dashboard"
+          className="mb-6 inline-flex items-center gap-1.5 text-sm text-[#9FB4A8] transition-colors hover:text-[#34D399]"
+        >
+          ← Voltar pro CRM
+        </a>
         <header className="mb-8">
           <span className="font-mono text-xs uppercase tracking-[0.2em] text-[#10B981]">
             Console do consultor · 3R
@@ -145,13 +152,22 @@ export default function RevisarPage() {
               Funil
             </h2>
             {funil.ok ? (
-              <p className="mt-2 text-[#EAF3EC]">
-                ✅ Pipeline <b>{funil.nome}</b> criado com{' '}
-                {funil.etapas?.length ?? 0} etapas —{' '}
-                <span className="text-[#34D399]">
-                  {funil.etapas?.map((e) => e.name).join(' → ')}
-                </span>
-              </p>
+              <>
+                <p className="mt-2 text-[#EAF3EC]">
+                  ✅ Pipeline <b>{funil.nome}</b>{' '}
+                  {funil.reused ? 'já existia (reusado, sem duplicar)' : 'criado'}{' '}
+                  com {funil.etapas?.length ?? 0} etapas —{' '}
+                  <span className="text-[#34D399]">
+                    {funil.etapas?.map((e) => e.name).join(' → ')}
+                  </span>
+                </p>
+                <a
+                  href="/pipelines"
+                  className="mt-2 inline-block text-sm text-[#34D399] underline-offset-2 hover:underline"
+                >
+                  Ver funil no CRM →
+                </a>
+              </>
             ) : (
               <p className="mt-2 text-[#dc6a54]">Funil não criado: {funil.error}</p>
             )}
