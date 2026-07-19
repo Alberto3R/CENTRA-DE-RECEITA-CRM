@@ -23,6 +23,7 @@ export interface ResultadoFunil {
   pipeline_id?: string
   nome?: string
   etapas?: EtapaFunil[]
+  reused?: boolean
   error?: string
 }
 
@@ -44,6 +45,37 @@ export async function criarFunilPadrao(args: {
   if (!accountId) return { ok: false, error: 'account_id é obrigatório.' }
   if (etapas.some((e) => !e.name)) {
     return { ok: false, error: 'Toda etapa precisa de um nome.' }
+  }
+
+  // Idempotência: se já existe um pipeline com esse nome na conta, reusa em vez
+  // de criar outro (senão cada clique em "Gerar e revisar" duplica o funil).
+  const { data: existente } = await supabase
+    .from('pipelines')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('name', nome)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (existente) {
+    const { data: stagesExist } = await supabase
+      .from('pipeline_stages')
+      .select('name, is_connection')
+      .eq('pipeline_id', existente.id)
+      .order('position', { ascending: true })
+    return {
+      ok: true,
+      pipeline_id: existente.id,
+      nome,
+      etapas: (stagesExist ?? []).map(
+        (s: { name: string; is_connection: boolean }) => ({
+          name: s.name,
+          is_connection: s.is_connection,
+        }),
+      ),
+      reused: true,
+    }
   }
 
   // pipelines.user_id é NOT NULL — usa o owner da conta.
