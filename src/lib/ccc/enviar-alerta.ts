@@ -99,3 +99,24 @@ export function cobrarVendedor(params: {
     variaveis: [params.vendedorNome, String(params.quantidade)],
   })
 }
+
+/** Toque da cadência pro vendedor executar (ccc_toque_cadencia).
+ *  {{1}}=vendedor {{2}}=lead {{3}}=quando (ex: "D+3") {{4}}=ação da régua. */
+export function cobrarToqueCadencia(params: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+  accountId: string
+  vendedorWhatsapp: string
+  vendedorNome: string
+  lead: string
+  quando: string
+  acao: string
+}) {
+  return enviarTemplate({
+    supabase: params.supabase,
+    accountId: params.accountId,
+    to: params.vendedorWhatsapp,
+    template: 'ccc_toque_cadencia',
+    variaveis: [params.vendedorNome, params.lead, params.quando, params.acao],
+  })
+}
