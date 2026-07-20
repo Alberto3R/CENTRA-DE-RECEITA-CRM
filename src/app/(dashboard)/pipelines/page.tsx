@@ -61,6 +61,12 @@ export default function PipelinesPage() {
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  // Situação do negócio no board. Padrão "ativos" ESCONDE os perdidos —
+  // um negócio marcado como perdido não deve poluir as colunas do funil.
+  // Para revisar/reabrir um perdido, troque para "perdidos" ou "todos".
+  const [statusFilter, setStatusFilter] = useState<
+    "ativos" | "todos" | "ganhos" | "perdidos"
+  >("ativos");
   const [members, setMembers] = useState<{ id: string; full_name: string }[]>([]);
   const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
 
@@ -268,10 +274,28 @@ export default function PipelinesPage() {
     });
   }, [deals, dateFilter, assigneeFilter, tagFilter, searchQuery]);
 
+  // Negócios exibidos NO BOARD. Diferente de `filteredDeals` (que alimenta
+  // a régua de análise do topo com todos os status, senão "Perdidos no mês"
+  // zeraria), aqui aplicamos o filtro de situação — que por padrão remove
+  // os perdidos do funil.
+  const boardDeals = useMemo(() => {
+    switch (statusFilter) {
+      case "ativos":
+        return filteredDeals.filter((d) => d.status !== "lost");
+      case "ganhos":
+        return filteredDeals.filter((d) => d.status === "won");
+      case "perdidos":
+        return filteredDeals.filter((d) => d.status === "lost");
+      default:
+        return filteredDeals;
+    }
+  }, [filteredDeals, statusFilter]);
+
   const filtroAtivo =
     dateFilter !== "all" ||
     !!assigneeFilter ||
     !!tagFilter ||
+    statusFilter !== "ativos" ||
     !!searchQuery.trim();
 
   const refreshPipelines = useCallback(async () => {
@@ -504,6 +528,16 @@ export default function PipelinesPage() {
               </option>
             ))}
           </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+          >
+            <option value="ativos">Situação: ativos</option>
+            <option value="todos">Todos (inclui perdidos)</option>
+            <option value="ganhos">Só ganhos</option>
+            <option value="perdidos">Só perdidos</option>
+          </select>
           {tags.length > 0 ? (
             <select
               value={tagFilter}
@@ -524,6 +558,7 @@ export default function PipelinesPage() {
                 setDateFilter("all");
                 setAssigneeFilter("");
                 setTagFilter("");
+                setStatusFilter("ativos");
                 setSearchQuery("");
               }}
               className="text-xs text-primary hover:underline"
@@ -532,7 +567,7 @@ export default function PipelinesPage() {
             </button>
           ) : null}
           <span className="ml-auto font-mono text-xs text-muted-foreground">
-            {filteredDeals.length} de {deals.length} negócios
+            {boardDeals.length} de {deals.length} negócios
           </span>
         </div>
       ) : null}
@@ -562,7 +597,7 @@ export default function PipelinesPage() {
           <PipelineAnalytics stages={stages} deals={filteredDeals} />
           <PipelineBoard
             stages={stages}
-            deals={filteredDeals}
+            deals={boardDeals}
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
