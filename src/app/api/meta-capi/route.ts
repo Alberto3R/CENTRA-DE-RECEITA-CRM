@@ -1,0 +1,105 @@
+import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { decrypt } from '@/lib/whatsapp/encryption'
+
+// ============================================================
+// POST /api/meta-capi — Conversions API (CAPI) da landing da CCC.
+//
+// Recebe o evento do Pixel client-side, completa com IP + User-Agent do
+// request e reenvia server-side pro Pixel da 3R. O Pixel manda o mesmo
+// event_id, então a Meta DEDUPLICA (não conta 2x). O token vem do canal
+// WhatsApp já conectado (mesmo BM/pixel), descriptografado aqui — nenhum
+// segredo em texto no repo. Rota pública (chamada da landing).
+// ============================================================
+
+const GRAPH = 'https://graph.facebook.com/v22.0'
+const PIXEL_ID = '889803623429912' // pixel da 3R (público — também vai no client)
+const WABA = '824812527258696' // canal cujo system user token gerencia o pixel
+
+const EVENTOS_OK = new Set(['PageView', 'ViewContent', 'Lead'])
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _admin: any = null
+function admin() {
+  if (!_admin) {
+    _admin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+  }
+  return _admin
+}
+
+async function tokenDoCanal(): Promise<string | null> {
+  const { data } = await admin()
+    .from('whatsapp_config')
+    .select('access_token')
+    .eq('waba_id', WABA)
+    .eq('status', 'connected')
+    .not('access_token', 'is', null)
+    .limit(1)
+    .maybeSingle()
+  if (!data?.access_token) return null
+  try {
+    return decrypt(data.access_token)
+  } catch {
+    return null
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => ({}))
+    const eventName =
+      typeof body?.event_name === 'string' && EVENTOS_OK.has(body.event_name)
+        ? body.event_name
+        : 'PageView'
+    const eventId =
+      typeof body?.event_id === 'string' && body.event_id ? body.event_id : undefined
+    const sourceUrl =
+      typeof body?.event_source_url === 'string' ? body.event_source_url : undefined
+    const fbp = typeof body?.fbp === 'string' && body.fbp ? body.fbp : undefined
+    const fbc = typeof body?.fbc === 'string' && body.fbc ? body.fbc : undefined
+
+    const token = await tokenDoCanal()
+    if (!token) {
+      return NextResponse.json({ error: 'capi_sem_token' }, { status: 500 })
+    }
+
+    // dados do cliente que só o servidor tem (melhora a qualidade da correspondência)
+    const fwd = req.headers.get('x-forwarded-for') || ''
+    const ip = fwd.split(',')[0].trim() || undefined
+    const ua = req.headers.get('user-agent') || undefined
+
+    const userData: Record<string, string> = {}
+    if (ip) userData.client_ip_address = ip
+    if (ua) userData.client_user_agent = ua
+    if (fbp) userData.fbp = fbp
+    if (fbc) userData.fbc = fbc
+
+    const evento: Record<string, unknown> = {
+      event_name: eventName,
+      event_time: Math.floor(Date.now() / 1000),
+      action_source: 'website',
+      user_data: userData,
+    }
+    if (sourceUrl) evento.event_source_url = sourceUrl
+    if (eventId) evento.event_id = eventId
+
+    const res = await fetch(`${GRAPH}/${PIXEL_ID}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: [evento], access_token: token }),
+    })
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      console.error('[meta-capi] Meta recusou', res.status, JSON.stringify(data))
+      return NextResponse.json({ ok: false }, { status: 502 })
+    }
+    return NextResponse.json({ ok: true, received: data?.events_received ?? 0 })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'capi_error'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
