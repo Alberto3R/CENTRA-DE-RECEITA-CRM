@@ -9,6 +9,14 @@
 <meta property="og:title" content="Central de Comando Comercial — Programa 3R">
 <meta property="og:description" content="Seu comercial parou de vender no escuro em 45 dias. Implementacao, nao informacao.">
 <meta property="og:type" content="website">
+<!-- Meta Pixel + CAPI (mesmo event_id → dedup server/client) -->
+<script>
+!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init','889803623429912');
+window.__track3R=function(name){try{var id='e'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);fbq('track',name,{},{eventID:id});var ck=function(n){var m=document.cookie.match('(^|;)\\s*'+n+'\\s*=\\s*([^;]+)');return m?m.pop():'';};fetch('/api/meta-capi',{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({event_name:name,event_id:id,event_source_url:location.href,fbp:ck('_fbp'),fbc:ck('_fbc')})}).catch(function(){});}catch(e){}};
+window.__track3R('PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=889803623429912&ev=PageView&noscript=1"/></noscript>
 </head>
 <body>
 <style>
@@ -614,6 +622,7 @@
           'Time comercial: ' + (d.get('time') || '(não informado)'),
           'Por que agora: ' + (d.get('motivo') || '-')
         ];
+        if(window.__track3R) window.__track3R('Lead');
         var msg = encodeURIComponent(linhas.join('\n'));
         window.open('https://wa.me/' + NUMERO_WHATSAPP_3R + '?text=' + msg, '_blank');
         form.style.display = 'none';
