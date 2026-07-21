@@ -4,6 +4,7 @@ import type { Deal, PipelineStage } from "@/types";
 import { Calendar, Check, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
+import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
 import { StartTemplateButton } from "@/components/whatsapp/start-template-button";
 
 interface DealCardProps {
@@ -121,6 +122,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           onPointerDown={(e) => e.stopPropagation()}
         >
           <WaCallButton contactId={deal.contact.id} compact />
+          <TelnyxCallButton contactId={deal.contact.id} compact />
           <StartTemplateButton contactId={deal.contact.id} />
         </div>
       )}

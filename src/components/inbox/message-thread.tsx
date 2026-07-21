@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
+import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
@@ -929,6 +930,9 @@ export function MessageThread({
               lead + tier — senão avisa via tooltip/estado. Não faz sentido
               no Instagram (sem telefone) — escondido nesse canal. */}
           {!isInstagram && <WaCallButton contactId={contact.id} compact />}
+          {/* Ligação PSTN direta (Telnyx) — telefone comum, caller id de Goiânia.
+              Também só faz sentido quando há telefone (não no Instagram). */}
+          {!isInstagram && <TelnyxCallButton contactId={contact.id} compact />}
 
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
