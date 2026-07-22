@@ -234,6 +234,9 @@ export async function maybeRunAgent(params: {
 
   if (!inboundText.trim()) return // v1: responde só a texto
 
+  // Âncora da rodada — usada pelo guarda anti-rajada antes do envio.
+  const runStartedAt = new Date().toISOString()
+
   // 1. Config do agente DO CANAL (multi-agente: 1 persona por número).
   const { data: cfg } = await supabase
     .from('ai_agent_config')
@@ -410,6 +413,22 @@ export async function maybeRunAgent(params: {
       .update({ ai_handoff: true, status: 'pending', updated_at: new Date().toISOString() })
       .eq('id', conversationId)
     console.error('[ai-agent] sem resposta da IA — conversa', conversationId, 'escalada pra humano')
+    return
+  }
+
+  // 5b. Guarda anti-rajada: se o cliente mandou mensagem MAIS NOVA enquanto
+  // esta rodada pensava (mensagens em sequência rápida), aborta sem enviar —
+  // a rodada disparada pela mensagem nova responde com o histórico completo.
+  // Evita respostas duplicadas/defasadas (ex.: cliente manda número e nome em
+  // 2 balões e o bot responde 2x a mesma coisa).
+  const { count: newerInbound } = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'customer')
+    .gt('created_at', runStartedAt)
+  if ((newerInbound ?? 0) > 0) {
+    console.log('[ai-agent] rajada detectada — abortando rodada defasada da conversa', conversationId)
     return
   }
 
