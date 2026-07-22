@@ -215,6 +215,9 @@ async function drainBroadcast(
 /**
  * Finaliza broadcasts sem pending restante: status 'sent' (ou 'failed' se
  * todos falharam). Chamado após o dreno.
+ *
+ * Broadcast sem NENHUM destinatário materializado nunca vira 'sent' — isso
+ * mascararia um disparo que não aconteceu (envio fantasma). Vira 'failed'.
  */
 async function finalizeIfDone(admin: Admin, broadcastId: string): Promise<void> {
   const { count: pendingCount } = await admin
@@ -233,8 +236,65 @@ async function finalizeIfDone(admin: Admin, broadcastId: string): Promise<void> 
     .select("id", { count: "exact", head: true })
     .eq("broadcast_id", broadcastId)
     .eq("status", "failed");
-  const final = (total ?? 0) > 0 && failed === total ? "failed" : "sent";
+  const final = (total ?? 0) === 0 || failed === total ? "failed" : "sent";
   await admin.from("broadcasts").update({ status: final }).eq("id", broadcastId);
+}
+
+/**
+ * Materializa destinatários de um broadcast agendado que chegou ao dreno sem
+ * nenhuma linha em broadcast_recipients (criado fora da UI — API/SQL). Resolve
+ * audience_filter do tipo 'tags' (tagIds - excludeTagIds) e insere os contatos
+ * como 'pending'. Idempotente: só roda quando não existe destinatário algum.
+ */
+async function materializeAudienceIfEmpty(
+  admin: Admin,
+  broadcastId: string,
+): Promise<void> {
+  const { count: existing } = await admin
+    .from("broadcast_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("broadcast_id", broadcastId);
+  if ((existing ?? 0) > 0) return;
+
+  const { data: b } = await admin
+    .from("broadcasts")
+    .select("id, audience_filter")
+    .eq("id", broadcastId)
+    .maybeSingle();
+  const filter = (b?.audience_filter ?? null) as {
+    type?: string;
+    tagIds?: string[];
+    excludeTagIds?: string[];
+  } | null;
+  if (!filter || filter.type !== "tags" || !filter.tagIds?.length) return;
+
+  const { data: tagged } = await admin
+    .from("contact_tags")
+    .select("contact_id, tag_id")
+    .in("tag_id", filter.tagIds);
+  let contactIds = [...new Set((tagged ?? []).map((r) => r.contact_id as string))];
+
+  if (contactIds.length > 0 && filter.excludeTagIds?.length) {
+    const { data: excluded } = await admin
+      .from("contact_tags")
+      .select("contact_id")
+      .in("tag_id", filter.excludeTagIds);
+    const excludeSet = new Set((excluded ?? []).map((r) => r.contact_id as string));
+    contactIds = contactIds.filter((id) => !excludeSet.has(id));
+  }
+  if (contactIds.length === 0) return;
+
+  await admin.from("broadcast_recipients").insert(
+    contactIds.map((contactId) => ({
+      broadcast_id: broadcastId,
+      contact_id: contactId,
+      status: "pending",
+    })),
+  );
+  await admin
+    .from("broadcasts")
+    .update({ total_recipients: contactIds.length })
+    .eq("id", broadcastId);
 }
 
 /**
@@ -252,7 +312,9 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
   const nowIso = new Date().toISOString();
   const staleIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
-  // Agendados vencidos → sending.
+  // Agendados vencidos → sending. Se o broadcast chegou aqui sem nenhum
+  // destinatário materializado (criado via API/SQL, fora da UI), resolve a
+  // audiência por tags antes de promover.
   const { data: dueScheduled } = await admin
     .from("broadcasts")
     .select("id")
@@ -260,6 +322,7 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
     .lte("scheduled_at", nowIso)
     .limit(20);
   for (const b of dueScheduled ?? []) {
+    await materializeAudienceIfEmpty(admin, b.id);
     await admin.from("broadcasts").update({ status: "sending" }).eq("id", b.id);
   }
 
