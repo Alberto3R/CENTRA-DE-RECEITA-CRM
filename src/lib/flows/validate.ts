@@ -68,7 +68,15 @@ export function validateFlowForActivation(
   issues.push(...validateTrigger(flow.trigger_type, flow.trigger_config));
 
   // ---- graph integrity ----
-  if (!flow.entry_node_id) {
+  // Gatilho deal_stage no modo "só template" não executa nós: o flow envia
+  // o HSM de abertura e encerra (o agente IA assume as respostas). Nesse
+  // modo, nó de entrada e grafo são opcionais.
+  const templateOnly =
+    flow.trigger_type === "deal_stage" &&
+    ((flow.trigger_config.mode as string | undefined) ?? "template_only") ===
+      "template_only";
+
+  if (!flow.entry_node_id && !templateOnly) {
     issues.push({
       severity: "error",
       scope: "flow",
@@ -78,7 +86,7 @@ export function validateFlowForActivation(
   }
 
   const keys = new Set(nodes.map((n) => n.node_key));
-  if (nodes.length === 0) {
+  if (nodes.length === 0 && !templateOnly) {
     issues.push({
       severity: "error",
       scope: "flow",
