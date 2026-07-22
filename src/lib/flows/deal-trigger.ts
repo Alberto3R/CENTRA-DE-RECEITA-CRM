@@ -247,5 +247,12 @@ async function fireForEvent(
     await db.rpc("increment_flow_execution_count", { p_flow_id: flow.id });
     return "run_started";
   }
+  // template_only também conta como execução — é o que o card de Fluxos
+  // mostra ("X execuções"), dando visibilidade dos disparos na UI.
+  await db.rpc("increment_flow_execution_count", { p_flow_id: flow.id });
+  await db
+    .from("flows")
+    .update({ last_executed_at: new Date().toISOString() })
+    .eq("id", flow.id);
   return "template_sent";
 }
