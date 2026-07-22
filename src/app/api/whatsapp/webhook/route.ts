@@ -8,6 +8,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeRunAgent } from '@/lib/ai-agent/handle'
+import { advanceDealsOnFirstReply } from '@/lib/pipeline/auto-advance'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -742,6 +743,12 @@ async function processMessage(
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(accountId, contactRecord.id)
+
+  // Auto-avanço de funil (opt-in por pipeline, migration 078): primeira
+  // resposta do contato move o negócio da 1ª etapa pra 2ª ("conversa ativa").
+  if (isFirstInboundMessage) {
+    await advanceDealsOnFirstReply(supabaseAdmin(), accountId, contactRecord.id)
+  }
 
   // CTWA (Fase 2): lead que chegou por um anúncio Click-to-WhatsApp.
   // A Meta injeta `referral.ctwa_clid` na primeira mensagem — gravamos

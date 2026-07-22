@@ -13,6 +13,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { availableSlots, createMeetEvent, type SchedulingConfig } from '@/lib/google/calendar'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
+import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -109,6 +110,12 @@ function buildSchedulingTools(opts: {
         })
         if (attendeeEmail && contactId) {
           await admin.from('contacts').update({ email: attendeeEmail }).eq('id', contactId).is('email', null)
+        }
+        // Auto-avanço de funil (opt-in por pipeline, migration 078): call
+        // marcada → negócio vai pra etapa configurada (ex.: Diagnóstico
+        // agendado). Best-effort — nunca bloqueia o agendamento.
+        if (contactId) {
+          await advanceDealsOnCallBooked(admin, accountId, contactId)
         }
       } catch (e) {
         console.error('[ai-agent] registrar scheduled_call falhou:', e)
