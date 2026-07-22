@@ -44,6 +44,18 @@ interface WhatsAppMessage {
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
   /**
+   * Present when the customer shares one or more contact cards (vCard).
+   * Cada cartão traz nome + telefones; em prospecção isso costuma ser o
+   * momento em que o atendente passa o contato do decisor — perder esse
+   * payload é perder o lead.
+   */
+  contacts?: Array<{
+    name?: { formatted_name?: string; first_name?: string; last_name?: string }
+    phones?: Array<{ phone?: string; wa_id?: string; type?: string }>
+    emails?: Array<{ email?: string; type?: string }>
+    org?: { company?: string; title?: string }
+  }>
+  /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
    * we put on the button/row when sending — the Flows engine uses this
@@ -995,6 +1007,41 @@ async function parseMessageContent(
         }
       }
       return { ...empty, contentText: '[Interactive reply]' }
+    }
+
+    case 'contacts': {
+      // Cartão(ões) de contato (vCard). Em prospecção este é o payload mais
+      // valioso que existe — o atendente passando o decisor. Renderiza cada
+      // cartão como texto legível (nome + telefones + e-mails), para que o
+      // número fique gravado, pesquisável e visível pro agente de IA.
+      const cards = message.contacts ?? []
+      if (cards.length === 0) return { ...empty, contentText: '[Contato recebido — sem dados]' }
+      const rendered = cards
+        .map((card) => {
+          const nome =
+            card.name?.formatted_name ||
+            [card.name?.first_name, card.name?.last_name].filter(Boolean).join(' ') ||
+            'Contato'
+          const fones = (card.phones ?? [])
+            .map((p) => p.phone || p.wa_id)
+            .filter(Boolean)
+            .join(', ')
+          const emails = (card.emails ?? [])
+            .map((e) => e.email)
+            .filter(Boolean)
+            .join(', ')
+          const org = [card.org?.title, card.org?.company].filter(Boolean).join(' — ')
+          return [
+            `📇 ${nome}`,
+            fones ? `📱 ${fones}` : null,
+            emails ? `✉️ ${emails}` : null,
+            org ? `🏢 ${org}` : null,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        })
+        .join('\n\n')
+      return { ...empty, contentText: rendered }
     }
 
     default:
