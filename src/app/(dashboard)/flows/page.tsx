@@ -46,8 +46,8 @@ interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
-  trigger_config: { keywords?: string[] } | Record<string, unknown>;
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "deal_stage";
+  trigger_config: { keywords?: string[]; stages?: string[] } | Record<string, unknown>;
   execution_count: number;
   last_executed_at: string | null;
   created_at: string;
@@ -432,6 +432,14 @@ function describeTrigger(flow: FlowRow): string {
   }
   if (flow.trigger_type === "first_inbound_message") {
     return "Dispara na primeira mensagem recebida de um contato";
+  }
+  if (flow.trigger_type === "deal_stage") {
+    const stages = Array.isArray(flow.trigger_config.stages)
+      ? (flow.trigger_config.stages as string[])
+      : [];
+    return stages.length
+      ? `Dispara quando o negócio entra em: ${stages.join(", ")}`
+      : "Dispara quando o negócio entra em etapa (nenhuma definida)";
   }
   return "Disparo manual";
 }

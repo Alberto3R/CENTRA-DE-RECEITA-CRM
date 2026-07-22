@@ -37,7 +37,7 @@ export interface ValidationIssue {
 
 interface FlowInput {
   name: string;
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "deal_stage";
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
 }
@@ -171,6 +171,31 @@ function validateTrigger(
           message: `${blanks} keyword${blanks === 1 ? " is" : "s are"} blank — they won't match anything.`,
         });
       }
+    }
+  }
+  if (trigger_type === "deal_stage") {
+    const stages = Array.isArray(trigger_config.stages)
+      ? (trigger_config.stages as unknown[]).filter(
+          (x) => typeof x === "string" && x.trim(),
+        )
+      : [];
+    if (stages.length === 0) {
+      issues.push({
+        severity: "error",
+        scope: "trigger",
+        field: "trigger_config.stages",
+        message: "Informe ao menos uma etapa que dispara o flow.",
+      });
+    }
+    const tpl = trigger_config.template_name;
+    if (typeof tpl !== "string" || !tpl.trim()) {
+      issues.push({
+        severity: "error",
+        scope: "trigger",
+        field: "trigger_config.template_name",
+        message:
+          "Informe o template aprovado de abertura (mensagem ativa fora da janela de 24h exige HSM).",
+      });
     }
   }
   // first_inbound_message / manual have no config; nothing to validate.

@@ -857,6 +857,37 @@ export async function dispatchInboundToFlows(
       // One SELECT for the whole flow's nodes — advance loop is now
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
+
+      // Run aberto pelo gatilho 'deal_stage' (mode=flow): o template de
+      // abertura já foi enviado e o run ficou aguardando a PRIMEIRA
+      // resposta do lead. Esta inbound abre a janela de 24h — agora o
+      // flow começa de verdade, avançando a partir do nó de entrada
+      // (em vez de tratar a mensagem como resposta a um prompt que
+      // nunca existiu).
+      const runVars = (activeRun.vars ?? {}) as Record<string, unknown>;
+      if (runVars.__pending_first_advance && activeRun.current_node_key) {
+        delete runVars.__pending_first_advance;
+        await db
+          .from("flow_runs")
+          .update({ vars: runVars, conversation_id: input.conversationId })
+          .eq("id", activeRun.id);
+        await logEvent(db, activeRun.id, "started", activeRun.current_node_key, {
+          reason: "deal_stage_first_reply",
+          meta_message_id: input.message.meta_message_id,
+        });
+        const adv = await advanceFromNodeKey(
+          db,
+          activeRun,
+          activeRun.current_node_key,
+          nodes,
+        );
+        return {
+          consumed: true,
+          flow_run_id: activeRun.id,
+          outcome: adv.outcome === "advanced" ? "started" : adv.outcome,
+        };
+      }
+
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
     }
 

@@ -294,9 +294,115 @@ function TriggerPanel({
               <SelectItem value="manual">
                 Apenas manual (sem gatilho automático)
               </SelectItem>
+              <SelectItem value="deal_stage">
+                Negócio entra em etapa do pipeline
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
+        {state.trigger_type === "deal_stage" && (
+          <>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Etapas que disparam (nomes exatos do pipeline)
+              </label>
+              <KeywordsInput
+                keywords={
+                  Array.isArray(state.trigger_config.stages)
+                    ? (state.trigger_config.stages as string[])
+                    : []
+                }
+                onChange={(stages) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, stages },
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Pipeline (opcional — restringe pelo nome)
+              </label>
+              <Input
+                className="bg-muted"
+                value={(state.trigger_config.pipeline as string) ?? ""}
+                placeholder="ex.: Tráfego Pago"
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, pipeline: e.target.value },
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Template de abertura (HSM aprovado — obrigatório)
+              </label>
+              <Input
+                className="bg-muted"
+                value={(state.trigger_config.template_name as string) ?? ""}
+                placeholder="ex.: ccc_lead_raiox"
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, template_name: e.target.value },
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Variável {"{{1}}"} do template
+              </label>
+              <Select
+                value={(state.trigger_config.template_param as string) ?? "first_name"}
+                onValueChange={(v) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, template_param: v },
+                  }))
+                }
+              >
+                <SelectTrigger className="bg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="first_name">Primeiro nome do contato</SelectItem>
+                  <SelectItem value="full_name">Nome completo</SelectItem>
+                  <SelectItem value="none">Sem variável</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Depois de enviar o template…
+              </label>
+              <Select
+                value={(state.trigger_config.mode as string) ?? "template_only"}
+                onValueChange={(v) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, mode: v },
+                  }))
+                }
+              >
+                <SelectTrigger className="bg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="template_only">
+                    Encerrar — o agente IA do canal assume as respostas
+                  </SelectItem>
+                  <SelectItem value="flow">
+                    Continuar neste flow quando o lead responder
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
         {state.trigger_type === "keyword" && (
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
