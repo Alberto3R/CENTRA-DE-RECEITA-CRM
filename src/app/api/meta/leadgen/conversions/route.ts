@@ -113,19 +113,26 @@ export async function POST(request: Request) {
   }[]).filter((e) => !doneSet.has(e.id) && e.stage_id)
   if (!pending.length) return NextResponse.json({ ok: true, sent: 0 })
 
-  // 3. nomes das etapas + contatos (match reserva em/ph)
+  // 3. nomes das etapas + contatos (match reserva em/ph) + valor dos deals
   const stageIds = [...new Set(pending.map((e) => e.stage_id as string))]
   const contactIds = [...new Set([...byDeal.values()].map((l) => l.contact_id).filter(Boolean))] as string[]
-  const [{ data: stages }, { data: contacts }] = await Promise.all([
+  const pendingDealIds = [...new Set(pending.map((e) => e.deal_id))]
+  const [{ data: stages }, { data: contacts }, { data: dealRows }] = await Promise.all([
     db.from('pipeline_stages').select('id, name').in('id', stageIds),
     contactIds.length
       ? db.from('contacts').select('id, phone_normalized, email').in('id', contactIds)
       : Promise.resolve({ data: [] }),
+    db.from('deals').select('id, value, currency').in('id', pendingDealIds),
   ])
   const stageName = new Map(((stages ?? []) as { id: string; name: string }[]).map((s) => [s.id, s.name]))
   const contactById = new Map(
     ((contacts ?? []) as { id: string; phone_normalized: string | null; email: string | null }[]).map(
       (c) => [c.id, c],
+    ),
+  )
+  const dealById = new Map(
+    ((dealRows ?? []) as { id: string; value: number | null; currency: string | null }[]).map(
+      (d) => [d.id, d],
     ),
   )
 
@@ -158,11 +165,20 @@ export async function POST(request: Request) {
     if (contact?.email) userData.em = [sha256(contact.email)]
     if (contact?.phone_normalized) userData.ph = [sha256(contact.phone_normalized)]
 
-    const event = {
+    const event: Record<string, unknown> = {
       event_name: eventName,
       event_time: Math.floor(new Date(ev.entered_at).getTime() / 1000),
       action_source: 'system_generated',
       user_data: userData,
+    }
+    // "converted" (Ganho) leva o VALOR do negócio — habilita otimização por
+    // valor de conversão na Meta (não só contagem). Só quando o deal tem valor.
+    if (eventName === 'converted') {
+      const dv = dealById.get(ev.deal_id)
+      const value = typeof dv?.value === 'number' ? dv.value : Number(dv?.value ?? 0)
+      if (value > 0) {
+        event.custom_data = { value, currency: dv?.currency ?? 'BRL' }
+      }
     }
 
     let ok = false
