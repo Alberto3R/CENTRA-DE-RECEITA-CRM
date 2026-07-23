@@ -92,6 +92,43 @@ export interface MetaLead {
   created_time?: string
 }
 
+// A Meta devolve respostas de múltipla escolha como a CHAVE da opção
+// ("faturamento_3"), não o texto. Buscamos as perguntas do formulário 1×
+// e montamos o mapa chave→texto (cache por form_id no processo).
+const formLabelCache = new Map<string, Record<string, string>>()
+
+async function formOptionLabels(
+  db: Db,
+  pageId: string,
+  formId: string,
+): Promise<Record<string, string>> {
+  const cached = formLabelCache.get(formId)
+  if (cached) return cached
+  const map: Record<string, string> = {}
+  try {
+    const pt = await pageToken(db, pageId)
+    if (pt) {
+      const res = await fetch(
+        `${GRAPH}/${formId}?fields=questions&access_token=${encodeURIComponent(pt)}`,
+      )
+      if (res.ok) {
+        const j = (await res.json()) as {
+          questions?: { key?: string; options?: { key?: string; value?: string }[] }[]
+        }
+        for (const q of j.questions ?? []) {
+          for (const o of q.options ?? []) {
+            if (o.key && o.value) map[o.key] = o.value
+          }
+        }
+      }
+    }
+  } catch {
+    // sem mapa, seguimos com os valores crus (melhor importar do que perder)
+  }
+  formLabelCache.set(formId, map)
+  return map
+}
+
 /**
  * Importa UM lead já buscado da Graph: contato (dedup por telefone) +
  * deal no estágio do gate + vínculo meta_leadgen_leads + atribuição +
@@ -112,6 +149,14 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
   const fields: Record<string, string> = {}
   for (const f of lead.field_data ?? []) {
     if (f.name && f.values?.length) fields[f.name] = String(f.values[0])
+  }
+  // decodifica chaves de opção → texto (ex.: "faturamento_3" → "Mais de R$200 mil")
+  if (lead.form_id) {
+    const labels = await formOptionLabels(db, pageId, String(lead.form_id))
+    for (const k of Object.keys(fields)) {
+      const label = labels[fields[k]]
+      if (label) fields[k] = label
+    }
   }
   const name = fields.full_name ?? 'Lead (Form Meta)'
   const email = fields.email ?? null
