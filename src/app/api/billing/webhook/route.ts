@@ -9,6 +9,77 @@ import type Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { getStripe } from "@/lib/billing/stripe";
 import { isPlanId } from "@/lib/billing/plans";
+import { enviarEmail } from "@/lib/email/client";
+
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://sales-3r-crm.vercel.app";
+
+/**
+ * Compra vinda do funil público (Payment Link) chega SEM user_id/account_id no
+ * metadata — só o e-mail do comprador. Aqui a gente resolve a conta a partir
+ * do e-mail: acha o usuário (ou cria), provisiona a conta e manda o acesso.
+ * É o que faltava — sem isso, toda venda pelo site paga e fica sem acesso.
+ */
+async function provisionarPorEmail(email: string): Promise<string | null> {
+  const admin = supabaseAdmin();
+  try {
+    let userId: string | null = null;
+    const { data: found } = await admin.rpc("get_user_id_by_email", {
+      p_email: email,
+    });
+    userId = (found as string | null) ?? null;
+
+    let isNew = false;
+    if (!userId) {
+      const { data: created, error: createErr } =
+        await admin.auth.admin.createUser({ email, email_confirm: true });
+      if (createErr || !created?.user) {
+        console.error("[stripe webhook] createUser falhou:", createErr);
+        return null;
+      }
+      userId = created.user.id;
+      isNew = true;
+    }
+
+    const { data: accId, error: provErr } = await admin.rpc(
+      "provision_account",
+      { p_user_id: userId },
+    );
+    if (provErr) {
+      console.error("[stripe webhook] provision_account (email) falhou:", provErr);
+      return null;
+    }
+    const accountId = (accId as string | null) ?? null;
+
+    // Entrega o acesso: link pra definir senha (novo) ou entrar (existente).
+    try {
+      const { data: link } = await admin.auth.admin.generateLink({
+        type: isNew ? "invite" : "recovery",
+        email,
+      });
+      const actionLink =
+        (link as { properties?: { action_link?: string } } | null)?.properties
+          ?.action_link ?? APP_URL;
+      await enviarEmail({
+        para: email,
+        assunto: "Seu acesso à Central de Receita 🎉",
+        html: `<div style="font-family:Arial;font-size:15px;color:#1a1a1a">
+          <h2>Sua assinatura está ativa!</h2>
+          <p>Bem-vindo(a) à Central de Receita. Clique abaixo para ${isNew ? "definir sua senha e" : ""} acessar:</p>
+          <p><a href="${actionLink}" style="display:inline-block;background:#111;color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:bold">${isNew ? "Definir senha e entrar" : "Acessar a Central de Receita"}</a></p>
+          <p style="color:#555">Ou acesse <a href="${APP_URL}">${APP_URL}</a> com o e-mail <b>${email}</b>.</p>
+        </div>`,
+      });
+    } catch (e) {
+      console.error("[stripe webhook] envio do acesso falhou:", e);
+    }
+
+    return accountId;
+  } catch (e) {
+    console.error("[stripe webhook] provisionarPorEmail erro:", e);
+    return null;
+  }
+}
 
 /** Mapeia o status do Stripe para o plano efetivo da conta. */
 function planoEfetivo(status: string, plan: string): string {
@@ -53,7 +124,12 @@ async function aplicarAssinatura(
     console.error("[stripe webhook] subscription sem account_id/user_id no metadata");
     return;
   }
-  const plan = sub.metadata?.plan ?? "pro";
+  // Plano: metadata da subscription tem prioridade; senão lê do preço (os
+  // Payment Links carregam plan=starter|pro na metadata do price).
+  const priceMeta = sub.items?.data?.[0]?.price?.metadata as
+    | { plan?: string }
+    | undefined;
+  const plan = sub.metadata?.plan ?? priceMeta?.plan ?? "pro";
   const status = sub.status;
   // `current_period_end` mudou de lugar entre versões da API do Stripe (topo da
   // subscription vs. no item). Lemos de ambos com cast defensivo.
@@ -126,9 +202,20 @@ export async function POST(request: Request) {
           // O metadata da SESSION é a fonte da verdade (account_id em upgrade OU
           // user_id na primeira compra). Resolve a conta — provisionando se for
           // a primeira compra.
-          const accountId = await resolveAccountId(
+          let accountId = await resolveAccountId(
             session.metadata ?? sub.metadata,
           );
+          // Funil público (Payment Link): sem user_id/account_id no metadata,
+          // provisiona a partir do e-mail do comprador.
+          if (!accountId) {
+            const cust = sub.customer;
+            const custEmail =
+              cust && typeof cust !== "string" && !("deleted" in cust)
+                ? cust.email
+                : null;
+            const email = session.customer_details?.email ?? custEmail ?? null;
+            if (email) accountId = await provisionarPorEmail(email);
+          }
           // Carimba o account_id resolvido na assinatura no Stripe, para que os
           // eventos futuros (updated/deleted) já venham com ele.
           if (accountId && sub.metadata?.account_id !== accountId) {
