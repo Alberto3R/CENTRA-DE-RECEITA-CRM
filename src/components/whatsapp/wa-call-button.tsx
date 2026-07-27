@@ -126,7 +126,7 @@ export function WaCallButton({
           className={
             status === "needs_permission" || status === "failed"
               ? "text-amber-400 hover:text-amber-300"
-              : "text-muted-foreground hover:text-primary"
+              : "text-blue-500 hover:text-blue-400"
           }
         >
           <Phone className="h-4 w-4" />

@@ -62,12 +62,13 @@ export function useTelnyxCall() {
   const callRowIdRef = useRef<string | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Solta os recursos SEM chamar call.hangup(). Chamar hangup() aqui — dentro
+  // do handler das notificações de 'hangup'/'destroy' — causava RECURSÃO
+  // INFINITA (hangup → notificação → setState → hangup → …) que estourava a
+  // pilha ("Maximum call stack size exceeded") e CRASHAVA a aba. O hangup ATIVO
+  // do SDK fica exclusivamente no hangup() do usuário (botão Encerrar). O
+  // disconnect() do client já derruba a chamada no transporte.
   const cleanup = useCallback(() => {
-    try {
-      callRef.current?.hangup?.();
-    } catch {
-      /* noop */
-    }
     callRef.current = null;
     try {
       clientRef.current?.disconnect?.();
@@ -139,6 +140,8 @@ export function useTelnyxCall() {
 
       client.on("telnyx.notification", (n: TelnyxNotification) => {
         if (n.type !== "callUpdate" || !n.call) return;
+        // Já encerrado (cleanup zerou o client) → ignora notificações residuais.
+        if (!clientRef.current) return;
         const call = n.call;
         callRef.current = call;
         // ata o áudio do lead

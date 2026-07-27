@@ -100,7 +100,7 @@ export function TelnyxCallButton({
           className={
             status === "failed"
               ? "text-amber-400 hover:text-amber-300"
-              : "text-muted-foreground hover:text-primary"
+              : "text-green-500 hover:text-green-400"
           }
         >
           <PhoneCall className="h-4 w-4" />
