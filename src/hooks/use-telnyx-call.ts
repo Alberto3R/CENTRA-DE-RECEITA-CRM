@@ -68,6 +68,10 @@ export function useTelnyxCall() {
   const endedRef = useRef(false);
   const dialedRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Registro da chamada no CRM a partir do CLIENTE (a connection WebRTC não
+  // dispara webhook): quando atendeu e por quanto tempo falou.
+  const answeredAtRef = useRef<number | null>(null);
+  const reportedRef = useRef(false); // garante 1 report de "completed" só
 
   // Solta os recursos SEM chamar call.hangup(). Chamar hangup() aqui — dentro
   // do handler das notificações de 'hangup'/'destroy' — causava RECURSÃO
@@ -101,6 +105,8 @@ export function useTelnyxCall() {
       // nova tentativa: rearma as guardas
       endedRef.current = false;
       dialedRef.current = false;
+      answeredAtRef.current = null;
+      reportedRef.current = false;
       setStatus("connecting");
 
       // 1) registra a chamada (log) + resolve destino/caller
@@ -189,13 +195,21 @@ export function useTelnyxCall() {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
+            answeredAtRef.current = Date.now();
             setStatus("in_progress");
+            void reportUpdate(callRowIdRef.current, "answered");
             break;
           case "hangup":
-          case "destroy":
+          case "destroy": {
+            const rowId = callRowIdRef.current;
+            const dur = answeredAtRef.current
+              ? Math.round((Date.now() - answeredAtRef.current) / 1000)
+              : 0;
             setStatus((s) => (s === "failed" ? s : "ended"));
+            finishReport(reportedRef, rowId, dur);
             cleanup();
             break;
+          }
         }
       });
 
@@ -247,27 +261,56 @@ export function useTelnyxCall() {
 
   const hangup = useCallback(async () => {
     const id = callRowIdRef.current;
+    const dur = answeredAtRef.current
+      ? Math.round((Date.now() - answeredAtRef.current) / 1000)
+      : 0;
     setStatus((s) => (s === "in_progress" || s === "ringing" ? "ended" : s));
     try {
       callRef.current?.hangup?.();
     } catch {
       /* noop */
     }
-    if (id) {
-      try {
-        await fetch("/api/telnyx/call", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "hangup", callId: id }),
-        });
-      } catch {
-        /* best-effort */
-      }
-    }
+    // Registro do encerramento no CRM (a notificação de hangup pode chegar
+    // depois do teardown, então garantimos o report aqui também — dedup pelo
+    // reportedRef).
+    finishReport(reportedRef, id, dur);
     cleanup();
   }, [cleanup]);
 
   return { status, error, seconds, startCall, hangup, remoteAudioRef };
+}
+
+/** Reporta uma transição de estado da chamada pro CRM (status + duração). */
+async function reportUpdate(
+  callId: string | null,
+  status: string,
+  durationSeconds?: number,
+) {
+  if (!callId) return;
+  try {
+    await fetch("/api/telnyx/call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update", callId, status, durationSeconds }),
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Registra o encerramento UMA vez (dedup por ref), com a duração falada. */
+function finishReport(
+  reportedRef: { current: boolean },
+  callId: string | null,
+  durationSeconds: number,
+) {
+  if (reportedRef.current || !callId) return;
+  reportedRef.current = true;
+  void reportUpdate(
+    callId,
+    durationSeconds > 0 ? "completed" : "no_answer",
+    durationSeconds,
+  );
 }
 
 async function markFail(callId?: string | null, errorMessage?: string) {

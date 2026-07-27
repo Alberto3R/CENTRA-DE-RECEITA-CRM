@@ -27,6 +27,8 @@ export async function POST(request: Request) {
       dealId?: string;
       to?: string;
       errorMessage?: string;
+      status?: string; // update: answered | completed | no_answer
+      durationSeconds?: number; // update: duração falada
     } | null;
     if (!body) {
       return NextResponse.json({ error: "payload inválido" }, { status: 400 });
@@ -53,6 +55,49 @@ export async function POST(request: Request) {
         .from("telnyx_calls")
         .update({ status: "completed", updated_at: new Date().toISOString() })
         .eq("id", row.id);
+      return NextResponse.json({ ok: true });
+    }
+
+    // ---- UPDATE (estado reportado pelo softphone) ----
+    // A connection WebRTC (credential) NÃO dispara webhooks de Call Control,
+    // então o REGISTRO da chamada vem do cliente: o softphone reporta aqui
+    // 'answered' (atendeu) e 'completed' (encerrou, com a duração). É o que
+    // alimenta status/duração no histórico + a atividade 'call' do Painel.
+    if (body.action === "update") {
+      if (!body.callId || !body.status) {
+        return NextResponse.json(
+          { error: "callId e status são obrigatórios" },
+          { status: 400 },
+        );
+      }
+      const now = new Date().toISOString();
+      const patch: Record<string, unknown> = { status: body.status, updated_at: now };
+      if (body.status === "answered") patch.start_time = now;
+      if (body.status === "completed" || body.status === "no_answer") {
+        patch.end_time = now;
+        patch.duration_seconds = body.durationSeconds ?? 0;
+      }
+      const { data: row } = await admin
+        .from("telnyx_calls")
+        .update(patch)
+        .eq("id", body.callId)
+        .eq("account_id", ctx.accountId)
+        .select("account_id, user_id, contact_id, deal_id")
+        .maybeSingle();
+      // Auto-log da atividade 'call' no Painel Outbound quando atendida.
+      if (row && body.status === "completed" && (body.durationSeconds ?? 0) > 0) {
+        try {
+          await admin.from("sdr_activities").insert({
+            account_id: row.account_id,
+            user_id: row.user_id,
+            contact_id: row.contact_id,
+            deal_id: row.deal_id,
+            tipo: "call",
+          });
+        } catch (e) {
+          console.warn("[telnyx] sdr_activities log falhou:", e);
+        }
+      }
       return NextResponse.json({ ok: true });
     }
 
