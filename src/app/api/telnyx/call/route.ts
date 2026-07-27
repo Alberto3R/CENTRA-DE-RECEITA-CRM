@@ -77,14 +77,18 @@ export async function POST(request: Request) {
         patch.end_time = now;
         patch.duration_seconds = body.durationSeconds ?? 0;
       }
+      // Dedup no servidor: só atualiza se a chamada AINDA NÃO estava encerrada.
+      // Uma 2ª chegada de 'completed' (corrida entre os dois reports do cliente)
+      // não retorna linha → não re-loga a atividade (evita inflar o Painel).
       const { data: row } = await admin
         .from("telnyx_calls")
         .update(patch)
         .eq("id", body.callId)
         .eq("account_id", ctx.accountId)
+        .not("status", "in", "(completed,no_answer,failed)")
         .select("account_id, user_id, contact_id, deal_id")
         .maybeSingle();
-      // Auto-log da atividade 'call' no Painel Outbound quando atendida.
+      // Auto-log da atividade 'call' no Painel Outbound quando atendida (1x só).
       if (row && body.status === "completed" && (body.durationSeconds ?? 0) > 0) {
         try {
           await admin.from("sdr_activities").insert({
