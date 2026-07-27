@@ -26,6 +26,7 @@ interface CallRow {
   recording_path: string | null;
   transcript: string | null;
   contact: { name: string | null; phone: string | null } | null;
+  source: "whatsapp" | "telnyx"; // canal da ligação
 }
 
 function fmtDur(s: number | null) {
@@ -42,10 +43,14 @@ function fmtDate(iso: string) {
 }
 const STATUS: Record<string, { label: string; cls: string }> = {
   completed: { label: "Atendida", cls: "text-primary" },
+  answered: { label: "Em andamento", cls: "text-muted-foreground" },
   failed: { label: "Falhou", cls: "text-red-400" },
   rejected: { label: "Recusada", cls: "text-red-400" },
   missed: { label: "Não atendida", cls: "text-amber-400" },
+  no_answer: { label: "Não atendida", cls: "text-amber-400" },
+  busy: { label: "Ocupado", cls: "text-amber-400" },
   in_progress: { label: "Em andamento", cls: "text-muted-foreground" },
+  initiating: { label: "Iniciando", cls: "text-muted-foreground" },
   ringing: { label: "Chamando", cls: "text-muted-foreground" },
 };
 
@@ -67,17 +72,35 @@ export default function LigacoesPage() {
   const load = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
-    let q = supabase
-      .from("whatsapp_calls")
-      .select(
-        "id,direction,status,duration_seconds,created_at,recording_path,transcript,contact:contacts(name,phone)",
-      )
-      .eq("account_id", accountId)
-      .order("created_at", { ascending: false })
-      .limit(100);
-    if (onlyRec) q = q.not("recording_path", "is", null);
-    const { data } = await q;
-    setCalls((data as unknown as CallRow[]) ?? []);
+    const cols =
+      "id,direction,status,duration_seconds,created_at,recording_path,transcript,contact:contacts(name,phone)";
+    // Busca WhatsApp + Telnyx em paralelo e mescla por data (mais recente 1º).
+    const [wa, tx] = await Promise.all([
+      supabase
+        .from("whatsapp_calls")
+        .select(cols)
+        .eq("account_id", accountId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      supabase
+        .from("telnyx_calls")
+        .select(cols)
+        .eq("account_id", accountId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ]);
+    let merged: CallRow[] = [
+      ...((wa.data as unknown as CallRow[]) ?? []).map((c) => ({
+        ...c,
+        source: "whatsapp" as const,
+      })),
+      ...((tx.data as unknown as CallRow[]) ?? []).map((c) => ({
+        ...c,
+        source: "telnyx" as const,
+      })),
+    ].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    if (onlyRec) merged = merged.filter((c) => c.recording_path);
+    setCalls(merged.slice(0, 100));
     setLoading(false);
   }, [supabase, accountId, onlyRec]);
 
@@ -85,11 +108,11 @@ export default function LigacoesPage() {
     void load();
   }, [load]);
 
-  async function ouvir(id: string) {
+  async function ouvir(id: string, source: string) {
     if (urls[id]) return;
     setBusy(`play:${id}`);
     try {
-      const res = await fetch(`/api/whatsapp/call/${id}/recording`);
+      const res = await fetch(`/api/${source}/call/${id}/recording`);
       const j = await res.json();
       if (!res.ok || !j.url) throw new Error(j.error || "sem link");
       setUrls((u) => ({ ...u, [id]: j.url }));
@@ -100,10 +123,10 @@ export default function LigacoesPage() {
     }
   }
 
-  async function analisar(id: string) {
+  async function analisar(id: string, source: string) {
     setBusy(`ai:${id}`);
     try {
-      const tr = await fetch(`/api/whatsapp/call/${id}/transcribe`, {
+      const tr = await fetch(`/api/${source}/call/${id}/transcribe`, {
         method: "POST",
       });
       const tj = await tr.json();
@@ -113,7 +136,7 @@ export default function LigacoesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           texto: tj.transcript,
-          origem: "Ligação WhatsApp",
+          origem: source === "telnyx" ? "Ligação telefônica" : "Ligação WhatsApp",
           callId: id,
         }),
       });
@@ -138,8 +161,8 @@ export default function LigacoesPage() {
             Ligações
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Histórico das chamadas WhatsApp — ouça a gravação e analise com o
-            Gestor Comercial.
+            Histórico das chamadas — WhatsApp e telefone (Telnyx). Ouça a
+            gravação e analise com o Gestor Comercial.
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 pt-1 text-xs text-muted-foreground">
@@ -171,12 +194,17 @@ export default function LigacoesPage() {
                 label: c.status,
                 cls: "text-muted-foreground",
               };
+              const incoming =
+                c.direction === "USER_INITIATED" || c.direction === "inbound";
               const Icon =
-                c.status === "missed" || c.status === "rejected"
+                c.status === "missed" ||
+                c.status === "rejected" ||
+                c.status === "no_answer"
                   ? PhoneMissed
-                  : c.direction === "USER_INITIATED"
+                  : incoming
                     ? PhoneIncoming
                     : PhoneOutgoing;
+              const canal = c.source === "telnyx" ? "Telefone" : "WhatsApp";
               return (
                 <li key={c.id}>
                   <Card>
@@ -187,8 +215,17 @@ export default function LigacoesPage() {
                           {c.contact?.name || c.contact?.phone || "Sem contato"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {c.direction === "USER_INITIATED" ? "Recebida" : "Efetuada"} ·{" "}
-                          {fmtDate(c.created_at)}
+                          {incoming ? "Recebida" : "Efetuada"} ·{" "}
+                          <span
+                            className={
+                              c.source === "telnyx"
+                                ? "text-green-500"
+                                : "text-blue-500"
+                            }
+                          >
+                            {canal}
+                          </span>{" "}
+                          · {fmtDate(c.created_at)}
                         </p>
                       </div>
                       <span className={`text-xs font-medium ${st.cls}`}>
@@ -213,7 +250,7 @@ export default function LigacoesPage() {
                               size="sm"
                               className="h-8 gap-1 text-xs"
                               disabled={busy === `play:${c.id}`}
-                              onClick={() => ouvir(c.id)}
+                              onClick={() => ouvir(c.id, c.source)}
                             >
                               {busy === `play:${c.id}` ? (
                                 <Loader2 className="size-3.5 animate-spin" />
@@ -227,7 +264,7 @@ export default function LigacoesPage() {
                               size="sm"
                               className="h-8 gap-1 text-xs text-primary hover:text-primary"
                               disabled={busy === `ai:${c.id}`}
-                              onClick={() => analisar(c.id)}
+                              onClick={() => analisar(c.id, c.source)}
                               title="Transcrever e analisar no Gestor Comercial"
                             >
                               {busy === `ai:${c.id}` ? (

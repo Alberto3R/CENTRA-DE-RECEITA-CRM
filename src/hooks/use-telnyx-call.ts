@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
 
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  startCallRecording,
+  type CallRecorder,
+} from "@/lib/whatsapp/call-recorder";
+
 /**
  * Softphone Telnyx (ligação PSTN direta ao telefone do lead) — WebRTC no
  * navegador via SDK @telnyx/webrtc.
@@ -37,6 +44,7 @@ interface StartOpts {
 // Tipos frouxos do SDK (evita acoplar à versão exata).
 type TelnyxCall = {
   state: string;
+  localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
   hangup: () => void;
 };
@@ -73,6 +81,40 @@ export function useTelnyxCall() {
   const answeredAtRef = useRef<number | null>(null);
   const reportedRef = useRef(false); // garante 1 report de "completed" só
 
+  // ---- Gravação (WebRTC → Storage), reusando o gravador do WhatsApp ----
+  const { accountId } = useAuth();
+  const accountIdRef = useRef<string | null>(accountId ?? null);
+  accountIdRef.current = accountId ?? null;
+  const recorderRef = useRef<CallRecorder | null>(null);
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  function supabase() {
+    if (!supabaseRef.current) supabaseRef.current = createClient();
+    return supabaseRef.current;
+  }
+  const uploadRecording = useCallback(async (rowId: string, blob: Blob) => {
+    const acc = accountIdRef.current;
+    if (!acc) return;
+    try {
+      const path = `${acc}/telnyx-${rowId}.webm`;
+      const sb = supabase();
+      const { error } = await sb.storage
+        .from("call-recordings")
+        .upload(path, blob, {
+          contentType: blob.type || "audio/webm",
+          upsert: true,
+        });
+      if (error) {
+        console.error("[telnyx-call] upload da gravação falhou:", error.message);
+        return;
+      }
+      await sb.from("telnyx_calls").update({ recording_path: path }).eq("id", rowId);
+    } catch (e) {
+      console.error("[telnyx-call] finalização da gravação falhou:", e);
+    }
+    // supabase() é estável (ref); accountIdRef idem — sem deps externas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Solta os recursos SEM chamar call.hangup(). Chamar hangup() aqui — dentro
   // do handler das notificações de 'hangup'/'destroy' — causava RECURSÃO
   // INFINITA (hangup → notificação → setState → hangup → …) que estourava a
@@ -85,6 +127,11 @@ export function useTelnyxCall() {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    // gravação ainda ativa aqui = caminho de falha (erro/timeout) → descarta.
+    // No encerramento normal ela já foi parada+enviada antes do cleanup.
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    if (rec) void rec.stop();
     callRef.current = null;
     try {
       clientRef.current?.disconnect?.();
@@ -198,6 +245,13 @@ export function useTelnyxCall() {
             answeredAtRef.current = Date.now();
             setStatus("in_progress");
             void reportUpdate(callRowIdRef.current, "answered");
+            // grava a conversa (mic do SDR + áudio do lead) — best-effort
+            if (!recorderRef.current) {
+              recorderRef.current = startCallRecording(
+                call.localStream ?? null,
+                call.remoteStream ?? null,
+              );
+            }
             break;
           case "hangup":
           case "destroy": {
@@ -207,6 +261,14 @@ export function useTelnyxCall() {
               : 0;
             setStatus((s) => (s === "failed" ? s : "ended"));
             finishReport(reportedRef, rowId, dur);
+            // finaliza a gravação ANTES do cleanup derrubar as tracks e sobe
+            const rec = recorderRef.current;
+            recorderRef.current = null;
+            if (rec && rowId) {
+              void rec.stop().then((blob) => {
+                if (blob) void uploadRecording(rowId, blob);
+              });
+            }
             cleanup();
             break;
           }
@@ -256,7 +318,7 @@ export function useTelnyxCall() {
 
       client.connect();
     },
-    [cleanup],
+    [cleanup, uploadRecording],
   );
 
   const hangup = useCallback(async () => {
