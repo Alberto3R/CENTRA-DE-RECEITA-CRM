@@ -61,6 +61,13 @@ export function useTelnyxCall() {
   const callRef = useRef<TelnyxCall | null>(null);
   const callRowIdRef = useRef<string | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Guardas contra o loop de re-discagem/reconexão do SDK:
+  //   endedRef  = já encerramos → TODOS os handlers viram no-op (nada re-processa)
+  //   dialedRef = já discamos 1x nesta sessão → telnyx.ready não disca de novo
+  //             (o SDK reconecta sozinho e re-emite ready; sem isso, re-disca em loop)
+  const endedRef = useRef(false);
+  const dialedRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Solta os recursos SEM chamar call.hangup(). Chamar hangup() aqui — dentro
   // do handler das notificações de 'hangup'/'destroy' — causava RECURSÃO
@@ -69,6 +76,11 @@ export function useTelnyxCall() {
   // do SDK fica exclusivamente no hangup() do usuário (botão Encerrar). O
   // disconnect() do client já derruba a chamada no transporte.
   const cleanup = useCallback(() => {
+    endedRef.current = true;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     callRef.current = null;
     try {
       clientRef.current?.disconnect?.();
@@ -86,6 +98,9 @@ export function useTelnyxCall() {
     async (opts: StartOpts) => {
       setError(null);
       cleanup();
+      // nova tentativa: rearma as guardas
+      endedRef.current = false;
+      dialedRef.current = false;
       setStatus("connecting");
 
       // 1) registra a chamada (log) + resolve destino/caller
@@ -134,14 +149,27 @@ export function useTelnyxCall() {
         return;
       }
 
+      // 2b) GARANTE o microfone ANTES de discar. Sem permissão de mic, o SDK
+      // cria a chamada mas ela morre na hora (sem tocar/sem áudio) — provável
+      // causa do "não chamou nada". Aqui o prompt aparece e, se negado, avisa.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch {
+        setError("Permita o acesso ao microfone do navegador para ligar.");
+        setStatus("failed");
+        await markFail(logged.id, "mic_denied");
+        return;
+      }
+
       // 3) SDK: conecta e disca
       const client = new TelnyxRTC({ login_token: token });
       clientRef.current = client;
 
       client.on("telnyx.notification", (n: TelnyxNotification) => {
         if (n.type !== "callUpdate" || !n.call) return;
-        // Já encerrado (cleanup zerou o client) → ignora notificações residuais.
-        if (!clientRef.current) return;
+        // Já encerrado → ignora notificações residuais (mata o loop de re-processo).
+        if (endedRef.current) return;
         const call = n.call;
         callRef.current = call;
         // ata o áudio do lead
@@ -157,6 +185,10 @@ export function useTelnyxCall() {
             setStatus("ringing");
             break;
           case "active":
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
             setStatus("in_progress");
             break;
           case "hangup":
@@ -168,6 +200,7 @@ export function useTelnyxCall() {
       });
 
       client.on("telnyx.error", () => {
+        if (endedRef.current) return;
         setError("Erro na conexão do softphone.");
         setStatus("failed");
         void markFail(callRowIdRef.current, "telnyx.error");
@@ -175,6 +208,10 @@ export function useTelnyxCall() {
       });
 
       client.on("telnyx.ready", () => {
+        // Disca UMA vez. O SDK reconecta sozinho e re-emite ready; sem estas
+        // guardas, cada re-ready disparava outra chamada → loop de discagem.
+        if (endedRef.current || dialedRef.current) return;
+        dialedRef.current = true;
         try {
           const call = client.newCall({
             destinationNumber: logged.to!,
@@ -192,6 +229,16 @@ export function useTelnyxCall() {
           cleanup();
         }
       });
+
+      // Trava de segurança: se não atender/conectar em 45s, encerra sozinho
+      // (evita ficar preso em "Conectando…"/"Chamando…" pra sempre).
+      timeoutRef.current = setTimeout(() => {
+        if (endedRef.current) return;
+        setError("A ligação não completou (sem resposta em 45s).");
+        setStatus("failed");
+        void markFail(callRowIdRef.current, "timeout");
+        cleanup();
+      }, 45000);
 
       client.connect();
     },
