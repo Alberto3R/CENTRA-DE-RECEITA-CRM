@@ -94,9 +94,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    // E.164 com DDI Brasil quando vier sem +
-    const digits = toPhone.replace(/\D/g, "");
-    const to = digits.startsWith("55") ? `+${digits}` : `+55${digits}`;
+    const to = toBrE164(toPhone);
+    if (!to) {
+      return NextResponse.json(
+        { error: "número de telefone inválido" },
+        { status: 400 },
+      );
+    }
 
     const { data: row, error: insErr } = await admin
       .from("telnyx_calls")
@@ -129,4 +133,21 @@ export async function POST(request: Request) {
   } catch (err) {
     return toErrorResponse(err);
   }
+}
+
+/**
+ * Normaliza telefone BR pra E.164 corrigindo o "9º dígito": celular sem o 9
+ * (DDD + 8 dígitos começando em 6–9) recebe o 9; fixo (8 dígitos começando em
+ * 2–5) fica como está. Sem isso, a Telnyx rejeita o celular sem o 9 com
+ * "CALL DOES NOT EXIST". Retorna null se o número for inválido.
+ */
+function toBrE164(raw: string): string | null {
+  let d = (raw || "").replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2); // remove o DDI 55
+  if (d.length === 10) {
+    const sub = d.slice(2);
+    if (/^[6-9]/.test(sub)) d = d.slice(0, 2) + "9" + sub; // celular sem o 9
+  }
+  if (!/^\d{10,11}$/.test(d)) return null; // DDD(2) + 8 (fixo) ou 9 (celular)
+  return `+55${d}`;
 }
