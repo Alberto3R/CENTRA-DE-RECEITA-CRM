@@ -42,6 +42,7 @@ interface Cfg {
   stage_map: Record<string, string>;
   enabled: boolean;
   recovery_template: string | null;
+  auto_route_by_name: boolean;
 }
 
 function newToken() {
@@ -98,6 +99,7 @@ export function WebhooksSettings() {
       stage_map: {},
       enabled: true,
       recovery_template: "",
+      auto_route_by_name: false,
     });
   }
 
@@ -171,6 +173,7 @@ export function WebhooksSettings() {
       stage_map: editing.stage_map,
       enabled: editing.enabled,
       recovery_template: editing.recovery_template?.trim() || null,
+      auto_route_by_name: editing.auto_route_by_name,
     };
     const { error } = editing.id
       ? await supabase.from("gateway_webhook_config").update(row).eq("id", editing.id)
@@ -394,6 +397,25 @@ export function WebhooksSettings() {
                     className="size-4 accent-[var(--primary)]"
                   />
                   No reembolso/estorno, marcar o negócio como perdido
+                </label>
+
+                <label className="flex items-start gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editing.auto_route_by_name}
+                    onChange={(e) =>
+                      setEditing({ ...editing, auto_route_by_name: e.target.checked })
+                    }
+                    className="mt-0.5 size-4 accent-[var(--primary)]"
+                  />
+                  <span>
+                    Rotear por nome do produto
+                    <span className="block text-xs text-muted-foreground">
+                      Se existir um funil com o mesmo nome do produto da venda, o lead vai
+                      pra lá (e a etapa é escolhida pelo nome das etapas). Sem funil
+                      correspondente, cai no funil acima.
+                    </span>
+                  </span>
                 </label>
 
                 <label className="flex items-center gap-2 text-sm text-foreground">

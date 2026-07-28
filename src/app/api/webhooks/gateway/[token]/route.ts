@@ -35,6 +35,68 @@ function str(v: unknown): string | null {
   return null
 }
 
+// Normaliza texto pra comparação (sem acento, minúsculo, só alfanum).
+function norm(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+// Auto-roteamento: acha o funil cujo NOME casa com o produto. Prioriza
+// igualdade > funil contido no produto ("Otológicas" ⊆ "Formulações
+// Otológicas") > produto contido no funil. Empate real (ex.: produto
+// genérico "Masterclass" com 2 funis Masterclass) → null (não chuta).
+function pickPipelineByProduct(
+  pipes: { id: string; name: string }[],
+  productName: string,
+): { id: string; name: string } | null {
+  const p = norm(productName)
+  if (!p) return null
+  const scored = pipes
+    .map((pl) => {
+      const n = norm(pl.name)
+      if (!n) return null
+      if (n === p) return { id: pl.id, name: pl.name, score: 3, len: n.length }
+      if (p.includes(n)) return { id: pl.id, name: pl.name, score: 2, len: n.length }
+      if (n.includes(p)) return { id: pl.id, name: pl.name, score: 1, len: n.length }
+      return null
+    })
+    .filter(Boolean) as { id: string; name: string; score: number; len: number }[]
+  if (!scored.length) return null
+  scored.sort((a, b) => b.score - a.score || b.len - a.len)
+  const top = scored[0]
+  if (scored.filter((s) => s.score === top.score && s.len === top.len).length > 1) return null
+  return top
+}
+
+// Resolve etapa por evento a partir da SEMÂNTICA dos nomes das etapas do
+// funil (venda/ganho/fechado, carrinho abandonado, pix/boleto, refund).
+function autoStageMap(
+  stages: { id: string; name: string; position: number }[],
+): Record<string, string> {
+  const find = (re: RegExp) => stages.find((s) => re.test(norm(s.name)))
+  const notLost = stages.filter((s) => !/perdid|perda|lost|cancel|reembols/.test(norm(s.name)))
+  const won = find(/ganho|ganha|venda|fechad|pago|won/) ?? notLost[notLost.length - 1]
+  const abandoned = find(/abandon|carrinho/) ?? stages[0]
+  const pending = find(/pix|boleto|pend|aguard|gerad/) ?? null
+  const m: Record<string, string> = {}
+  const set = (keys: string[], sid?: string | null) => {
+    if (sid) for (const k of keys) m[k] = sid
+  }
+  set(['PURCHASE_APPROVED', 'PURCHASE_COMPLETE', 'salePaid', 'saleApproved', 'paid'], won?.id)
+  set(
+    ['PURCHASE_OUT_OF_SHOPPING_CART', 'checkoutAbandoned', 'abandonedCart', 'abandonedCheckout', 'saleAbandonedCart'],
+    abandoned?.id,
+  )
+  set(['PURCHASE_BILLET_PRINTED', 'PURCHASE_DELAYED', 'waiting_payment', 'pixGenerated', 'pixCreated'], pending?.id)
+  for (const k of ['PURCHASE_REFUNDED', 'PURCHASE_CHARGEBACK', 'PURCHASE_PROTEST', 'saleRefunded', 'saleChargeback', 'refunded', 'chargedback'])
+    m[k] = 'refund'
+  return m
+}
+
 // Telefone do comprador na Hotmart — o formato varia por versão:
 //   buyer.checkout_phone: "5511999999999"
 //   buyer.phone: "..." (string) | { ddd, number } | { country_code, area_code, number }
@@ -239,10 +301,40 @@ export async function POST(
   const productKeys = [str(product.id), str(product.name)].filter(Boolean) as string[]
   const productRoute = productKeys.map((k) => productMap[k]).find(Boolean) ?? null
 
-  const pipelineId = productRoute?.pipeline_id ?? cfg.pipeline_id
-  const stageMap = (productRoute?.stage_map ?? cfg.stage_map ?? {}) as Record<string, string>
-  const recoveryTemplate = productRoute?.recovery_template ?? cfg.recovery_template
-  if (!pipelineId) return ack('no_pipeline', { product: productKeys[0] ?? null })
+  let pipelineId = productRoute?.pipeline_id ?? null
+  let stageMap = (productRoute?.stage_map ?? null) as Record<string, string> | null
+  let recoveryTemplate = productRoute?.recovery_template ?? null
+
+  // Auto-roteamento por NOME (opt-in): sem rota explícita no product_map,
+  // casa o produto com um funil de mesmo nome e resolve as etapas pela
+  // semântica dos nomes das etapas. Sem match único → cai no padrão.
+  const productName = str(product.name)
+  if (!pipelineId && cfg.auto_route_by_name && productName) {
+    const { data: pipes } = await db
+      .from('pipelines')
+      .select('id, name')
+      .eq('account_id', cfg.account_id)
+    const match = pickPipelineByProduct(
+      (pipes ?? []) as { id: string; name: string }[],
+      productName,
+    )
+    if (match) {
+      const { data: stgs } = await db
+        .from('pipeline_stages')
+        .select('id, name, position')
+        .eq('pipeline_id', match.id)
+        .order('position')
+      pipelineId = match.id
+      stageMap = autoStageMap((stgs ?? []) as { id: string; name: string; position: number }[])
+      console.log(`[gateway] auto-route: produto "${productName}" → funil "${match.name}"`)
+    }
+  }
+
+  // Fallback pro funil/mapa padrão da config.
+  pipelineId = pipelineId ?? cfg.pipeline_id
+  stageMap = stageMap ?? ((cfg.stage_map ?? {}) as Record<string, string>)
+  recoveryTemplate = recoveryTemplate ?? cfg.recovery_template
+  if (!pipelineId) return ack('no_pipeline', { product: productName })
 
   const eventKey = candidates.find((k) => k in stageMap) ?? 'unknown'
   const target = stageMap[eventKey]
