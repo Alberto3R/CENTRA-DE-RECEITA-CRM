@@ -144,9 +144,8 @@ export async function POST(
   const dealId = deal?.id ?? null
 
   // Atribuição (UTMs + payload bruto) — best-effort, nunca derruba a resposta.
-  await db
-    .from('lead_attribution')
-    .insert({
+  try {
+    await db.from('lead_attribution').insert({
       account_id: cfg.account_id,
       contact_id: contactId,
       deal_id: dealId,
@@ -159,7 +158,9 @@ export async function POST(
       landing_url: str(a.event_source_url) ?? str(a.landing_url),
       raw: a,
     })
-    .catch(() => {})
+  } catch (e) {
+    console.error('[leads/token] attribution falhou', e)
+  }
 
   // Mensagem de abertura (template aprovado), se configurada — best-effort.
   if (cfg.welcome_template) {
