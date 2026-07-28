@@ -34,6 +34,21 @@ function str(v: unknown): string | null {
   if (typeof v === 'number') return String(v)
   return null
 }
+
+// Telefone do comprador na Hotmart — o formato varia por versão:
+//   buyer.checkout_phone: "5511999999999"
+//   buyer.phone: "..." (string) | { ddd, number } | { country_code, area_code, number }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hotmartPhone(buyer: any): string | null {
+  if (str(buyer?.checkout_phone)) return str(buyer.checkout_phone)
+  const p = buyer?.phone
+  if (typeof p === 'string') return str(p)
+  if (p && typeof p === 'object') {
+    const parts = [p.country_code, p.area_code ?? p.ddd, p.number].map((x) => str(x)).filter(Boolean)
+    if (parts.length) return parts.join('')
+  }
+  return null
+}
 const ack = (reason: string, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ ok: false, reason, ...extra }, { status: 200 })
 
@@ -162,19 +177,58 @@ export async function POST(
     return ack('bad_json')
   }
 
-  const sale = body?.sale ?? {}
-  const product = body?.product ?? {}
-  const client = body?.client ?? {}
-  const orderId = str(sale.id) ?? str(body?.id) ?? ''
-  const currentStatus = str(body?.currentStatus) ?? str(sale.status) ?? null
+  // Normaliza o payload pro modelo interno { sale, product, client }.
+  // Dois provedores com formatos diferentes:
+  //   Voomp   → { sale, product, client, trigger/currentStatus/event }
+  //   Hotmart → { event, data: { buyer, purchase, product } }  (webhook 2.0)
+  // Detecta Hotmart pela presença de `data.buyer`/`data.purchase` + `event`.
+  const isHotmart =
+    !!body?.data &&
+    typeof body?.event === 'string' &&
+    (!!body.data.buyer || !!body.data.purchase)
 
-  // A Voomp manda event=saleUpdated + currentStatus na mudança de status (e
-  // um `trigger` em alguns webhooks). Tentamos trigger e currentStatus — o
-  // que estiver no mapa vence (ex.: salePaid OU waiting_payment).
+  let sale: Record<string, unknown>
+  let product: Record<string, unknown>
+  let client: Record<string, unknown>
+  let orderId: string
+  let currentStatus: string | null
+  let candidates: string[]
+
+  if (isHotmart) {
+    const d = (body.data ?? {}) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    const buyer = (d.buyer ?? {}) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    const purchase = (d.purchase ?? {}) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    const prod = (d.product ?? {}) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    client = { name: buyer.name, email: buyer.email, cellphone: hotmartPhone(buyer) }
+    product = { id: prod.id != null ? String(prod.id) : str(prod.ucode), name: prod.name }
+    const priceVal =
+      purchase?.price?.value ?? purchase?.full_price?.value ?? purchase?.original_offer_price?.value
+    sale = {
+      id: str(purchase.transaction) ?? str(body.id),
+      amount: typeof priceVal === 'number' ? priceVal : Number(priceVal) || 0,
+      status: str(purchase.status),
+      method: str(purchase?.payment?.type),
+    }
+    currentStatus = str(purchase.status) // APPROVED, COMPLETE, WAITING_PAYMENT, ...
+    orderId = str(purchase.transaction) ?? str(body.id) ?? ''
+    // Pro Hotmart o nome do EVENTO é a chave canônica (PURCHASE_APPROVED etc.);
+    // o status entra como fallback.
+    candidates = [str(body.event), currentStatus].filter(Boolean) as string[]
+  } else {
+    sale = body?.sale ?? {}
+    product = body?.product ?? {}
+    client = body?.client ?? {}
+    orderId = str(sale.id) ?? str(body?.id) ?? ''
+    currentStatus = str(body?.currentStatus) ?? str(sale.status) ?? null
+    // A Voomp manda event=saleUpdated + currentStatus na mudança de status (e
+    // um `trigger` em alguns webhooks). Tentamos trigger e currentStatus — o
+    // que estiver no mapa vence (ex.: salePaid OU waiting_payment).
+    candidates = [str(body?.trigger), currentStatus, str(body?.event)].filter(
+      Boolean,
+    ) as string[]
+  }
+
   const stageMap = (cfg.stage_map ?? {}) as Record<string, string>
-  const candidates = [str(body?.trigger), currentStatus, str(body?.event)].filter(
-    Boolean,
-  ) as string[]
   const eventKey = candidates.find((k) => k in stageMap) ?? 'unknown'
   const target = stageMap[eventKey]
   if (!target) {
