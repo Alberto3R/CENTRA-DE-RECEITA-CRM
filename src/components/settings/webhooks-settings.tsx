@@ -17,6 +17,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { LeadCaptureSettings } from "./lead-capture-settings";
 
 // Webhooks de gateway de pagamento (Voomp etc.). Cada config tem um token
 // próprio na URL e mapeia eventos do gateway → etapas de um funil. O
@@ -460,6 +461,8 @@ export function WebhooksSettings() {
           )}
         </div>
       )}
+
+      <LeadCaptureSettings />
     </section>
   );
 }
