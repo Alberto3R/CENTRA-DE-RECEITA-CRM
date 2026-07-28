@@ -228,7 +228,22 @@ export async function POST(
     ) as string[]
   }
 
-  const stageMap = (cfg.stage_map ?? {}) as Record<string, string>
+  // Roteamento por PRODUTO (opcional). product_map:
+  //   { "<id|nome do produto>": { pipeline_id, stage_map, recovery_template? } }
+  // Assim UM webhook distribui cada produto pro seu funil. Sem match — ou
+  // product_map vazio — cai no funil/mapa padrão da config (retrocompatível).
+  const productMap = (cfg.product_map ?? {}) as Record<
+    string,
+    { pipeline_id?: string; stage_map?: Record<string, string>; recovery_template?: string | null }
+  >
+  const productKeys = [str(product.id), str(product.name)].filter(Boolean) as string[]
+  const productRoute = productKeys.map((k) => productMap[k]).find(Boolean) ?? null
+
+  const pipelineId = productRoute?.pipeline_id ?? cfg.pipeline_id
+  const stageMap = (productRoute?.stage_map ?? cfg.stage_map ?? {}) as Record<string, string>
+  const recoveryTemplate = productRoute?.recovery_template ?? cfg.recovery_template
+  if (!pipelineId) return ack('no_pipeline', { product: productKeys[0] ?? null })
+
   const eventKey = candidates.find((k) => k in stageMap) ?? 'unknown'
   const target = stageMap[eventKey]
   if (!target) {
@@ -291,8 +306,8 @@ export async function POST(
 
   // Recuperação de venda (PIX pendente): tag "Recuperação" + dispara o
   // template aprovado; o agente da conta assume quando a pessoa responde.
-  const isRecovery = currentStatus === 'waiting_payment' || /waiting|pix|pend/i.test(eventKey)
-  if (isRecovery && cfg.recovery_template) {
+  const isRecovery = currentStatus === 'waiting_payment' || /waiting|pix|pend|billet/i.test(eventKey)
+  if (isRecovery && recoveryTemplate) {
     await tagContact(db, cfg.account_id, ownerId, contactId, 'Recuperação')
     await sendRecoveryTemplate({
       db,
@@ -300,7 +315,7 @@ export async function POST(
       phoneRaw,
       name,
       productId: str(product.id),
-      templateName: cfg.recovery_template,
+      templateName: recoveryTemplate,
     }).catch((e) => console.error('[gateway] recovery send falhou', e))
   }
 
@@ -310,7 +325,7 @@ export async function POST(
       .from('deals')
       .update({ status: 'lost' })
       .eq('account_id', cfg.account_id)
-      .eq('pipeline_id', cfg.pipeline_id)
+      .eq('pipeline_id', pipelineId)
       .eq('contact_id', contactId)
     await tagContact(db, cfg.account_id, ownerId, contactId, 'Reembolsado')
     return NextResponse.json({ ok: true, action: 'refund', contact_id: contactId }, { status: 200 })
@@ -327,7 +342,7 @@ export async function POST(
     .from('deals')
     .select('id, stage_id')
     .eq('account_id', cfg.account_id)
-    .eq('pipeline_id', cfg.pipeline_id)
+    .eq('pipeline_id', pipelineId)
     .eq('contact_id', contactId)
     .eq('status', 'open')
     .order('created_at', { ascending: false })
@@ -364,7 +379,7 @@ export async function POST(
     .insert({
       account_id: cfg.account_id,
       user_id: ownerId,
-      pipeline_id: cfg.pipeline_id,
+      pipeline_id: pipelineId,
       stage_id: target,
       contact_id: contactId,
       title: `${productTag ?? 'Low Ticket'} — ${name}`,

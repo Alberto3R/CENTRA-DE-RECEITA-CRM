@@ -101,12 +101,15 @@ export function WebhooksSettings() {
     });
   }
 
-  // Eventos lógicos (escondem os aliases de trigger da Voomp).
+  // Eventos lógicos (escondem os aliases de trigger de cada gateway —
+  // Voomp e Hotmart). A leitura aceita a chave de qualquer provedor pra a
+  // config aparecer certa na tela independentemente de quem a criou.
   const map = editing?.stage_map ?? {};
-  const compra = map.salePaid ?? "";
-  const abandono = map.checkoutAbandoned ?? "";
-  const recuperacao = map.waiting_payment ?? "";
-  const refundOn = map.saleRefunded === "refund";
+  const compra = map.salePaid ?? map.PURCHASE_APPROVED ?? "";
+  const abandono = map.checkoutAbandoned ?? map.PURCHASE_OUT_OF_SHOPPING_CART ?? "";
+  const recuperacao = map.waiting_payment ?? map.PURCHASE_BILLET_PRINTED ?? "";
+  const refundOn =
+    map.saleRefunded === "refund" || map.PURCHASE_REFUNDED === "refund";
 
   function setEvent(
     kind: "compra" | "abandono" | "recuperacao" | "refund",
@@ -115,48 +118,39 @@ export function WebhooksSettings() {
     setEditing((prev) => {
       if (!prev) return prev;
       const m = { ...prev.stage_map };
+      // Cada evento lógico grava as chaves dos DOIS gateways (Voomp +
+      // Hotmart) — o endpoint casa a que o provedor enviar. Assim a mesma
+      // config funciona pra Voomp e Hotmart sem o admin escolher aliases.
       if (kind === "compra") {
-        delete m.salePaid;
-        delete m.saleApproved;
-        delete m.paid;
+        for (const k of ["salePaid", "saleApproved", "paid", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"])
+          delete m[k];
         if (value) {
           const v = value as string;
-          m.salePaid = v;
-          m.saleApproved = v;
-          m.paid = v;
+          for (const k of ["salePaid", "saleApproved", "paid", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"])
+            m[k] = v;
         }
       } else if (kind === "abandono") {
-        delete m.checkoutAbandoned;
-        delete m.abandonedCart;
-        delete m.abandonedCheckout;
-        delete m.saleAbandonedCart;
+        for (const k of ["checkoutAbandoned", "abandonedCart", "abandonedCheckout", "saleAbandonedCart", "PURCHASE_OUT_OF_SHOPPING_CART"])
+          delete m[k];
         if (value) {
           const v = value as string;
-          m.checkoutAbandoned = v;
-          m.abandonedCart = v;
-          m.abandonedCheckout = v;
-          m.saleAbandonedCart = v;
+          for (const k of ["checkoutAbandoned", "abandonedCart", "abandonedCheckout", "saleAbandonedCart", "PURCHASE_OUT_OF_SHOPPING_CART"])
+            m[k] = v;
         }
       } else if (kind === "recuperacao") {
-        delete m.waiting_payment;
-        delete m.pixGenerated;
-        delete m.pixCreated;
+        for (const k of ["waiting_payment", "pixGenerated", "pixCreated", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"])
+          delete m[k];
         if (value) {
           const v = value as string;
-          m.waiting_payment = v;
-          m.pixGenerated = v;
-          m.pixCreated = v;
+          for (const k of ["waiting_payment", "pixGenerated", "pixCreated", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"])
+            m[k] = v;
         }
       } else {
-        delete m.saleRefunded;
-        delete m.saleChargeback;
-        delete m.refunded;
-        delete m.chargedback;
+        for (const k of ["saleRefunded", "saleChargeback", "refunded", "chargedback", "PURCHASE_REFUNDED", "PURCHASE_CHARGEBACK", "PURCHASE_PROTEST"])
+          delete m[k];
         if (value) {
-          m.saleRefunded = "refund";
-          m.saleChargeback = "refund";
-          m.refunded = "refund";
-          m.chargedback = "refund";
+          for (const k of ["saleRefunded", "saleChargeback", "refunded", "chargedback", "PURCHASE_REFUNDED", "PURCHASE_CHARGEBACK", "PURCHASE_PROTEST"])
+            m[k] = "refund";
         }
       }
       return { ...prev, stage_map: m };
@@ -298,6 +292,7 @@ export function WebhooksSettings() {
                     onChange={(e) => setEditing({ ...editing, provider: e.target.value })}
                   >
                     <option value="voomp">Voomp</option>
+                    <option value="hotmart">Hotmart</option>
                   </select>
                 </div>
 
