@@ -7,6 +7,7 @@ import {
   useState,
   useCallback,
   useMemo,
+  useRef,
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -123,6 +124,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // settles later. Callers that gate on `profile.*` need to know which
   // window they're in — see the type doc above.
   const [profileLoading, setProfileLoading] = useState(true);
+
+  // Id do usuário atualmente carregado. Serve pra ignorar re-emissões do
+  // onAuthStateChange pro MESMO usuário (TOKEN_REFRESHED e SIGNED_IN
+  // repetido, que o Supabase dispara toda vez que a aba recupera o foco).
+  // Sem esse guarda, cada refoco refazia setUser (nova identidade do
+  // objeto) + fetchProfile (pisca profileLoading), o que remonta a árvore
+  // (RequireRole) e re-dispara efeitos keyados em user/profileLoading —
+  // apagando o que o usuário estava digitando (ex.: IDs na config do
+  // WhatsApp) em qualquer página do app.
+  const currentUserIdRef = useRef<string | null>(null);
 
   // Shared across init, auth-state-change listener, and the exposed
   // refreshProfile() callback. Reads the current session's user id and
@@ -241,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!mounted) return;
         const currentUser = session?.user ?? null;
+        currentUserIdRef.current = currentUser?.id ?? null;
         setUser(currentUser);
 
         if (currentUser) {
@@ -269,6 +281,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
+      const nextUserId = session?.user?.id ?? null;
+
+      // Só reage quando o USUÁRIO muda de fato (login/logout/troca de conta).
+      // TOKEN_REFRESHED e SIGNED_IN repetido do mesmo usuário — que o Supabase
+      // re-emite a cada refoco de aba/refresh de token — são ignorados aqui:
+      // refazer setUser/fetchProfile neles apaga formulários não salvos em
+      // toda a aplicação (ver currentUserIdRef acima). O SDK continua
+      // renovando o token por baixo; nada depende de reprocessarmos o evento.
+      if (nextUserId === currentUserIdRef.current) return;
+      currentUserIdRef.current = nextUserId;
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
 
