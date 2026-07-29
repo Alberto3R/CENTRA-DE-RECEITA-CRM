@@ -157,10 +157,14 @@ export function DealHistory({ dealId }: { dealId: string }) {
           ),
         };
       }
-      case "stage_changed":
+      case "stage_changed": {
+        const via = e.metadata?.integration
+          ? ` · via ${String(e.metadata.integration)}`
+          : "";
         return {
-          title: `Mudou de etapa: ${e.from_value || "—"} → ${e.to_value || "—"}`,
+          title: `Mudou de etapa: ${e.from_value || "—"} → ${e.to_value || "—"}${via}`,
         };
+      }
       case "assignee_changed": {
         const from = e.from_id ? nameById.get(e.from_id) || "alguém" : "sem responsável";
         const to = e.to_id ? nameById.get(e.to_id) || "alguém" : "sem responsável";

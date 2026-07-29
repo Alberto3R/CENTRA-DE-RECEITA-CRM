@@ -454,6 +454,35 @@ export async function POST(
         advanced = true
       }
     }
+    // Rotula o evento de mudança de etapa (gravado pelo trigger) com a origem
+    // da integração — vira "Mudou de etapa … via Hotmart: compra aprovada".
+    if (advanced) {
+      try {
+        const { data: ev } = await db
+          .from('deal_events')
+          .select('id')
+          .eq('deal_id', openDeal.id)
+          .eq('type', 'stage_changed')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (ev?.id) {
+          await db
+            .from('deal_events')
+            .update({
+              metadata: {
+                integration: str(cfg.provider) ?? (isHotmart ? 'Hotmart' : 'Voomp'),
+                origem: 'gateway',
+                event: eventKey,
+                order_id: orderId || null,
+              },
+            })
+            .eq('id', ev.id)
+        }
+      } catch (e) {
+        console.error('[gateway] deal_event enrich (stage) falhou', e)
+      }
+    }
     return NextResponse.json(
       { ok: true, action: eventKey, contact_id: contactId, deal_id: openDeal.id, advanced, tag: productTag },
       { status: 200 },
@@ -482,6 +511,35 @@ export async function POST(
     })
     .select('id')
     .single()
+
+  // Histórico (deal_events, migration 081): marca a criação como "via integração"
+  // com os dados da compra — vira o "Negócio criado via <provedor> → Mostrar dados".
+  // Best-effort: nunca derruba a resposta do webhook.
+  if (deal?.id) {
+    try {
+      await db
+        .from('deal_events')
+        .update({
+          type: 'created_via_integration',
+          metadata: {
+            integration: str(cfg.provider) ?? (isHotmart ? 'Hotmart' : 'Voomp'),
+            origem: 'gateway',
+            provider: cfg.provider,
+            event: eventKey,
+            order_id: orderId || null,
+            product: productName || null,
+            amount,
+            status: currentStatus,
+            method: str(sale.method),
+            payload: body,
+          },
+        })
+        .eq('deal_id', deal.id)
+        .eq('type', 'created')
+    } catch (e) {
+      console.error('[gateway] deal_event enrich (created) falhou', e)
+    }
+  }
 
   return NextResponse.json(
     { ok: true, action: eventKey, contact_id: contactId, deal_id: deal?.id ?? null, created: true, tag: productTag },
