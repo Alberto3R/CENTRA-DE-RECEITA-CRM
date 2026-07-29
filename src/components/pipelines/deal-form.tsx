@@ -25,6 +25,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import { DealHistory } from "@/components/pipelines/deal-history";
+import {
   Check,
   X,
   Trash2,
@@ -289,7 +296,17 @@ export function DealForm({
             </SheetTitle>
           </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <Tabs defaultValue="dados" className="flex min-h-0 flex-1 flex-col">
+            {deal && (
+              <TabsList className="mx-4 mt-3 grid shrink-0 grid-cols-2">
+                <TabsTrigger value="dados">Dados</TabsTrigger>
+                <TabsTrigger value="historico">Histórico</TabsTrigger>
+              </TabsList>
+            )}
+            <TabsContent
+              value="dados"
+              className="mt-0 flex-1 space-y-4 overflow-y-auto p-4"
+            >
             <div className="grid gap-2">
               <Label className="text-muted-foreground">Título</Label>
               <Input
@@ -528,7 +545,16 @@ export function DealForm({
                 )}
               </div>
             )}
-          </div>
+            </TabsContent>
+            {deal && (
+              <TabsContent
+                value="historico"
+                className="mt-0 flex-1 overflow-y-auto p-4"
+              >
+                <DealHistory dealId={deal.id} />
+              </TabsContent>
+            )}
+          </Tabs>
 
           <div className="border-t border-border/50 bg-popover/80 p-4">
             <div className="flex gap-2">
