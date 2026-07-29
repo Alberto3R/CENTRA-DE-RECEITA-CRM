@@ -6,12 +6,22 @@ import { formatCurrency } from "@/lib/currency";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
 import { StartTemplateButton } from "@/components/whatsapp/start-template-button";
+import { DealCardTags, type TagLite } from "./deal-card-tags";
 
 interface DealCardProps {
   deal: Deal;
   stage: PipelineStage | null;
   onEdit: (deal: Deal) => void;
+  onTagsChanged?: () => void;
   isOverlay?: boolean;
+}
+
+// As tags vêm embutidas no contato via
+// `contact:contacts(*, contact_tags(tag:tags(id, name, color)))`.
+function contactTags(deal: Deal): TagLite[] {
+  const cts = (deal.contact as unknown as { contact_tags?: { tag: TagLite | null }[] } | null)
+    ?.contact_tags;
+  return (cts ?? []).map((ct) => ct.tag).filter((t): t is TagLite => !!t);
 }
 
 function formatDate(dateStr: string) {
@@ -28,9 +38,10 @@ function initials(name?: string, fallback?: string) {
   return source.charAt(0).toUpperCase();
 }
 
-export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
+export function DealCard({ deal, stage, onEdit, onTagsChanged, isOverlay }: DealCardProps) {
   const contactLabel = deal.contact?.name || deal.contact?.phone || "Sem contato";
   const assigneeLabel = deal.assignee?.full_name || null;
+  const tags = contactTags(deal);
 
   return (
     <div
@@ -100,6 +111,27 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           </span>
         )}
       </div>
+
+      {/* Tags do contato — ver e inserir direto no card */}
+      {deal.contact?.id && !isOverlay ? (
+        <DealCardTags
+          contactId={deal.contact.id}
+          current={tags}
+          onChanged={onTagsChanged ?? (() => {})}
+        />
+      ) : tags.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {tags.map((t) => (
+            <span
+              key={t.id}
+              className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{ backgroundColor: `${t.color}20`, color: t.color }}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {assigneeLabel && (
         <div className="mt-2 flex items-center justify-end">

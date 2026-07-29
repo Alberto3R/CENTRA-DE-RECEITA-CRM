@@ -113,7 +113,9 @@ export default function PipelinesPage() {
     async (pipelineId: string) => {
       const { data } = await supabase
         .from("deals")
-        .select("*, contact:contacts(*, contact_tags(tag_id)), assignee:profiles!deals_assigned_to_fkey(*)")
+        .select(
+          "*, contact:contacts(*, contact_tags(tag:tags(id, name, color))), assignee:profiles!deals_assigned_to_fkey(*)",
+        )
         .eq("pipeline_id", pipelineId)
         .order("created_at", { ascending: false });
       return (data ?? []) as Deal[];
@@ -266,9 +268,9 @@ export default function PipelinesPage() {
       } else if (assigneeFilter && d.assigned_to !== assigneeFilter) return false;
       if (tagFilter) {
         const cts = (
-          d.contact as unknown as { contact_tags?: { tag_id: string }[] } | null
+          d.contact as unknown as { contact_tags?: { tag: { id: string } | null }[] } | null
         )?.contact_tags;
-        if (!cts?.some((ct) => ct.tag_id === tagFilter)) return false;
+        if (!cts?.some((ct) => ct.tag?.id === tagFilter)) return false;
       }
       return true;
     });
@@ -601,6 +603,7 @@ export default function PipelinesPage() {
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
+            onTagsChanged={refreshDeals}
           />
         </>
       )}
