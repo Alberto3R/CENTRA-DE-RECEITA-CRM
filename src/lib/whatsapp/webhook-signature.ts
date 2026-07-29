@@ -27,13 +27,21 @@ import crypto from 'node:crypto'
 export function verifyMetaWebhookSignature(
   rawBody: string,
   signatureHeader: string | null,
+  extraSecrets: string[] = [],
 ): boolean {
-  const raw = process.env.META_APP_SECRET
-  if (!raw) {
+  // Segredos candidatos: o(s) App Secret(s) do próprio canal (guardados por
+  // conta em whatsapp_config.app_secret) + a lista do env META_APP_SECRET como
+  // fallback. Com o segredo por canal, o env deixa de ser obrigatório —
+  // onboarding de cliente novo não exige mais mexer em env + redeploy.
+  const envRaw = process.env.META_APP_SECRET
+  const envSecrets = envRaw
+    ? envRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    : []
+  const secrets = [...extraSecrets.filter(Boolean), ...envSecrets]
+  if (secrets.length === 0) {
     console.error(
-      '[webhook] META_APP_SECRET is not set — rejecting request. ' +
-        'Configure the env var (Meta → App Settings → Basic → App Secret) ' +
-        'to enable signature verification.',
+      '[webhook] nenhum App Secret disponível (nem no canal nem em ' +
+        'META_APP_SECRET) — rejeitando a requisição.',
     )
     return false
   }
@@ -41,10 +49,6 @@ export function verifyMetaWebhookSignature(
   if (!signatureHeader) return false
   if (!signatureHeader.startsWith('sha256=')) return false
 
-  const secrets = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
   const sigBuf = Buffer.from(signatureHeader)
 
   for (const secret of secrets) {

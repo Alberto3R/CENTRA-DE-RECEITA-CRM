@@ -193,6 +193,44 @@ export async function GET(request: Request) {
   }
 }
 
+// Resolve o(s) App Secret(s) do(s) canal(is) referenciado(s) no payload, a
+// partir do phone_number_id (guardado criptografado em whatsapp_config). É só
+// lookup do candidato — quem autentica de fato é o HMAC sobre o rawBody. Um
+// payload forjado com phone_number_id falso ou não acha canal, ou acha um cujo
+// segredo não bate com a assinatura forjada → rejeitado do mesmo jeito.
+async function resolveChannelAppSecrets(rawBody: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(rawBody) as { entry?: WhatsAppWebhookEntry[] }
+    const ids = new Set<string>()
+    for (const entry of parsed.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        const pnid = (
+          change?.value as { metadata?: { phone_number_id?: string } }
+        )?.metadata?.phone_number_id
+        if (pnid) ids.add(String(pnid))
+      }
+    }
+    if (ids.size === 0) return []
+    const { data } = await supabaseAdmin()
+      .from('whatsapp_config')
+      .select('app_secret')
+      .in('phone_number_id', [...ids])
+      .not('app_secret', 'is', null)
+    const secrets: string[] = []
+    for (const row of (data ?? []) as { app_secret: string | null }[]) {
+      if (!row.app_secret) continue
+      try {
+        secrets.push(decrypt(row.app_secret))
+      } catch {
+        // Segredo ilegível (chave trocada etc.) — ignora e cai no env.
+      }
+    }
+    return secrets
+  } catch {
+    return []
+  }
+}
+
 // POST - Receive messages
 export async function POST(request: Request) {
   // Read raw body first so we can HMAC-verify the exact bytes Meta
@@ -200,7 +238,10 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
-  if (!verifyMetaWebhookSignature(rawBody, signature)) {
+  // App Secret por canal (DB) + fallback pro env META_APP_SECRET.
+  const channelSecrets = await resolveChannelAppSecrets(rawBody)
+
+  if (!verifyMetaWebhookSignature(rawBody, signature, channelSecrets)) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.

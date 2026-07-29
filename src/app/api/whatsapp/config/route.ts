@@ -191,7 +191,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, app_secret } = body
     // Multi-canal: `channelId` = editar um canal existente; `isNew` = adicionar
     // um novo canal; `label` = rótulo do canal. Sem nenhum → edita o primário
     // (retrocompatível com o fluxo de 1 canal).
@@ -270,9 +270,11 @@ export async function POST(request: Request) {
     // Encrypt sensitive tokens before storing
     let encryptedAccessToken: string
     let encryptedVerifyToken: string | null
+    let encryptedAppSecret: string | null
     try {
       encryptedAccessToken = encrypt(access_token)
       encryptedVerifyToken = verify_token ? encrypt(verify_token) : null
+      encryptedAppSecret = app_secret ? encrypt(app_secret) : null
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown encryption error'
       console.error('Encryption failed:', message)
@@ -396,6 +398,9 @@ export async function POST(request: Request) {
       subscribed_apps_at: subscribedAppsAt ?? null,
       last_registration_error: registrationError,
       updated_at: new Date().toISOString(),
+      // Só grava app_secret quando enviado — num update sem o campo, preserva
+      // o segredo já salvo (não sobrescreve com null).
+      ...(app_secret ? { app_secret: encryptedAppSecret } : {}),
     }
 
     if (existing) {
