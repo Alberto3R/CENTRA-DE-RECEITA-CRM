@@ -603,7 +603,6 @@ export default function PipelinesPage() {
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
-            onTagsChanged={refreshDeals}
           />
         </>
       )}
