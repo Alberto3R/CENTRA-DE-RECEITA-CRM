@@ -58,6 +58,7 @@ export function WhatsAppConfig() {
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
+  const [appSecret, setAppSecret] = useState('');
   const [pin, setPin] = useState('');
   const [tokenEdited, setTokenEdited] = useState(false);
 
@@ -267,6 +268,9 @@ export function WhatsAppConfig() {
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
         verify_token: verifyToken.trim() || null,
+        // App Secret do App Meta (opcional). Enviado só quando preenchido; sem
+        // ele, o webhook cai no fallback do env META_APP_SECRET.
+        app_secret: appSecret.trim() || null,
         // Optional — only sent when the user filled it in. The server
         // requires it on first save or when changing numbers; for a
         // simple token rotation, leaving it blank skips re-register.
@@ -798,6 +802,27 @@ export function WhatsAppConfig() {
               />
               <p className="text-xs text-muted-foreground">
                 Uma sequência personalizada que você cria. Deve corresponder ao token definido nas configurações de webhook da Meta.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                App Secret do App Meta
+                <span className="ml-1 text-muted-foreground">(recomendado)</span>
+              </Label>
+              <Input
+                type="password"
+                placeholder="App Secret — Meta → Configurações do app → Básico"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Valida a assinatura dos webhooks da Meta{' '}
+                <strong className="text-muted-foreground">deste canal</strong>.
+                Preenchendo aqui, o número passa a receber mensagens sem depender
+                de variável de ambiente no servidor (nem de deploy). Fica
+                criptografado. Deixe em branco para manter o segredo já salvo.
               </p>
             </div>
 
