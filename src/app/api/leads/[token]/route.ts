@@ -162,6 +162,34 @@ export async function POST(
     console.error('[leads/token] attribution falhou', e)
   }
 
+  // Enriquece o evento 'created' do histórico (deal_events, migration 081) com
+  // origem/UTM/payload — vira o "Negócio criado via integração → Mostrar dados".
+  // Best-effort: nunca derruba a resposta.
+  if (dealId) {
+    try {
+      await db
+        .from('deal_events')
+        .update({
+          type: 'created_via_integration',
+          metadata: {
+            integration: cfg.name ?? 'Captação de lead',
+            origem: str(a.origem) ?? 'form',
+            utm_source: str(a.utm_source),
+            utm_medium: str(a.utm_medium),
+            utm_campaign: str(a.utm_campaign),
+            utm_content: str(a.utm_content),
+            utm_term: str(a.utm_term),
+            landing_url: str(a.event_source_url) ?? str(a.landing_url),
+            payload: a,
+          },
+        })
+        .eq('deal_id', dealId)
+        .eq('type', 'created')
+    } catch (e) {
+      console.error('[leads/token] deal_event enrich falhou', e)
+    }
+  }
+
   // Mensagem de abertura (template aprovado), se configurada — best-effort.
   if (cfg.welcome_template) {
     try {
