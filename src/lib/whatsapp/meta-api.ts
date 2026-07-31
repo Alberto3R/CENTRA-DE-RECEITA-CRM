@@ -31,14 +31,40 @@ interface MetaErrorResponse {
   error?: { message?: string; code?: number; type?: string }
 }
 
+// Dicas em PT-BR por código de erro da Meta — anexadas à mensagem de erro
+// para que qualquer envio (send/broadcast/template) explique a CAUSA e a
+// CORREÇÃO em vez de só o código cru. Ponto único: todo envio passa por aqui.
+const META_ERROR_HINTS: Record<number, string> = {
+  133010:
+    'O número não está registrado na Cloud API. Registre-o em Configurações → WhatsApp (informe o PIN de verificação em duas etapas e clique em Salvar configuração).',
+  131047:
+    'Fora da janela de 24h — para reabrir a conversa é preciso enviar um TEMPLATE aprovado (mensagem livre só dentro das 24h após a última resposta do contato).',
+  131051: 'Tipo de mensagem não suportado para este envio.',
+  131026:
+    'Mensagem não entregável — confira se o número existe no WhatsApp; fora da janela de 24h, só com template aprovado.',
+  190: 'Token de acesso inválido ou expirado — reconecte o canal em Configurações → WhatsApp.',
+  131056:
+    'Muitas mensagens para este contato em pouco tempo (limite de pares da Meta) — aguarde um pouco e tente de novo.',
+  132000:
+    'Os parâmetros enviados não batem com o template aprovado — confira o número de variáveis {{1}}, {{2}}… e os botões.',
+  132001:
+    'Template não existe ou não está aprovado neste idioma — verifique o nome e o status em Modelos.',
+  132015: 'Este template está pausado pela Meta por baixa qualidade.',
+  132016: 'Este template foi desabilitado pela Meta.',
+}
+
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
+  let code: number | undefined
   try {
     const data = (await response.json()) as MetaErrorResponse
     if (data.error?.message) message = data.error.message
+    code = data.error?.code
   } catch {
     // response body wasn't JSON — keep the fallback
   }
+  const hint = code != null ? META_ERROR_HINTS[code] : undefined
+  if (hint) message = `${message} — ${hint}`
   throw new Error(message)
 }
 
