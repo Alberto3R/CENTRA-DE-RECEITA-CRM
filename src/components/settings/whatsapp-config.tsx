@@ -634,7 +634,7 @@ export function WhatsAppConfig() {
                 >
                   {isRegistered
                     ? 'Registrado — a Meta entregará eventos à Central de Receita'
-                    : 'Não registrado — a Meta não entregará eventos'}
+                    : 'Não registrado — os envios falham (#133010) e a Meta não entrega eventos'}
                 </AlertTitle>
               </div>
               <Button
@@ -664,19 +664,34 @@ export function WhatsAppConfig() {
                 </>
               ) : lastRegistrationError ? (
                 <>
-                  A última tentativa falhou com:{' '}
+                  A última tentativa de registro falhou com:{' '}
                   <span className="text-red-300">
                     &quot;{lastRegistrationError}&quot;
+                  </span>
+                  . Enquanto não registrar, os envios falham com{' '}
+                  <span className="text-red-300">
+                    (#133010) Account not registered
                   </span>
                   . Insira (ou corrija) o PIN de verificação em duas etapas
                   abaixo e clique em Salvar configuração para tentar de novo.
                 </>
               ) : (
                 <>
-                  Este número foi salvo antes de existir o rastreamento de
-                  registro, ou o registro foi ignorado. Insira o PIN de
-                  verificação em duas etapas abaixo e clique em Salvar
-                  configuração para inscrevê-lo.
+                  O número está conectado, mas{' '}
+                  <strong className="text-amber-200">
+                    não foi registrado na Cloud API
+                  </strong>{' '}
+                  (o registro foi pulado por falta de PIN). Enquanto isso,{' '}
+                  <strong className="text-amber-200">todo envio falha</strong>{' '}
+                  com o erro{' '}
+                  <span className="text-red-300">
+                    (#133010) Account not registered
+                  </span>
+                  . Para resolver: informe o{' '}
+                  <strong>PIN de verificação em duas etapas</strong> do número no
+                  campo abaixo e clique em <strong>Salvar configuração</strong>{' '}
+                  para registrá-lo. (Números de teste da Meta já vêm registrados —
+                  não precisam de PIN.)
                 </>
               )}
             </AlertDescription>
