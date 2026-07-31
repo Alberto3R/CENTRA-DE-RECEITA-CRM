@@ -1,5 +1,9 @@
 # Estado do CRM — 27/jul/2026 (novidade: Ligação PSTN via Telnyx)
 
+> **Rodada seguinte (31/jul):** histórico vivo do negócio + robustez do WhatsApp
+> (App Secret por canal, registro Cloud API/#133010, resposta de botão, verify_token
+> preservado, dicas de erro) → ver [RODADA-2026-07-31](./RODADA-2026-07-31-whatsapp-e-historico.md).
+
 > Complementa o snapshot de [14/jul](./ESTADO-DO-CRM-2026-07-14.md). Aqui só o
 > que mudou/entrou desde então. O headline da rodada é a **ligação direta ao
 > telefone do lead (PSTN)** — antes o CRM só ligava pela VoIP do WhatsApp/Meta.

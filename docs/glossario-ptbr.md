@@ -80,6 +80,8 @@ Traduzir o **valor** quebra o banco. Só traduza o **label exibido**, nunca o va
 | Viewer | Visualizador |
 | Recipient | Destinatário |
 | Template | Modelo |
+| History | Histórico |
+| Event | Evento |
 
 ## 📖 Termos — ações
 
@@ -129,6 +131,23 @@ Traduzir o **valor** quebra o banco. Só traduza o **label exibido**, nunca o va
 | Won / Lost | Ganho / Perdido |
 | Open / Closed | Aberto / Fechado |
 | Failed | Falhou |
+| Registered / Not registered | Registrado / Não registrado |
+
+## 📖 Termos técnicos Meta/WhatsApp (manter em inglês; só o rótulo ao redor traduz)
+
+Nomes próprios da plataforma da Meta — **não traduzir o termo**. Traduza só o texto
+ao redor (ex.: "Insira o **App Secret**", "Número **registrado** na Cloud API").
+
+| Termo | Observação |
+|---|---|
+| **App Secret** | Segredo do App Meta; valida a assinatura dos webhooks. Guardado por canal (`whatsapp_config.app_secret`), env `META_APP_SECRET` = fallback. |
+| **App ID** | ID do App Meta. |
+| **verify token** / **Token de verificação do webhook** | String que o operador cria; casa com o webhook na Meta. Rótulo pode ser PT ("Token de verificação"); o conceito é esse. |
+| **access token** / **Token de acesso** | Token permanente (System User). Rótulo PT ok. |
+| **phone_number_id**, **WABA** (WhatsApp Business Account) | Identificadores da Cloud API. |
+| **Cloud API** / **registrar (register)** | Verificar ≠ **registrar**: sem `/register` (com PIN de 2 etapas), o envio falha com **#133010 "Account not registered"**. |
+| **PIN de verificação em duas etapas** | PIN 2FA do número, exigido no `/register`. |
+| **template** (button/quick reply) | O toque em botão de template chega como mensagem `type: 'button'` (valor de dado — fica em inglês). |
 
 ## Tom
 

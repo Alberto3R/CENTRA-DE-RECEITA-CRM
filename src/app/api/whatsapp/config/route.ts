@@ -391,15 +391,17 @@ export async function POST(request: Request) {
       phone_number_id,
       waba_id: waba_id || null,
       access_token: encryptedAccessToken,
-      verify_token: encryptedVerifyToken,
       status: registrationError ? 'disconnected' : 'connected',
       connected_at: registrationError ? null : new Date().toISOString(),
       registered_at: registrationError ? null : registeredAt,
       subscribed_apps_at: subscribedAppsAt ?? null,
       last_registration_error: registrationError,
       updated_at: new Date().toISOString(),
-      // Só grava app_secret quando enviado — num update sem o campo, preserva
-      // o segredo já salvo (não sobrescreve com null).
+      // verify_token e app_secret: só gravam quando enviados. Num update com o
+      // campo vazio, PRESERVAM o valor já salvo (não sobrescrevem com null) —
+      // senão editar o canal só p/ girar o token zeraria o verify_token e
+      // quebraria o recebimento (a Meta rejeita a verificação do webhook).
+      ...(verify_token ? { verify_token: encryptedVerifyToken } : {}),
       ...(app_secret ? { app_secret: encryptedAppSecret } : {}),
     }
 
