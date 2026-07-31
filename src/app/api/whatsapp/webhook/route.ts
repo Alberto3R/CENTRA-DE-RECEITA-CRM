@@ -45,6 +45,13 @@ interface WhatsAppMessage {
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
   /**
+   * Presente quando o cliente toca num botão de resposta rápida de um
+   * TEMPLATE que enviamos (diferente de `interactive`, que é para mensagens
+   * interativas). A Meta entrega `type: 'button'` com { text, payload } —
+   * o rótulo e a carga do botão tocado.
+   */
+  button?: { text?: string; payload?: string }
+  /**
    * Present when the customer shares one or more contact cards (vCard).
    * Cada cartão traz nome + telefones; em prospecção isso costuma ser o
    * momento em que o atendente passa o contato do decisor — perder esse
@@ -1091,6 +1098,17 @@ async function parseMessageContent(
         .join('\n\n')
       return { ...empty, contentText: rendered }
     }
+
+    case 'button':
+      // Toque num botão de resposta rápida de um TEMPLATE (quick reply).
+      // A Meta manda { text, payload }. Renderiza o rótulo como texto legível
+      // no inbox e guarda o payload como reply-id p/ o motor de fluxos /
+      // auto-advance conseguir rotear a resposta.
+      return {
+        ...empty,
+        contentText: message.button?.text || message.button?.payload || '[Botão]',
+        interactiveReplyId: message.button?.payload ?? null,
+      }
 
     default:
       return {
