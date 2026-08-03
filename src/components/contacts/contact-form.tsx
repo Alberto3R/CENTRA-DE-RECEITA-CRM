@@ -30,7 +30,12 @@ interface ContactFormProps {
   onOpenChange: (open: boolean) => void;
   contact?: Contact | null;
   contactTags?: ContactTag[];
-  onSaved: () => void;
+  /**
+   * Chamado após salvar. Recebe o id do contato — quem abre o formulário
+   * para em seguida agir sobre ele (ex.: o inbox, que emenda na conversa)
+   * precisa do id sem ter que caçá-lo por telefone depois.
+   */
+  onSaved: (contactId?: string) => void;
   /** Open an existing contact's detail view — used by the duplicate
    *  notice to jump to the contact that already owns this number. */
   onViewExisting?: (contactId: string) => void;
@@ -196,7 +201,7 @@ export function ContactForm({
 
       toast.success(isEdit ? 'Contato atualizado' : 'Contato criado');
       onOpenChange(false);
-      onSaved();
+      onSaved(contactId);
     } catch (err: unknown) {
       // The unique index (migration 022) rejects a duplicate phone that
       // slipped past the on-blur check (race, or a format that

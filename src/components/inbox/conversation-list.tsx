@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown } from "lucide-react";
+import { Search, ChevronDown, Plus } from "lucide-react";
 import {
   InstagramGlyph,
   isInstagramContact,
@@ -20,13 +20,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { GatedButton } from "@/components/ui/gated-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCan } from "@/hooks/use-can";
+import { NewConversationDialog } from "./new-conversation-dialog";
 
 interface ConversationListProps {
   activeConversationId: string | null;
   onSelect: (conversation: Conversation) => void;
   conversations: Conversation[];
   onConversationsLoaded: (conversations: Conversation[]) => void;
+  /**
+   * Abre (ou cria) a conversa do contato e a seleciona. Fica na página
+   * porque é ela que possui a lista, a seleção e a URL. Opcional para os
+   * testes e para qualquer uso que só queira listar.
+   */
+  onStartConversation?: (contactId: string) => Promise<void>;
   /**
    * Increment to force the fetch effect below to refire. The parent
    * bumps this on realtime reconnect / tab visibility → visible so the
@@ -63,11 +72,14 @@ export function ConversationList({
   onSelect,
   conversations,
   onConversationsLoaded,
+  onStartConversation,
   resyncToken = 0,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [loading, setLoading] = useState(true);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const canSend = useCan("send-messages");
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -167,14 +179,29 @@ export function ConversationList({
     <div className="flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
       {/* Search + Filter */}
       <div className="space-y-2 border-b border-border p-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={handleSearchChange}
-            placeholder="Buscar conversas..."
-            className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={handleSearchChange}
+              placeholder="Buscar conversas..."
+              className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
+            />
+          </div>
+          {onStartConversation && (
+            <GatedButton
+              canAct={canSend}
+              gateReason="iniciar conversas"
+              size="icon"
+              onClick={() => setNewConversationOpen(true)}
+              title="Nova conversa"
+              aria-label="Nova conversa"
+              className="size-9 shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+            </GatedButton>
+          )}
         </div>
 
         <DropdownMenu>
@@ -216,8 +243,24 @@ export function ConversationList({
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
+          <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              Nenhuma conversa encontrada
+            </p>
+            {/* O vazio é justamente onde alguém quer começar uma conversa —
+                repetir a ação aqui evita a viagem até o botão do topo. */}
+            {onStartConversation && !search.trim() && (
+              <GatedButton
+                canAct={canSend}
+                gateReason="iniciar conversas"
+                variant="outline"
+                size="sm"
+                onClick={() => setNewConversationOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Nova conversa
+              </GatedButton>
+            )}
           </div>
         ) : (
           <div className="flex flex-col">
@@ -232,6 +275,14 @@ export function ConversationList({
           </div>
         )}
       </ScrollArea>
+
+      {onStartConversation && (
+        <NewConversationDialog
+          open={newConversationOpen}
+          onOpenChange={setNewConversationOpen}
+          onPickContact={onStartConversation}
+        />
+      )}
     </div>
   );
 }

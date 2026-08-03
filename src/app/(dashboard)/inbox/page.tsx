@@ -474,6 +474,68 @@ export default function InboxPage() {
     [activeConversation?.id, router]
   );
 
+  /**
+   * Abre a conversa de um contato a partir do diálogo "Nova conversa",
+   * criando-a se ainda não existir.
+   *
+   * A criação fica no servidor (`/api/whatsapp/start-conversation`, que já
+   * existia para o card de negócio) porque a checagem "já existe conversa
+   * para este contato?" precisa rodar com service role — sob RLS o cliente
+   * enxerga só o que é dele e duas abas criariam duas conversas para o mesmo
+   * contato.
+   *
+   * Se a conversa já estava na lista, apenas seleciona: recriar o objeto
+   * descartaria o `unread_count` e o `contact` que a lista já tem.
+   */
+  const handleStartConversation = useCallback(
+    async (contactId: string) => {
+      try {
+        const res = await fetch("/api/whatsapp/start-conversation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contactId }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(data.error ?? "Não foi possível abrir a conversa.");
+          return;
+        }
+
+        const existing = conversations.find((c) => c.id === data.conversationId);
+        if (existing) {
+          handleSelectConversation(existing);
+          return;
+        }
+
+        // Conversa recém-criada: busca a linha com o contato embutido, no
+        // mesmo formato que a lista usa, para a thread e o painel lateral
+        // receberem os dados completos.
+        const supabase = createClient();
+        const { data: conv, error } = await supabase
+          .from("conversations")
+          .select("*, contact:contacts(*)")
+          .eq("id", data.conversationId)
+          .single();
+
+        if (error || !conv) {
+          console.error("Conversa criada mas não recuperada:", error);
+          toast.error("Conversa criada, mas não foi possível abri-la. Recarregue a página.");
+          return;
+        }
+
+        const created = conv as Conversation;
+        setConversations((prev) =>
+          prev.some((c) => c.id === created.id) ? prev : [created, ...prev],
+        );
+        handleSelectConversation(created);
+      } catch (err) {
+        console.error("start-conversation falhou:", err);
+        toast.error("Não foi possível abrir a conversa.");
+      }
+    },
+    [conversations, handleSelectConversation],
+  );
+
   // Mobile "back" — deselect the conversation so the list pane comes
   // back. Also clears the ?c= param so a refresh lands on the list
   // instead of re-opening the thread the user just backed out of.
@@ -591,6 +653,7 @@ export default function InboxPage() {
             onSelect={handleSelectConversation}
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
+            onStartConversation={handleStartConversation}
             resyncToken={resyncToken}
           />
         </div>
