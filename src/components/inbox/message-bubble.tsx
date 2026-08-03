@@ -17,6 +17,7 @@ import {
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { AudioPlayer } from "./audio-player";
 
 interface MessageBubbleProps {
   message: Message;
@@ -116,7 +117,14 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message }: { message: Message }) {
+function MessageContent({
+  message,
+  onPrimary,
+}: {
+  message: Message;
+  /** Bolha de saída (fundo `bg-primary`) — o player ajusta os realces. */
+  onPrimary: boolean;
+}) {
   switch (message.content_type) {
     case "text":
       return (
@@ -165,7 +173,11 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <AudioPlayer
+              url={message.media_url}
+              onPrimary={onPrimary}
+              className="w-64 max-w-full"
+            />
           ) : (
             <MediaUnavailable label="Áudio" />
           )}
@@ -275,7 +287,7 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} />
+        <MessageContent message={message} onPrimary={isAgent} />
         <div
           className={cn(
             "mt-1 flex items-center gap-1",
