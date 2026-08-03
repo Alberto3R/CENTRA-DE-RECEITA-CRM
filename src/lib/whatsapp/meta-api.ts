@@ -9,7 +9,7 @@
  * instead of a runtime rejection from Meta.
  */
 
-const META_API_VERSION = 'v21.0'
+const META_API_VERSION = 'v22.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 export interface MetaSendResult {
@@ -25,10 +25,63 @@ export interface MetaPhoneInfo {
   status?: string
   /** CLOUD_API quando o número roda na Cloud API (vs. on-premise). */
   platform_type?: string
+  /**
+   * VERIFIED / EXPIRED / NOT_VERIFIED. É o campo que decide o caminho da
+   * ativação: VERIFIED vai direto pro /register; EXPIRED exige re-verificar
+   * o número com o código físico (SMS ou ligação) ANTES do /register.
+   * Sem ele não dá pra rotear — por isso ele entra no fields do diagnóstico.
+   */
+  code_verification_status?: string
 }
 
 interface MetaErrorResponse {
-  error?: { message?: string; code?: number; type?: string }
+  error?: { message?: string; code?: number; type?: string; error_subcode?: number }
+}
+
+/**
+ * Erro da Graph API com o código preservado.
+ *
+ * Antes todo erro virava `new Error(message)` e quem chamava tinha que
+ * adivinhar a causa por regex na mensagem — frágil, porque a Meta reescreve
+ * esses textos e traduz alguns. O fluxo de ativação roteia por CÓDIGO
+ * (100/33 = objeto invisível pro token, 133005 = já registrado,
+ * 133010 = não registrado, 139xxx = 2SV), então o código precisa sobreviver
+ * até o chamador.
+ */
+export class MetaApiError extends Error {
+  readonly code?: number
+  readonly subcode?: number
+  readonly httpStatus: number
+
+  constructor(
+    message: string,
+    opts: { code?: number; subcode?: number; httpStatus: number }
+  ) {
+    super(message)
+    this.name = 'MetaApiError'
+    this.code = opts.code
+    this.subcode = opts.subcode
+    this.httpStatus = opts.httpStatus
+  }
+
+  /**
+   * "Esse ID não é um Phone Number ID que este token enxerga."
+   *
+   * Dois formatos reais da Meta caem aqui:
+   *   * 100 / subcode 33 — "does not exist, or you do not have permission";
+   *   * 100 sem subcode, mensagem "Tried accessing nonexisting field
+   *     (display_phone_number) on node type (WhatsAppBusinessAccount)" —
+   *     é o que a Graph responde quando o ID É um WABA ID e a gente pediu
+   *     campos de número. Esse é o caso mais comum no onboarding.
+   *
+   * Em ambos, o próximo passo é o mesmo: tentar listar os números do ID
+   * (PASSO 1B) antes de culpar o token.
+   */
+  get isObjectNotVisible(): boolean {
+    if (this.code !== 100) return false
+    if (this.subcode === 33) return true
+    return /nonexisting field|does not exist/i.test(this.message)
+  }
 }
 
 // Dicas em PT-BR por código de erro da Meta — anexadas à mensagem de erro
@@ -56,16 +109,18 @@ const META_ERROR_HINTS: Record<number, string> = {
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   let code: number | undefined
+  let subcode: number | undefined
   try {
     const data = (await response.json()) as MetaErrorResponse
     if (data.error?.message) message = data.error.message
     code = data.error?.code
+    subcode = data.error?.error_subcode
   } catch {
     // response body wasn't JSON — keep the fallback
   }
   const hint = code != null ? META_ERROR_HINTS[code] : undefined
   if (hint) message = `${message} — ${hint}`
-  throw new Error(message)
+  throw new MetaApiError(message, { code, subcode, httpStatus: response.status })
 }
 
 // ============================================================
@@ -85,7 +140,7 @@ export async function verifyPhoneNumber(
   args: VerifyPhoneNumberArgs
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
-  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,status,platform_type`
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,status,platform_type,code_verification_status`
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -172,17 +227,51 @@ export async function registerPhoneNumber(
   // text "already registered" appears when the number is already
   // subscribed to this app — that's success from the caller's
   // perspective, surface it as such.
-  let data: { error?: { message?: string; code?: number; error_subcode?: number } } = {}
+  let data: MetaErrorResponse = {}
   try {
     data = await response.json()
   } catch {
     /* keep empty */
   }
   const message = data.error?.message ?? `Meta API error: ${response.status}`
-  if (/already.*registered/i.test(message)) {
+  const code = data.error?.code
+  // 133005 é o código canônico de "já registrado"; o teste por texto fica
+  // como rede de segurança porque a Meta nem sempre manda o código nesse caso.
+  if (code === 133005 || /already.*registered/i.test(message)) {
     return { success: true, alreadyRegistered: true }
   }
-  throw new Error(message)
+  throw new MetaApiError(message, {
+    code,
+    subcode: data.error?.error_subcode,
+    httpStatus: response.status,
+  })
+}
+
+/**
+ * Códigos de erro do /register que significam "o PIN de verificação em duas
+ * etapas está errado ou faltando".
+ *
+ * Importa porque a remediação é específica e não-óbvia: se o número JÁ teve um
+ * PIN definido antes, só o PIN ANTIGO funciona — não adianta escolher um novo.
+ * Sem o PIN antigo, o reset leva 7 dias ou passa pelo suporte da Meta. A UI
+ * precisa dizer isso em vez de mostrar o erro cru da Meta.
+ */
+const PIN_ERROR_CODES = new Set([133007, 133008, 133009, 139000, 139001, 139003])
+
+export function isPinError(err: unknown): boolean {
+  if (!(err instanceof MetaApiError)) return false
+  if (err.code != null && PIN_ERROR_CODES.has(err.code)) return true
+  return /two.?step|two.?factor|\bpin\b/i.test(err.message)
+}
+
+/**
+ * 133010 — "Phone number not registered". Aparece no /register e no
+ * /deregister quando o registro está solto no nível de messaging. A spec de
+ * onboarding manda tratar como NÃO-REGISTRADO e seguir o caminho normal de
+ * ativação, em vez de reportar como falha.
+ */
+export function isNotRegisteredError(err: unknown): boolean {
+  return err instanceof MetaApiError && err.code === 133010
 }
 
 export interface SubscribeWabaToAppArgs {
@@ -239,6 +328,187 @@ export async function getSubscribedApps(
   }
   const data = (await response.json()) as { data?: SubscribedApp[] }
   return data.data ?? []
+}
+
+// ============================================================
+// Diagnóstico de onboarding
+// ============================================================
+//
+// O cliente entrega "token + ID". Esse ID pode ser o Phone Number ID
+// (o que a gente precisa) ou o WABA ID (o que ele copiou primeiro no
+// painel da Meta). São objetos diferentes e o erro que a Graph devolve
+// não diz qual é qual. As funções abaixo existem para descobrir isso
+// sem chutar, antes de qualquer POST que mude estado.
+
+export interface WabaPhoneNumber {
+  id: string
+  display_phone_number?: string
+  verified_name?: string
+  code_verification_status?: string
+  platform_type?: string
+  status?: string
+}
+
+/**
+ * Lista os números de um WABA. É o teste do PASSO 1B: se o ID que o cliente
+ * mandou responde aqui, ele era um WABA ID e o `id` de dentro de `data[]` é
+ * o Phone Number ID de verdade.
+ */
+export async function listWabaPhoneNumbers(args: {
+  wabaId: string
+  accessToken: string
+}): Promise<WabaPhoneNumber[]> {
+  const { wabaId, accessToken } = args
+  const url = `${META_API_BASE}/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name,code_verification_status,platform_type,status`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: WabaPhoneNumber[] }
+  return data.data ?? []
+}
+
+export interface DebugTokenInfo {
+  is_valid: boolean
+  scopes: string[]
+  expires_at?: number
+  app_id?: string
+}
+
+/**
+ * Valida o token em si. Só é chamado quando o ID não resolve por nenhum
+ * caminho — aí a pergunta deixa de ser "qual ID?" e passa a ser "esse token
+ * serve?". Confere validade e os dois escopos obrigatórios.
+ */
+export async function debugToken(args: {
+  accessToken: string
+}): Promise<DebugTokenInfo> {
+  const { accessToken } = args
+  const url = `${META_API_BASE}/debug_token?input_token=${encodeURIComponent(
+    accessToken
+  )}&access_token=${encodeURIComponent(accessToken)}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const body = (await response.json()) as {
+    data?: { is_valid?: boolean; scopes?: string[]; expires_at?: number; app_id?: string }
+  }
+  return {
+    is_valid: body.data?.is_valid === true,
+    scopes: body.data?.scopes ?? [],
+    expires_at: body.data?.expires_at,
+    app_id: body.data?.app_id,
+  }
+}
+
+export const REQUIRED_TOKEN_SCOPES = [
+  'whatsapp_business_management',
+  'whatsapp_business_messaging',
+] as const
+
+export function missingTokenScopes(scopes: string[]): string[] {
+  return REQUIRED_TOKEN_SCOPES.filter((s) => !scopes.includes(s))
+}
+
+export interface MetaBusiness {
+  id: string
+  name?: string
+}
+
+/** Negócios (BMs) que este token administra. */
+export async function listBusinesses(args: {
+  accessToken: string
+}): Promise<MetaBusiness[]> {
+  const url = `${META_API_BASE}/me/businesses?fields=id,name`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: MetaBusiness[] }
+  return data.data ?? []
+}
+
+export interface OwnedWaba {
+  id: string
+  name?: string
+}
+
+/** WABAs pertencentes a um BM. */
+export async function listOwnedWabas(args: {
+  businessId: string
+  accessToken: string
+}): Promise<OwnedWaba[]> {
+  const url = `${META_API_BASE}/${args.businessId}/owned_whatsapp_business_accounts?fields=id,name`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: OwnedWaba[] }
+  return data.data ?? []
+}
+
+// ============================================================
+// Re-verificação de número (CAMINHO B)
+// ============================================================
+//
+// Quando code_verification_status = EXPIRED, a Meta exige provar de novo a
+// posse da linha. O código chega por SMS ou ligação NO NÚMERO — não existe
+// forma de a API pular essa etapa. Se ninguém controla o chip, o número não
+// conecta, ponto.
+
+export type CodeMethod = 'SMS' | 'VOICE'
+
+/**
+ * Pede o código de verificação. `VOICE` é a saída quando o SMS não chega
+ * (comum em número fixo/portado ou operadora que bloqueia SMS A2P).
+ */
+export async function requestVerificationCode(args: {
+  phoneNumberId: string
+  accessToken: string
+  codeMethod: CodeMethod
+  language?: string
+}): Promise<void> {
+  const { phoneNumberId, accessToken, codeMethod, language = 'pt_BR' } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/request_code`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ code_method: codeMethod, language }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+}
+
+/** Confirma o código recebido no chip. Depois disso o número volta a VERIFIED. */
+export async function verifyPhoneCode(args: {
+  phoneNumberId: string
+  accessToken: string
+  code: string
+}): Promise<void> {
+  const { phoneNumberId, accessToken, code } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/verify_code`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ code }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
 }
 
 // ============================================================

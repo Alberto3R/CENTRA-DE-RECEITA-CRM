@@ -95,6 +95,45 @@ export function WhatsAppConfig() {
   const [registrationProbe, setRegistrationProbe] =
     useState<RegistrationProbe | null>(null);
 
+  // Resultado da última ativação (o save agora diagnostica o número na Meta
+  // antes de registrar). `outcome` diz qual é o próximo passo — cada um tem
+  // uma remediação diferente e mostrar o erro cru da Meta não ajudava ninguém.
+  type ActivationOutcome = {
+    outcome:
+      | 'already_connected'
+      | 'registered'
+      | 'needs_pin'
+      | 'needs_old_pin'
+      | 'needs_code_verification'
+      | 'meta_error'
+      | 'ambiguous_waba'
+      | 'wrong_token_or_bm';
+    message?: string;
+    candidates?: {
+      id: string;
+      display_phone_number?: string;
+      verified_name?: string;
+    }[];
+    missingScopes?: string[];
+    reachable?: { businessId: string; businessName?: string; wabaIds: string[] }[];
+  };
+  const [activation, setActivation] = useState<ActivationOutcome | null>(null);
+
+  // CAMINHO B — re-verificação do número por código físico (SMS/ligação).
+  const [codeMethod, setCodeMethod] = useState<'SMS' | 'VOICE'>('SMS');
+  const [codeSent, setCodeSent] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [requestingCode, setRequestingCode] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
+
+  // O painel de re-verificação aparece tanto logo após um save que detectou
+  // EXPIRED quanto ao reabrir a página com o canal nesse estado — senão o
+  // cliente que fechasse a aba no meio do fluxo não teria como retomar.
+  const needsCodeVerification =
+    activation?.outcome === 'needs_code_verification' ||
+    (config as unknown as { code_verification_status?: string } | null)
+      ?.code_verification_status === 'EXPIRED';
+
   const webhookUrl =
     typeof window !== 'undefined'
       ? `${window.location.origin}/api/whatsapp/webhook`
@@ -300,44 +339,74 @@ export function WhatsAppConfig() {
       });
 
       const data = await res.json();
+      const act = (data.activation ?? null) as ActivationOutcome | null;
+      setActivation(act);
+      setCodeSent(false);
 
       if (!res.ok) {
+        // 400 = nada foi salvo (token/BM errado, ou WABA com vários números).
         toast.error(data.error || 'Falha ao salvar a configuração');
         setSaving(false);
         return;
       }
 
-      // The route now returns a structured outcome:
-      //   * registered=true   → number is live, events will flow
-      //   * registered=false  → credentials saved but /register
-      //                         failed; UI shows the specific error
-      //                         and a retry path. registration_error
-      //                         is human-readable from Meta.
-      if (data.registered === false && data.registration_error) {
-        toast.error(
-          `Salvo, mas a Meta não conseguiu registrar o número: ${data.registration_error}`,
-          { duration: 12000 },
-        );
-      } else if (data.registration_skipped) {
-        // Credentials saved + verified, but /register was skipped
-        // because no PIN was supplied (e.g. a Meta test number).
-        // Don't claim the number is "Live" — point at the
-        // Registration status banner instead.
-        toast.success(
-          'Credenciais salvas e verificadas. O registro de entrada foi ignorado (sem PIN) — veja o status de registro abaixo.',
+      // O save agora diagnostica antes de registrar, então a resposta diz
+      // exatamente em que ponto o número parou. Cada caso tem uma saída
+      // diferente — tratar tudo como "erro ao registrar" era o que fazia o
+      // cliente ficar preso sem saber o que fazer.
+      switch (act?.outcome) {
+        case 'already_connected':
+          toast.success(
+            data.phone_info?.verified_name
+              ? `${data.phone_info.verified_name} já estava conectado na Meta.`
+              : 'O número já estava conectado na Meta.',
+          );
+          setPin('');
+          break;
+        case 'registered':
+          toast.success(
+            data.phone_info?.verified_name
+              ? `Ativado — ${data.phone_info.verified_name} já pode receber eventos.`
+              : 'Número ativado na Meta. Os eventos começarão a chegar em até um minuto.',
+          );
+          setPin('');
+          break;
+        case 'needs_code_verification':
+          toast.warning(
+            'A verificação deste número expirou na Meta. Confirme a posse da linha para reativar — veja o passo abaixo.',
+            { duration: 12000 },
+          );
+          break;
+        case 'needs_old_pin':
+          toast.error(
+            'A Meta recusou o PIN. Se o número já teve verificação em duas etapas, só o PIN ANTIGO funciona.',
+            { duration: 14000 },
+          );
+          break;
+        case 'needs_pin':
+          toast.warning(
+            'Credenciais salvas. Informe o PIN de verificação em duas etapas (6 dígitos) para concluir a ativação.',
+            { duration: 10000 },
+          );
+          break;
+        default:
+          if (data.registration_error) {
+            toast.error(
+              `Salvo, mas a Meta não conseguiu ativar o número: ${data.registration_error}`,
+              { duration: 12000 },
+            );
+          } else {
+            toast.success('Configuração salva.');
+          }
+      }
+
+      if (data.resolved_phone_number_id) {
+        // O cliente colou o WABA ID; resolvemos o número real por trás dele.
+        // Vale avisar, senão o campo mudando sozinho parece bug.
+        toast.info(
+          `O ID informado era um WABA ID. Usamos o número ${data.resolved_phone_number_id}.`,
           { duration: 10000 },
         );
-        setPin('');
-      } else {
-        toast.success(
-          data.phone_info?.verified_name
-            ? `No ar — ${data.phone_info.verified_name} já pode receber eventos.`
-            : 'WhatsApp conectado. Os eventos começarão a chegar em até um minuto.',
-        );
-        // Clear the PIN so subsequent saves don't accidentally
-        // re-register (which would void the active subscription if
-        // the PIN became stale).
-        setPin('');
       }
 
       if (accountId) await fetchConfig(accountId);
@@ -407,6 +476,87 @@ export function WhatsAppConfig() {
       }
     } finally {
       setVerifyingRegistration(false);
+    }
+  }
+
+  /**
+   * CAMINHO B, passo 1 — pede o código à Meta.
+   *
+   * O código chega no PRÓPRIO NÚMERO (SMS ou ligação). Não há como a API
+   * pular isso: se ninguém controla a linha, o número não reativa.
+   */
+  async function handleRequestCode() {
+    try {
+      setRequestingCode(true);
+      const res = await fetch('/api/whatsapp/config/request-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelId: selectedChannelId,
+          code_method: codeMethod,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(
+          [data.error, data.hint].filter(Boolean).join(' '),
+          { duration: 12000 },
+        );
+        return;
+      }
+      setCodeSent(true);
+      toast.success(data.message ?? 'Código solicitado.', { duration: 10000 });
+    } catch (err) {
+      console.error('request-code failed:', err);
+      toast.error('Não foi possível solicitar o código.');
+    } finally {
+      setRequestingCode(false);
+    }
+  }
+
+  /** CAMINHO B, passos 2-3 — confirma o código e registra na sequência. */
+  async function handleVerifyCode() {
+    if (!verificationCode.trim()) {
+      toast.error('Informe o código recebido no número.');
+      return;
+    }
+    try {
+      setVerifyingCode(true);
+      const res = await fetch('/api/whatsapp/config/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelId: selectedChannelId,
+          code: verificationCode.trim(),
+          pin: pin.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Código recusado pela Meta.', { duration: 12000 });
+        return;
+      }
+      if (data.success) {
+        toast.success('Número verificado e ativado. Já pode receber eventos.');
+        setActivation(null);
+        setCodeSent(false);
+        setVerificationCode('');
+        setPin('');
+      } else if (data.outcome === 'needs_pin') {
+        toast.warning(data.message, { duration: 12000 });
+        setVerificationCode('');
+      } else {
+        toast.error(
+          data.activation?.message ?? 'Verificado, mas o registro não concluiu.',
+          { duration: 12000 },
+        );
+      }
+      if (accountId) await fetchConfig(accountId);
+    } catch (err) {
+      console.error('verify-code failed:', err);
+      toast.error('Não foi possível confirmar o código.');
+    } finally {
+      setVerifyingCode(false);
     }
   }
 
@@ -730,6 +880,173 @@ export function WhatsAppConfig() {
           </Alert>
         )}
 
+        {/* CAMINHO B — re-verificação do número.
+            Aparece quando a Meta reporta code_verification_status = EXPIRED.
+            É o único passo do onboarding que a automação não resolve sozinha:
+            o código chega no chip, então precisa de alguém com acesso à linha. */}
+        {needsCodeVerification && (
+          <Alert className="bg-amber-950/30 border-amber-700/50">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-400" />
+              <AlertTitle className="mb-0 text-amber-200">
+                Verificação expirada — é preciso confirmar a posse da linha
+              </AlertTitle>
+            </div>
+            <AlertDescription className="text-muted-foreground mt-2 text-xs leading-relaxed space-y-3">
+              <p>
+                A Meta exige revalidar este número antes de reativá-lo. Ela vai
+                enviar um código{' '}
+                <strong className="text-amber-200">para o próprio número</strong>{' '}
+                (SMS ou ligação). Alguém precisa ter acesso à linha agora — não
+                existe forma de pular esta etapa pela API.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={codeMethod}
+                  onChange={(e) =>
+                    setCodeMethod(e.target.value === 'VOICE' ? 'VOICE' : 'SMS')
+                  }
+                  className="h-8 rounded border border-border bg-muted px-2 text-foreground text-xs"
+                >
+                  <option value="SMS">Receber por SMS</option>
+                  <option value="VOICE">Receber por ligação</option>
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestCode}
+                  disabled={requestingCode}
+                  className="border-border bg-transparent text-foreground hover:bg-muted h-8"
+                >
+                  {requestingCode ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5" />
+                  )}
+                  {codeSent ? 'Reenviar código' : 'Enviar código'}
+                </Button>
+              </div>
+
+              {codeSent && (
+                <div className="flex flex-wrap items-end gap-2 pt-1">
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground text-[11px]">
+                      Código recebido no número
+                    </Label>
+                    <Input
+                      placeholder="ex.: 123456"
+                      value={verificationCode}
+                      onChange={(e) =>
+                        setVerificationCode(
+                          e.target.value.replace(/\D/g, '').slice(0, 8),
+                        )
+                      }
+                      className="h-8 w-40 bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handleVerifyCode}
+                    disabled={verifyingCode}
+                    className="h-8"
+                  >
+                    {verifyingCode ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-3.5" />
+                    )}
+                    Confirmar e ativar
+                  </Button>
+                </div>
+              )}
+              <p className="text-[11px]">
+                Depois de confirmar o código, o número é registrado
+                automaticamente com o PIN de verificação em duas etapas. Se
+                ainda não informou o PIN, preencha-o no campo abaixo antes de
+                confirmar.
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Diagnósticos que impedem o save: nada foi gravado, e a causa não é
+            o número, é o token/BM ou um WABA com vários números. */}
+        {activation?.outcome === 'wrong_token_or_bm' && (
+          <Alert className="bg-red-950/30 border-red-700/50">
+            <div className="flex items-center gap-2">
+              <XCircle className="size-4 text-red-400" />
+              <AlertTitle className="mb-0 text-red-200">
+                O token não alcança esse número
+              </AlertTitle>
+            </div>
+            <AlertDescription className="text-muted-foreground mt-2 text-xs leading-relaxed space-y-2">
+              <p>{activation.message}</p>
+              {(activation.missingScopes ?? []).length > 0 && (
+                <p>
+                  Permissões faltando:{' '}
+                  <code className="text-red-300">
+                    {activation.missingScopes?.join(', ')}
+                  </code>
+                </p>
+              )}
+              {(activation.reachable ?? []).length > 0 && (
+                <div>
+                  <p className="font-medium text-foreground">
+                    Este token administra:
+                  </p>
+                  <ul className="space-y-0.5">
+                    {activation.reachable?.map((b) => (
+                      <li key={b.businessId}>
+                        • {b.businessName ?? b.businessId} — WABAs:{' '}
+                        {b.wabaIds.length > 0 ? b.wabaIds.join(', ') : 'nenhum'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {activation?.outcome === 'ambiguous_waba' && (
+          <Alert className="bg-amber-950/30 border-amber-700/50">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-400" />
+              <AlertTitle className="mb-0 text-amber-200">
+                Escolha qual número ativar
+              </AlertTitle>
+            </div>
+            <AlertDescription className="text-muted-foreground mt-2 text-xs leading-relaxed space-y-2">
+              <p>{activation.message}</p>
+              <ul className="space-y-1">
+                {activation.candidates?.map((c) => (
+                  <li key={c.id} className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 border-border bg-transparent text-foreground hover:bg-muted"
+                      onClick={() => {
+                        setPhoneNumberId(c.id);
+                        setActivation(null);
+                        toast.info(
+                          'Número selecionado. Clique em Salvar configuração para ativar.',
+                        );
+                      }}
+                    >
+                      Usar este
+                    </Button>
+                    <span>
+                      {c.display_phone_number ?? c.id}
+                      {c.verified_name ? ` — ${c.verified_name}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* API Credentials */}
         <Card>
           <CardHeader>
@@ -858,22 +1175,25 @@ export function WhatsAppConfig() {
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground tracking-widest"
               />
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Necessário apenas para configurar mensagens{' '}
-                <strong className="text-muted-foreground">de entrada</strong>{' '}
-                de um número de{' '}
-                <strong className="text-muted-foreground">produção</strong>. Defina-o em{' '}
+                É o PIN de 6 dígitos que ativa o número na Cloud API. Defina-o
+                em{' '}
                 <strong className="text-muted-foreground">
                   Meta Business Manager → Contas do WhatsApp → Números de
                   telefone → Verificação em duas etapas
-                </strong>
-                , depois cole-o aqui para que o wacrm possa inscrever o número —
-                caso contrário, a Meta encaminha os eventos de entrada para o
-                último aplicativo que o reivindicou (o sintoma que afeta o
-                segundo número sob uma WABA compartilhada).{' '}
-                <strong className="text-muted-foreground">Números de teste da Meta</strong> não têm
-                PIN e já vêm registrados — deixe em branco para eles.
-                Deixar em branco também mantém um registro existente
-                intacto.
+                </strong>{' '}
+                e cole aqui.{' '}
+                <strong className="text-muted-foreground">
+                  Se este número já teve um PIN antes, use o PIN antigo
+                </strong>{' '}
+                — a Meta não aceita definir um novo, e sem ele o reset leva 7
+                dias ou depende do suporte. O PIN fica salvo criptografado e é
+                reutilizado nas próximas reconexões, então você só precisa
+                informá-lo uma vez. Deixe em branco para manter o já salvo.{' '}
+                <strong className="text-muted-foreground">
+                  Números de teste da Meta
+                </strong>{' '}
+                não têm PIN — para eles, o número já vem conectado e nada é
+                pedido.
               </p>
             </div>
           </CardContent>
