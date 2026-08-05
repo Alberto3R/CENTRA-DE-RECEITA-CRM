@@ -70,7 +70,11 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/relatorios', '/painel-outbound', '/broadcasts', '/automations', '/settings', '/comecar', '/ccc']
+  // `/admin` entra aqui só para não vazar a existência do painel a quem
+  // não está logado. A autorização de verdade é `requirePlatformAdmin()`
+  // na página e em cada rota — middleware não sabe quem é platform admin
+  // (a tabela exige service role), e não é lugar de decidir isso.
+  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/relatorios', '/painel-outbound', '/broadcasts', '/automations', '/settings', '/comecar', '/ccc', '/admin']
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
