@@ -161,6 +161,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data) {
+        // Impersonation: um platform admin com sessão ativa opera SOBRE
+        // outra conta. O perfil dele continua apontando para a conta
+        // dele, então perguntamos ao servidor qual é a conta efetiva —
+        // senão o painel abriria o inbox do próprio admin com o banner
+        // dizendo que ele está na conta do cliente.
+        //
+        // Isto é só a resolução de QUAL conta consultar. Quem concede o
+        // acesso é o RLS: consultar outra conta sem sessão ativa volta
+        // vazio, então mentir aqui não leva a lugar nenhum.
+        let effectiveAccountId = data.account_id as string | null;
+        let effectiveRole = data.account_role as string | null;
+        try {
+          const res = await fetch("/api/auth/effective-account");
+          if (res.ok) {
+            const eff = await res.json();
+            if (eff?.impersonating && eff.accountId) {
+              effectiveAccountId = eff.accountId;
+              effectiveRole = eff.role ?? "viewer";
+            }
+          }
+        } catch {
+          // Sem resposta, segue com a conta do perfil — o caso normal.
+        }
+
         // Load the account with a plain lookup by id instead of an
         // embedded FK join. The embed (`account:accounts!inner(...)`)
         // forces PostgREST to resolve the profiles.account_id →
@@ -172,13 +196,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // (with account_id / account_role) still resolves even if the
         // account name lookup itself can't.
         let accountRow: AccountSummary | null = null;
-        if (data.account_id) {
+        if (effectiveAccountId) {
           const { data: account, error: accountErr } = await supabase
             .from("accounts")
             // default_currency added in migration 021; narrowed to the
             // USD fallback below for older schemas where it reads null.
             .select("id, name, default_currency, accent")
-            .eq("id", data.account_id)
+            .eq("id", effectiveAccountId)
             .maybeSingle();
           if (accountErr) {
             console.error("[AuthProvider] fetchAccount error:", {
@@ -202,9 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // migration that broadens the enum without updating TS would
         // otherwise crash here — fall back to null and let UI gates
         // treat the caller as least-privileged.
-        const accountRole = isAccountRole(data.account_role)
-          ? data.account_role
-          : null;
+        const accountRole = isAccountRole(effectiveRole) ? effectiveRole : null;
 
         setProfile({
           id: data.id,
@@ -217,7 +239,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // (older deployments running 011 lazily) — `null` reads as no
           // opt-ins, which is the safe default for any future beta gate.
           beta_features: data.beta_features ?? [],
-          account_id: data.account_id ?? null,
+          // Conta EFETIVA — durante impersonation é a do tenant, e é ela
+          // que todas as telas usam para filtrar as consultas.
+          account_id: effectiveAccountId,
           account_role: accountRole,
         });
         setAccount(accountRow);
