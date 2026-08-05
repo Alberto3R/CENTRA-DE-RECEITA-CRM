@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Eye, Loader2, Search } from "lucide-react";
+import { Eye, Loader2, Search, Wrench } from "lucide-react";
 import { toast } from "sonner";
+
+import { ChannelDialog } from "./channel-dialog";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +46,7 @@ export function TenantList({ tenants }: { tenants: TenantRow[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<TenantRow | null>(null);
+  const [channelTarget, setChannelTarget] = useState<TenantRow | null>(null);
   const [reason, setReason] = useState("");
   const [entering, setEntering] = useState(false);
 
@@ -170,18 +173,34 @@ export function TenantList({ tenants }: { tenants: TenantRow[] }) {
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">
                       {relativeOrNever(t.last_message_at)}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setTarget(t);
-                          setReason("");
-                        }}
-                      >
-                        <Eye className="size-3.5" />
-                        Entrar
-                      </Button>
+                    <td className="px-4 py-2.5">
+                      <div className="flex justify-end gap-1.5">
+                        {/* Consertar o canal não exige entrar na conta — e
+                            não deveria: entrar é leitura, isto é a única
+                            escrita que o painel faz. */}
+                        {t.channel_count > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setChannelTarget(t)}
+                            title="Diagnosticar e ativar número"
+                          >
+                            <Wrench className="size-3.5" />
+                            Canal
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setTarget(t);
+                            setReason("");
+                          }}
+                        >
+                          <Eye className="size-3.5" />
+                          Entrar
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -241,6 +260,14 @@ export function TenantList({ tenants }: { tenants: TenantRow[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ChannelDialog
+        accountId={channelTarget?.account_id ?? null}
+        accountName={channelTarget?.account_name ?? ""}
+        open={channelTarget !== null}
+        onOpenChange={(open) => !open && setChannelTarget(null)}
+        onChanged={() => router.refresh()}
+      />
     </>
   );
 }
