@@ -30,7 +30,20 @@ import {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, canEditSettings } = useAuth();
+  const { defaultCurrency, canEditSettings, isImpersonating } = useAuth();
+
+  /**
+   * VER as configurações é diferente de EDITAR.
+   *
+   * Antes as duas coisas eram a mesma flag, então um platform admin
+   * impersonando (que roda como `viewer`) era jogado de volta para o
+   * perfil e não conseguia nem diagnosticar o canal do cliente — que é
+   * justamente o motivo mais comum de entrar numa conta.
+   *
+   * Liberar a leitura aqui não abre nada: a edição continua gateada por
+   * `canEditSettings` abaixo, e o banco recusa escrita durante a sessão.
+   */
+  const canViewSettings = canEditSettings || isImpersonating;
   const { mode } = useTheme();
 
   // The URL (`?tab=`) is the single source of truth for the active
@@ -42,7 +55,7 @@ export default function SettingsPage() {
   // aparência). Deep-link pra uma seção admin cai no Perfil — o menu já
   // esconde, isto fecha o acesso direto por URL. RLS reforça no back.
   const section =
-    !canEditSettings && isAdminSection(rawSection) ? 'profile' : rawSection;
+    !canViewSettings && isAdminSection(rawSection) ? 'profile' : rawSection;
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -96,7 +109,7 @@ export default function SettingsPage() {
           active={section}
           onSelect={go}
           hints={hints}
-          canManage={canEditSettings}
+          canManage={canViewSettings}
         />
         <div className="min-w-0">{panel[section]}</div>
       </div>

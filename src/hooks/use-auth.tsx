@@ -105,6 +105,14 @@ interface AuthContextValue {
   canEditSettings: boolean;
   /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
+  /**
+   * True quando um platform admin está com sessão de impersonation ativa.
+   *
+   * Serve para a UI decidir o que MOSTRAR — nunca o que permitir. A sessão
+   * roda como `viewer` e o banco recusa toda escrita, então uma tela
+   * liberada por esta flag continua sendo somente leitura.
+   */
+  isImpersonating: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -124,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // settles later. Callers that gate on `profile.*` need to know which
   // window they're in — see the type doc above.
   const [profileLoading, setProfileLoading] = useState(true);
+  const [isImpersonating, setIsImpersonating] = useState(false);
 
   // Id do usuário atualmente carregado. Serve pra ignorar re-emissões do
   // onAuthStateChange pro MESMO usuário (TOKEN_REFRESHED e SIGNED_IN
@@ -172,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // vazio, então mentir aqui não leva a lugar nenhum.
         let effectiveAccountId = data.account_id as string | null;
         let effectiveRole = data.account_role as string | null;
+        let impersonando = false;
         try {
           const res = await fetch("/api/auth/effective-account");
           if (res.ok) {
@@ -179,11 +189,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (eff?.impersonating && eff.accountId) {
               effectiveAccountId = eff.accountId;
               effectiveRole = eff.role ?? "viewer";
+              impersonando = true;
             }
           }
         } catch {
           // Sem resposta, segue com a conta do perfil — o caso normal.
         }
+        setIsImpersonating(impersonando);
 
         // Load the account with a plain lookup by id instead of an
         // embedded FK join. The embed (`account:accounts!inner(...)`)
@@ -381,6 +393,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshProfile,
         account,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
+        isImpersonating,
         ...derived,
       }}
     >
@@ -409,6 +422,9 @@ export function useAuth(): AuthContextValue {
         window.location.href = "/login";
       },
       refreshProfile: async () => {},
+      // Fora do provider, assumir que NÃO há impersonation é o lado
+      // seguro: nenhuma tela extra é liberada.
+      isImpersonating: false,
       account: null,
       defaultCurrency: DEFAULT_CURRENCY,
       accountId: null,
