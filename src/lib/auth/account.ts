@@ -25,54 +25,22 @@
 //   }
 // ============================================================
 
-import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
+import { ForbiddenError, UnauthorizedError } from "./errors";
+import { getActiveImpersonation } from "./platform-admin";
 
 // ------------------------------------------------------------
 // Errors
 //
-// Custom classes so API routes can map a single `catch` to the
-// right HTTP status without sprinkling 401/403 strings everywhere.
+// Definidos em `./errors` para evitar ciclo de import com
+// `./platform-admin`. Re-exportados aqui porque todo o app importa
+// `toErrorResponse` / `ForbiddenError` deste módulo.
 // ------------------------------------------------------------
 
-export class UnauthorizedError extends Error {
-  readonly status = 401 as const;
-  constructor(message = "Unauthorized") {
-    super(message);
-    this.name = "UnauthorizedError";
-  }
-}
-
-export class ForbiddenError extends Error {
-  readonly status = 403 as const;
-  constructor(message = "Forbidden") {
-    super(message);
-    this.name = "ForbiddenError";
-  }
-}
-
-/**
- * Convert one of the typed errors above (or anything else) into a
- * `NextResponse`. Routes can do:
- *
- *   } catch (err) {
- *     return toErrorResponse(err);
- *   }
- *
- * Unknown errors collapse to 500 with the generic message — we
- * never leak `err.message` for non-classified errors to keep
- * server internals out of the wire.
- */
-export function toErrorResponse(err: unknown): NextResponse {
-  if (err instanceof UnauthorizedError || err instanceof ForbiddenError) {
-    return NextResponse.json({ error: err.message }, { status: err.status });
-  }
-  console.error("[toErrorResponse] uncategorized error:", err);
-  return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-}
+export { ForbiddenError, UnauthorizedError, toErrorResponse } from "./errors";
 
 // ------------------------------------------------------------
 // Account context
@@ -89,6 +57,22 @@ export interface AccountContext {
   role: AccountRole;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
+  /**
+   * Preenchido quando o chamador é um platform admin com sessão de
+   * impersonation ativa. Nesse caso `accountId`/`account` apontam para o
+   * tenant impersonado e `role` é sempre `viewer`.
+   *
+   * `userId` continua sendo o do admin de verdade — nunca o de alguém do
+   * tenant. Trocar a identidade quebraria o rastro de quem fez o quê, que
+   * é justamente o que o log de impersonation existe para preservar.
+   */
+  impersonation?: {
+    sessionId: string;
+    /** Conta à qual o admin realmente pertence. */
+    actorAccountId: string;
+    expiresAt: string;
+    reason: string;
+  };
 }
 
 /**
@@ -137,6 +121,19 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     throw new ForbiddenError(`Unknown account role: ${data.account_role}`);
   }
 
+  // Impersonation: um platform admin com sessão ativa passa a operar
+  // SOBRE o tenant alvo. Só o alvo da resolução muda — `userId` segue
+  // sendo o do admin, e o papel é rebaixado a `viewer`.
+  //
+  // O rebaixamento é a segunda camada de defesa: `requireRole('agent')`
+  // e acima passam a lançar Forbidden, então rotas de escrita são
+  // recusadas antes de tocar o banco. A primeira camada continua sendo
+  // a policy da migration 084, que nega a escrita mesmo que esta aqui
+  // seja contornada.
+  const impersonation = await getActiveImpersonation(user.id);
+  const effectiveAccountId = impersonation?.targetAccountId ?? data.account_id;
+  const effectiveRole: AccountRole = impersonation ? "viewer" : data.account_role;
+
   // Load the account with a plain point lookup by id rather than an
   // embedded FK join (`account:accounts!inner(...)`). The embed forces
   // PostgREST to resolve the profiles.account_id → accounts.id
@@ -150,7 +147,7 @@ export async function getCurrentAccount(): Promise<AccountContext> {
   const { data: account, error: accountErr } = await supabase
     .from("accounts")
     .select("id, name")
-    .eq("id", data.account_id)
+    .eq("id", effectiveAccountId)
     .maybeSingle();
 
   if (accountErr) {
@@ -166,9 +163,19 @@ export async function getCurrentAccount(): Promise<AccountContext> {
   return {
     supabase,
     userId: user.id,
-    accountId: data.account_id,
-    role: data.account_role,
+    accountId: effectiveAccountId,
+    role: effectiveRole,
     account: { id: account.id, name: account.name },
+    ...(impersonation
+      ? {
+          impersonation: {
+            sessionId: impersonation.id,
+            actorAccountId: data.account_id,
+            expiresAt: impersonation.expiresAt,
+            reason: impersonation.reason,
+          },
+        }
+      : {}),
   };
 }
 

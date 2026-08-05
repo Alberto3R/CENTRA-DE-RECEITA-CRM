@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentAccount } from "@/lib/auth/account";
+import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { DashboardShell } from "./dashboard-shell";
 
 // Server layout whose only job is to declare "do not index" metadata
@@ -31,11 +32,31 @@ export default async function DashboardLayout({
   // middleware já garante que aqui só chega quem está logado; se getCurrentAccount
   // falhar, é por falta de conta (ou sessão), e /comecar (protegido) resolve o
   // roteamento (manda pro login se não houver sessão).
+  let ctx: Awaited<ReturnType<typeof getCurrentAccount>> | null = null;
   try {
-    await getCurrentAccount();
+    ctx = await getCurrentAccount();
   } catch {
     redirect("/comecar");
   }
 
-  return <DashboardShell>{children}</DashboardShell>;
+  // O banner é renderizado no servidor a partir do contexto que este
+  // layout já carrega. Nada de buscar estado de impersonation no
+  // cliente: seria uma requisição extra em toda navegação, para todo
+  // usuário, só para descobrir "não, você não está impersonando".
+  return (
+    <div className="flex h-screen flex-col">
+      {ctx.impersonation && (
+        <ImpersonationBanner
+          accountName={ctx.account.name}
+          reason={ctx.impersonation.reason}
+          expiresAt={ctx.impersonation.expiresAt}
+        />
+      )}
+      {/* min-h-0 para o shell encolher em vez de empurrar o banner
+          para fora da tela quando o conteúdo é alto. */}
+      <div className="min-h-0 flex-1">
+        <DashboardShell>{children}</DashboardShell>
+      </div>
+    </div>
+  );
 }
