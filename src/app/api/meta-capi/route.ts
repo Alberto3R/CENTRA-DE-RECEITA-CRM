@@ -1,6 +1,20 @@
+import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
+
+// A Meta exige os dados pessoais em SHA-256 (minúsculo, sem espaço nas pontas).
+// Hasheamos AQUI, no servidor: a landing manda em texto pelo HTTPS (como já faz
+// pro CRM) e nada identificável sai daqui pra Meta.
+function sha256(s: string): string {
+  return crypto.createHash('sha256').update(s.trim().toLowerCase()).digest('hex')
+}
+// telefone no formato que a Meta espera: só dígitos, com DDI
+function normFone(v: string): string {
+  const d = v.replace(/\D/g, '')
+  if (!d) return ''
+  return d.length <= 11 && !d.startsWith('55') ? '55' + d : d
+}
 
 // ============================================================
 // POST /api/meta-capi — Conversions API (CAPI) da landing da CCC.
@@ -71,11 +85,29 @@ export async function POST(req: Request) {
     const ip = fwd.split(',')[0].trim() || undefined
     const ua = req.headers.get('user-agent') || undefined
 
-    const userData: Record<string, string> = {}
+    const userData: Record<string, unknown> = {}
     if (ip) userData.client_ip_address = ip
     if (ua) userData.client_user_agent = ua
     if (fbp) userData.fbp = fbp
     if (fbc) userData.fbc = fbc
+
+    // Perfil do lead (hasheado) — mandado JÁ no cadastro, não só quando o lead
+    // avança de etapa. Sem isso a Meta otimiza praticamente às cegas: fbp/fbc
+    // só existem pra quem veio de clique no anúncio e caem quando o cookie some.
+    const s = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+    const email = s(body?.email)
+    const fone = normFone(s(body?.phone) || s(body?.whatsapp))
+    const nome = s(body?.nome)
+    if (email) userData.em = [sha256(email)]
+    if (fone) userData.ph = [sha256(fone)]
+    if (nome) {
+      const p = nome.split(/\s+/).filter(Boolean)
+      if (p[0]) userData.fn = [sha256(p[0])]
+      if (p.length > 1) userData.ln = [sha256(p[p.length - 1])]
+    }
+    // external_id estável (o próprio telefone) ajuda a Meta a ligar o mesmo
+    // lead entre eventos diferentes.
+    if (fone) userData.external_id = [sha256(fone)]
 
     const evento: Record<string, unknown> = {
       event_name: eventName,
