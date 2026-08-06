@@ -30,7 +30,9 @@ const GRAPH = 'https://graph.facebook.com/v22.0'
 const PIXEL_ID = '889803623429912' // pixel da 3R (público — também vai no client)
 const WABA = '824812527258696' // canal cujo system user token gerencia o pixel
 
-const EVENTOS_OK = new Set(['PageView', 'ViewContent', 'Lead'])
+// 'LeadQualificado' é evento próprio: só dispara para quem bate o ICP. Serve
+// para a campanha otimizar pelo lead que a gente QUER, não por lead qualquer.
+const EVENTOS_OK = new Set(['PageView', 'ViewContent', 'Lead', 'LeadQualificado'])
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _admin: any = null
@@ -117,6 +119,27 @@ export async function POST(req: Request) {
     }
     if (sourceUrl) evento.event_source_url = sourceUrl
     if (eventId) evento.event_id = eventId
+
+    // custom_data — é AQUI que a Meta aprende que tipo de lead a gente quer.
+    // `value` é a alavanca real: com otimização por valor, ela passa a caçar
+    // quem se parece com os leads de pontuação alta. As demais propriedades
+    // (faixa de faturamento, tamanho do time, nível de dor) não otimizam
+    // sozinhas — servem para segmentar, criar públicos e conferir no relatório.
+    const custom: Record<string, unknown> = {}
+    const valor = Number(body?.value)
+    if (Number.isFinite(valor) && valor >= 0) {
+      custom.value = valor
+      custom.currency = typeof body?.currency === 'string' ? body.currency : 'BRL'
+    }
+    if (typeof body?.content_name === 'string') custom.content_name = body.content_name
+    const perfil = body?.perfil
+    if (perfil && typeof perfil === 'object' && !Array.isArray(perfil)) {
+      for (const [k, v] of Object.entries(perfil as Record<string, unknown>)) {
+        if (typeof v === 'number' && Number.isFinite(v)) custom[k.slice(0, 40)] = v
+        else if (typeof v === 'string' && v) custom[k.slice(0, 40)] = v.slice(0, 100)
+      }
+    }
+    if (Object.keys(custom).length > 0) evento.custom_data = custom
 
     const res = await fetch(`${GRAPH}/${PIXEL_ID}/events`, {
       method: 'POST',
