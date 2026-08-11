@@ -14,6 +14,7 @@ import {
   User,
   UsersRound,
   Webhook,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export const SETTINGS_SECTIONS = [
   'whatsapp',
   'instagram',
   'templates',
+  'quick-replies',
   'fields',
   'deals',
   'ai-agent',
@@ -70,6 +72,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace', adminOnly: true },
   instagram: { id: 'instagram', label: 'Instagram', icon: AtSign, group: 'workspace', adminOnly: true },
   templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace', adminOnly: true },
+  'quick-replies': { id: 'quick-replies', label: 'Respostas rápidas', icon: Zap, group: 'workspace', adminOnly: true },
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },
   deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace', adminOnly: true },
   'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace', adminOnly: true },

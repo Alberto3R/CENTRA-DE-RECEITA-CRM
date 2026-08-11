@@ -1,16 +1,23 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type {
+  Contact,
+  Deal,
+  ContactNote,
+  Pipeline,
+  PipelineStage,
+  Tag,
+} from "@/types";
 import {
   Phone,
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
@@ -18,10 +25,19 @@ import {
   PhoneCall,
   CalendarClock,
   Video,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CallHistory } from "@/components/whatsapp/call-history";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
+import { DealForm } from "@/components/pipelines/deal-form";
 import { format } from "date-fns";
 import {
   InstagramGlyph,
@@ -33,19 +49,27 @@ import {
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  /**
+   * Rendered inside the mobile Sheet instead of as the fixed right rail —
+   * drops the fixed width and the left border so it fills the drawer.
+   */
+  inSheet?: boolean;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps) {
   const { accountId } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
-  const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [calls, setCalls] = useState<
     { id: string; starts_at: string; meet_link: string | null; status: string }[]
   >([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [dealFormOpen, setDealFormOpen] = useState(false);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -80,15 +104,71 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     if (notesRes.data) setNotes(notesRes.data);
     if (callsRes.data) setCalls(callsRes.data);
     if (tagsRes.data) {
-      const mapped = tagsRes.data
-        .filter((ct: Record<string, unknown>) => ct.tags)
-        .map((ct: Record<string, unknown>) => ({
-          ...(ct.tags as Tag),
-          contact_tag_id: ct.id as string,
-        }));
-      setTags(mapped);
+      const rows = tagsRes.data as unknown as { tags: Tag | null }[];
+      setTags(rows.map((ct) => ct.tags).filter((t): t is Tag => !!t));
     }
   }, [contact]);
+
+  // Pipeline padrão da conta (o primeiro, mesma regra da tela de Pipelines)
+  // + suas etapas. Necessário para criar negócio e trocar etapa daqui.
+  const fetchPipeline = useCallback(async () => {
+    if (!accountId) return;
+    const supabase = createClient();
+    const { data: pipes } = await supabase
+      .from("pipelines")
+      .select("*")
+      .eq("account_id", accountId)
+      .order("created_at")
+      .limit(1);
+
+    const first = (pipes?.[0] as Pipeline | undefined) ?? null;
+    setPipeline(first);
+    if (!first) {
+      setStages([]);
+      return;
+    }
+
+    const { data: st } = await supabase
+      .from("pipeline_stages")
+      .select("*")
+      .eq("pipeline_id", first.id)
+      .order("position");
+    setStages((st ?? []) as PipelineStage[]);
+  }, [accountId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPipeline();
+  }, [fetchPipeline]);
+
+  const handleTagsChange = useCallback((_ids: string[], nextTags: Tag[]) => {
+    setTags(nextTags);
+  }, []);
+
+  const handleStageChange = useCallback(
+    async (dealId: string, stage: PipelineStage) => {
+      const previous = deals;
+      // Otimista: o trigger de deal_stage_events registra o histórico e o
+      // sweeper de deal-triggers dispara as automações sozinho.
+      setDeals((prev) =>
+        prev.map((d) =>
+          d.id === dealId ? { ...d, stage_id: stage.id, stage } : d,
+        ),
+      );
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("deals")
+        .update({ stage_id: stage.id })
+        .eq("id", dealId);
+
+      if (error) {
+        setDeals(previous);
+        toast.error("Falha ao mover o negócio");
+      }
+    },
+    [deals],
+  );
 
   // Load on contact change. setContactData/setTags run inside async
   // Supabase callbacks, not synchronously in the effect body.
@@ -138,9 +218,13 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
+  const shellClass = inSheet
+    ? "flex h-full w-full flex-col bg-card"
+    : "flex h-full w-70 flex-col border-l border-border bg-card";
+
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
+      <div className={cn(shellClass, "items-center justify-center")}>
         <p className="text-sm text-muted-foreground">Selecione uma conversa</p>
       </div>
     );
@@ -154,7 +238,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const identity = contactSubtitle(contact); // telefone (WhatsApp) ou @username (IG)
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className={shellClass}>
       <ScrollArea className="flex-1">
         <div className="p-4">
           {/* Contact Info */}
@@ -214,23 +298,13 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               <TagIcon className="h-3 w-3" />
               Tags
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {tags.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Nenhuma tag</p>
-              ) : (
-                tags.map((tag) => (
-                  <span
-                    key={tag.contact_tag_id}
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: `${tag.color}20`,
-                      color: tag.color,
-                    }}
-                  >
-                    {tag.name}
-                  </span>
-                ))
-              )}
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              <TagPills tags={tags} />
+              <TagPicker
+                contactId={contact.id}
+                selectedTagIds={tags.map((t) => t.id)}
+                onChange={handleTagsChange}
+              />
             </div>
           </div>
 
@@ -239,9 +313,26 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
           {/* Active Deals */}
           <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <DollarSign className="h-3 w-3" />
-              Negócios ativos
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <DollarSign className="h-3 w-3" />
+                Negócios ativos
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[10px]"
+                onClick={() => setDealFormOpen(true)}
+                disabled={!pipeline || stages.length === 0}
+                title={
+                  pipeline
+                    ? "Criar negócio para este contato"
+                    : "Crie um pipeline antes de abrir negócios"
+                }
+              >
+                <Plus className="size-3" />
+                Novo
+              </Button>
             </div>
             <div className="mt-2 space-y-2">
               {deals.length === 0 ? (
@@ -255,21 +346,58 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                     <p className="text-sm font-medium text-foreground">
                       {deal.title}
                     </p>
-                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>
                         {deal.currency ?? "$"}
                         {deal.value.toLocaleString()}
                       </span>
-                      {deal.stage && (
-                        <span
-                          className="rounded-full px-1.5 py-0.5 text-[10px]"
-                          style={{
-                            backgroundColor: `${deal.stage.color}20`,
-                            color: deal.stage.color,
-                          }}
-                        >
-                          {deal.stage.name}
-                        </span>
+                      {stages.length > 0 ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] transition-opacity hover:opacity-80"
+                            style={{
+                              backgroundColor: `${deal.stage?.color ?? "#64748b"}20`,
+                              color: deal.stage?.color ?? "#64748b",
+                            }}
+                            aria-label="Mudar etapa"
+                          >
+                            {deal.stage?.name ?? "Sem etapa"}
+                            <ChevronDown className="h-2.5 w-2.5" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="border-border bg-popover"
+                          >
+                            {stages.map((s) => (
+                              <DropdownMenuItem
+                                key={s.id}
+                                onClick={() => handleStageChange(deal.id, s)}
+                                className={cn(
+                                  "text-sm",
+                                  s.id === deal.stage_id && "font-semibold",
+                                )}
+                              >
+                                <span
+                                  className="mr-2 size-2 shrink-0 rounded-full"
+                                  style={{ backgroundColor: s.color }}
+                                />
+                                {s.name}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        deal.stage && (
+                          <span
+                            className="rounded-full px-1.5 py-0.5 text-[10px]"
+                            style={{
+                              backgroundColor: `${deal.stage.color}20`,
+                              color: deal.stage.color,
+                            }}
+                          >
+                            {deal.stage.name}
+                          </span>
+                        )
                       )}
                     </div>
                   </div>
@@ -373,6 +501,21 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
           </div>
         </div>
       </ScrollArea>
+
+      {pipeline && stages.length > 0 && (
+        <DealForm
+          open={dealFormOpen}
+          onOpenChange={setDealFormOpen}
+          pipelineId={pipeline.id}
+          stages={stages}
+          defaultContactId={contact.id}
+          lockContact
+          onSaved={() => {
+            setDealFormOpen(false);
+            fetchContactData();
+          }}
+        />
+      )}
     </div>
   );
 }

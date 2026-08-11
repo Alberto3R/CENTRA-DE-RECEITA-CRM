@@ -26,6 +26,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  UserRound,
   Hand,
   Bot,
 } from "lucide-react";
@@ -125,6 +126,12 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /**
+   * Mobile-only: opens the contact details as a drawer. On mobile the
+   * right rail never renders, so without this the tag/deal/stage actions
+   * would be desktop-only.
+   */
+  onOpenContactSheet?: () => void;
 }
 
 function formatDateSeparator(dateStr: string): string {
@@ -184,6 +191,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onOpenContactSheet,
 }: MessageThreadProps) {
   const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
@@ -939,6 +947,21 @@ export function MessageThread({
               smaller laptops; this lets agents reclaim it when they just
               want to read and reply. Hidden on mobile, where the sidebar
               never renders as a permanent panel anyway. Issue #258. */}
+          {/* Mobile: mesmo conteúdo do painel, mas em drawer. O toggle
+              acima é lg-only, então sem este botão as ações de tag/
+              negócio/etapa não existiriam no celular. */}
+          {onOpenContactSheet && (
+            <button
+              type="button"
+              onClick={onOpenContactSheet}
+              aria-label="Ver detalhes do contato"
+              title="Detalhes do contato"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
+            >
+              <UserRound className="h-4 w-4" />
+            </button>
+          )}
+
           {onToggleContactPanel && (
             <button
               type="button"

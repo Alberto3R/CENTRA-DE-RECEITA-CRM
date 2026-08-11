@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -13,7 +13,9 @@ import type {
   DealStatus,
   PipelineStage,
   Profile,
+  Tag,
 } from "@/types";
+import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
 import {
   Sheet,
   SheetContent,
@@ -50,6 +52,14 @@ interface DealFormProps {
   pipelineId: string;
   stages: PipelineStage[];
   defaultStageId?: string;
+  /** Pre-selects the contact when creating a deal (used from the inbox). */
+  defaultContactId?: string;
+  /**
+   * Freezes the contact selection. Callers that already know the contact
+   * (the inbox sidebar) pass this so the form does not load every contact
+   * in the account just to render a dropdown the user must not change.
+   */
+  lockContact?: boolean;
   onSaved: () => void;
 }
 
@@ -60,6 +70,8 @@ export function DealForm({
   pipelineId,
   stages,
   defaultStageId,
+  defaultContactId,
+  lockContact = false,
   onSaved,
 }: DealFormProps) {
   const supabase = createClient();
@@ -76,8 +88,13 @@ export function DealForm({
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [contactTags, setContactTags] = useState<Tag[]>([]);
   const [linkedConversation, setLinkedConversation] =
     useState<Conversation | null>(null);
+
+  // Which contact the form is pinned to when `lockContact` is on. Derived
+  // from props (not state) so the load effect can depend on it directly.
+  const lockedContactId = deal?.contact_id ?? defaultContactId ?? null;
 
   const [saving, setSaving] = useState(false);
   const [statusAction, setStatusAction] = useState<DealStatus | null>(null);
@@ -110,13 +127,13 @@ export function DealForm({
       setTitle("");
       setValue("");
       setCurrency(defaultCurrency);
-      setContactId("");
+      setContactId(defaultContactId ?? "");
       setStageId(defaultStageId || stages[0]?.id || "");
       setAssignedTo("");
       setExpectedCloseDate("");
       setNotes("");
     }
-  }, [open, deal, defaultStageId, stages, defaultCurrency]);
+  }, [open, deal, defaultStageId, defaultContactId, stages, defaultCurrency]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Motivos de perda da conta (fallback: lista padrão do sistema).
@@ -148,8 +165,15 @@ export function DealForm({
     if (!open) return;
     let cancelled = false;
     (async () => {
+      // With the contact locked we only need the single selected row —
+      // loading the whole address book would be wasted work.
+      const contactsQuery =
+        lockContact && lockedContactId
+          ? supabase.from("contacts").select("*").eq("id", lockedContactId)
+          : supabase.from("contacts").select("*").order("name");
+
       const [c, p] = await Promise.all([
-        supabase.from("contacts").select("*").order("name"),
+        contactsQuery,
         supabase.from("profiles").select("*").order("full_name"),
       ]);
       if (cancelled) return;
@@ -159,7 +183,7 @@ export function DealForm({
     return () => {
       cancelled = true;
     };
-  }, [open, supabase]);
+  }, [open, supabase, lockContact, lockedContactId]);
 
   // Fetch linked conversation for the selected contact (newest open one).
   // Clearing on no-selection is sync with prop state; the populated
@@ -186,6 +210,35 @@ export function DealForm({
       cancelled = true;
     };
   }, [open, contactId, supabase]);
+
+  // Tags of the selected contact, for the inline picker below the contact
+  // field. Reloads whenever the selection changes.
+  useEffect(() => {
+    if (!open || !contactId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setContactTags([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("contact_tags")
+        .select("tags(*)")
+        .eq("contact_id", contactId);
+      if (cancelled) return;
+      // The generated types widen the embedded `tags` relation to an array;
+      // the FK is one-to-one, so a single row comes back.
+      const rows = (data ?? []) as unknown as { tags: Tag | null }[];
+      setContactTags(rows.map((r) => r.tags).filter((t): t is Tag => !!t));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, contactId, supabase]);
+
+  const handleTagsChange = useCallback((_ids: string[], nextTags: Tag[]) => {
+    setContactTags(nextTags);
+  }, []);
 
   async function handleSave() {
     if (!title.trim() || !contactId || !stageId) {
@@ -322,7 +375,8 @@ export function DealForm({
               <select
                 value={contactId}
                 onChange={(e) => setContactId(e.target.value)}
-                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                disabled={lockContact}
+                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <option value="">Selecione um contato</option>
                 {contacts.map((c) => (
@@ -372,6 +426,22 @@ export function DealForm({
                   <MessageSquare className="h-3 w-3" />
                   Ver conversa
                 </Link>
+              )}
+
+              {/* Tags do contato. Ficam na pessoa, não no negócio — o
+                  negócio já se classifica por etapa/pipeline/status. */}
+              {contactId && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <TagPills
+                    tags={contactTags}
+                    empty="Nenhuma tag neste contato"
+                  />
+                  <TagPicker
+                    contactId={contactId}
+                    selectedTagIds={contactTags.map((t) => t.id)}
+                    onChange={handleTagsChange}
+                  />
+                </div>
               )}
             </div>
 
