@@ -43,6 +43,20 @@ interface SendTemplateArgs {
   templateName: string
   language?: string
   params?: string[]
+  /**
+   * Quem assina a mensagem no inbox. Default 'bot', que é o certo para
+   * automação/fluxo. Mensagem agendada pelo vendedor passa 'agent' — foi
+   * uma pessoa que escreveu e escolheu a hora, e o balão precisa refletir
+   * isso para o time não achar que a IA respondeu sozinha.
+   */
+  senderType?: 'agent' | 'bot'
+  senderId?: string | null
+  /**
+   * Corpo já renderizado, gravado em messages.content_text. Sem isto o
+   * balão de template fica vazio no inbox (a coluna é null por padrão
+   * nesse caminho) e ninguém consegue ler o que foi enviado.
+   */
+  contentText?: string | null
 }
 
 interface SendDocumentArgs {
@@ -221,22 +235,28 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
 
   // Persist the sent message so it appears in the inbox with a real
   // Meta message id. sender_type='bot' distinguishes automation sends
-  // from manual agent sends.
+  // from manual agent sends — overridable for scheduled sends, which a
+  // human authored even though a worker delivered them.
   const content_type =
     input.kind === 'template' ? 'template' : input.kind === 'document' ? 'document' : 'text'
-  const content_text =
+  const defaultContentText =
     input.kind === 'text' ? input.text : input.kind === 'document' ? (input.caption ?? null) : null
+  const content_text =
+    input.kind === 'template' ? (input.contentText ?? null) : defaultContentText
   const template_name = input.kind === 'template' ? input.templateName : null
   const media_url = input.kind === 'document' ? input.link : null
+  const sender_type = input.kind === 'template' ? (input.senderType ?? 'bot') : 'bot'
+  const sender_id = input.kind === 'template' ? (input.senderId ?? null) : null
 
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,
-    sender_type: 'bot',
+    sender_type,
+    sender_id,
     content_type,
     content_text,
     template_name,
-    media_url,
     message_id: waMessageId,
+    media_url,
     status: 'sent',
   })
   if (msgErr) {
@@ -250,7 +270,9 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     .update({
       last_message_text:
         input.kind === 'template'
-          ? `[template:${input.templateName}]`
+          ? // Preferimos o corpo renderizado: na lista de conversas
+            // "[template:esfs_lm2_guia]" não diz nada a quem lê.
+            (input.contentText ?? `[template:${input.templateName}]`)
           : input.kind === 'document'
             ? input.caption || '[documento]'
             : input.text,
