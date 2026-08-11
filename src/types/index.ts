@@ -307,6 +307,21 @@ export interface MessageTemplate {
   created_at: string;
 }
 
+/**
+ * Resposta rápida: atalho de texto interno, acionado por "/" no compositor.
+ * Nada a ver com MessageTemplate (HSM da Meta) — não passa por aprovação e
+ * não reabre a janela de 24h.
+ */
+export interface QuickReply {
+  id: string;
+  account_id: string;
+  shortcut: string;
+  content: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Pipeline {
   id: string;
   user_id: string;

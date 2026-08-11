@@ -14,6 +14,7 @@ import { BillingSettings } from '@/components/settings/billing-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { InstagramSettings } from '@/components/settings/instagram-settings';
 import { TemplateManager } from '@/components/settings/template-manager';
+import { QuickRepliesSettings } from '@/components/settings/quick-replies-settings';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
@@ -83,6 +84,7 @@ export default function SettingsPage() {
     whatsapp: <WhatsAppConfig />,
     instagram: <InstagramSettings />,
     templates: <TemplateManager />,
+    'quick-replies': <QuickRepliesSettings />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
     'ai-agent': <AiAgentSettings />,

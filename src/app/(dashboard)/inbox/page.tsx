@@ -8,6 +8,12 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -52,6 +58,8 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  // Mobile-only drawer com o mesmo ContactSidebar (o rail some abaixo de lg).
+  const [contactSheetOpen, setContactSheetOpen] = useState(false);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -689,6 +697,7 @@ export default function InboxPage() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onOpenContactSheet={() => setContactSheetOpen(true)}
           />
         </div>
 
@@ -702,6 +711,18 @@ export default function InboxPage() {
           </div>
         )}
       </div>
+
+      {/* Mobile: o mesmo painel como drawer, aberto pelo botão de contato
+          no header do thread. Sem isto, tag / novo negócio / mudar etapa
+          só existiriam no desktop. */}
+      <Sheet open={contactSheetOpen} onOpenChange={setContactSheetOpen}>
+        <SheetContent side="right" className="w-[88vw] p-0 sm:w-100 lg:hidden">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Detalhes do contato</SheetTitle>
+          </SheetHeader>
+          <ContactSidebar contact={activeContact} inSheet />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

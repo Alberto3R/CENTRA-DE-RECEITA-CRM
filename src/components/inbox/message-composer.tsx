@@ -5,6 +5,7 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useMemo,
   KeyboardEvent,
 } from "react";
 import {
@@ -28,7 +29,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCan } from "@/hooks/use-can";
+import { useAuth } from "@/hooks/use-auth";
+import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import {
+  applyQuickReply,
+  filterQuickReplies,
+  findSlashQuery,
+  type SlashQuery,
+} from "@/lib/inbox/quick-replies";
+import type { QuickReply } from "@/types";
 import { toast } from "sonner";
 import {
   uploadAccountMedia,
@@ -129,6 +139,32 @@ export function MessageComposer({
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Respostas rápidas: catálogo da conta + estado do gatilho "/".
+  // `slash` é null quando o cursor não está dentro de um token /atalho.
+  const { accountId } = useAuth();
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [slash, setSlash] = useState<SlashQuery | null>(null);
+  const [highlight, setHighlight] = useState(0);
+
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("quick_replies")
+        .select("*")
+        .eq("account_id", accountId)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      setQuickReplies((data as QuickReply[] | null) ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
   const [draft, setDraft] = useState<MediaDraft | null>(null);
@@ -210,22 +246,86 @@ export function MessageComposer({
     }
   }, [text, sending, sessionExpired, onSend, replyTo?.id]);
 
+  // ─── Respostas rápidas ("/") ────────────────────────────────────────
+  const suggestions = useMemo(
+    () => (slash ? filterQuickReplies(quickReplies, slash.query) : []),
+    [slash, quickReplies],
+  );
+  const menuOpen = slash !== null && suggestions.length > 0;
+
+  /** Recalcula o gatilho a partir do estado atual do textarea. */
+  const syncSlash = useCallback((el: HTMLTextAreaElement) => {
+    const next = findSlashQuery(el.value, el.selectionStart ?? 0);
+    setSlash(next);
+    setHighlight(0);
+  }, []);
+
+  const insertQuickReply = useCallback(
+    (reply: QuickReply) => {
+      const el = textareaRef.current;
+      if (!el || !slash) return;
+      const caret = el.selectionStart ?? el.value.length;
+      const next = applyQuickReply(el.value, slash, caret, reply.content);
+
+      setText(next.text);
+      setSlash(null);
+      setHighlight(0);
+
+      // O caret só pode ser reposicionado depois que o React pintar o
+      // novo valor — senão o browser joga o cursor pro fim.
+      requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) return;
+        node.focus();
+        node.setSelectionRange(next.caret, next.caret);
+        adjustHeight();
+      });
+    },
+    [slash, adjustHeight],
+  );
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Com o menu aberto as teclas de navegação pertencem a ele. Enter
+      // seleciona a sugestão em vez de enviar a mensagem.
+      if (menuOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setHighlight((h) => (h + 1) % suggestions.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHighlight((h) => (h - 1 + suggestions.length) % suggestions.length);
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          insertQuickReply(suggestions[highlight] ?? suggestions[0]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlash(null);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, menuOpen, suggestions, highlight, insertQuickReply],
   );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
       adjustHeight();
+      syncSlash(e.target);
     },
-    [adjustHeight]
+    [adjustHeight, syncSlash],
   );
 
   // Upload a captured file to chat-media and stage it as a draft.
@@ -383,7 +483,42 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div className="relative border-t border-border bg-card p-3">
+      {/* Menu de respostas rápidas. Ancorado acima do compositor; a
+          seleção acontece no onMouseDown porque o onBlur do textarea
+          fecharia o menu antes de um onClick chegar. */}
+      {menuOpen && (
+        <div className="absolute bottom-full left-3 right-3 z-50 mb-1 overflow-hidden rounded-lg border border-border bg-popover shadow-md">
+          <div className="max-h-56 overflow-y-auto py-1">
+            {suggestions.map((r, i) => (
+              <button
+                key={r.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertQuickReply(r);
+                }}
+                onMouseEnter={() => setHighlight(i)}
+                className={cn(
+                  "flex w-full flex-col gap-0.5 px-3 py-1.5 text-left transition-colors",
+                  i === highlight ? "bg-muted" : "hover:bg-muted/50",
+                )}
+              >
+                <span className="text-xs font-medium text-popover-foreground">
+                  /{r.shortcut}
+                </span>
+                <span className="line-clamp-2 text-xs text-muted-foreground">
+                  {r.content}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-border px-3 py-1 text-[10px] text-muted-foreground">
+            ↑↓ navegar · Enter inserir · Esc fechar
+          </div>
+        </div>
+      )}
+
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -539,6 +674,10 @@ export function MessageComposer({
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            // Cliques e setas movem o cursor sem disparar onChange — sem
+            // isto o menu ficaria aberto depois de sair do token.
+            onSelect={(e) => syncSlash(e.currentTarget)}
+            onBlur={() => setSlash(null)}
             placeholder={
               readOnly
                 ? "Somente leitura — visualizadores podem navegar, mas não responder"
@@ -589,7 +728,9 @@ export function MessageComposer({
       {/* Hint sits outside the flex row so its height doesn't push
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge. */}
-      {!draft && !recording && (
+      {/* Só promete o atalho quando a conta tem respostas cadastradas —
+          antes disso o texto aparecia sempre e não levava a lugar nenhum. */}
+      {!draft && !recording && quickReplies.length > 0 && (
         <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
           Digite &apos;/&apos; para respostas rápidas
         </p>
