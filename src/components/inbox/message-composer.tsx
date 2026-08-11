@@ -19,6 +19,7 @@ import {
   Square,
   X,
   Loader2,
+  CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -107,6 +108,8 @@ interface MessageComposerProps {
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onOpenTemplates: () => void;
+  /** Abre o diálogo de agendar mensagem. Omitir esconde o botão. */
+  onOpenSchedule?: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
   /** Canal Instagram: esconde mídia e modelos (WhatsApp-only) — Fase 1 é
@@ -131,6 +134,7 @@ export function MessageComposer({
   onSend,
   onSendMedia,
   onOpenTemplates,
+  onOpenSchedule,
   replyTo,
   onClearReply,
   isInstagram = false,
@@ -696,6 +700,24 @@ export function MessageComposer({
               (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
             )}
           />
+
+          {/* Agendar — o vendedor combina uma data com o lead e engatilha
+              o toque. Nunca desabilitado por sessionExpired: o agendamento
+              usa template aprovado, que é justamente o que funciona fora
+              da janela de 24h. */}
+          {onOpenSchedule && (
+            <GatedButton
+              variant="ghost"
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              title={readOnly ? undefined : "Agendar mensagem"}
+              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={onOpenSchedule}
+            >
+              <CalendarClock className="h-4 w-4" />
+            </GatedButton>
+          )}
 
           {/* Microfone — atalho fixo pra mensagem de voz, do lado do enviar,
               na cor do tema (primary da conta). */}

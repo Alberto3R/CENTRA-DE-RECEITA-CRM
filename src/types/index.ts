@@ -312,6 +312,33 @@ export interface MessageTemplate {
  * Nada a ver com MessageTemplate (HSM da Meta) — não passa por aprovação e
  * não reabre a janela de 24h.
  */
+/**
+ * Mensagem agendada 1:1 pelo vendedor dentro da conversa. Sempre um
+ * template aprovado: o disparo acontece dias depois, quando a janela de
+ * 24h já fechou e a Meta recusa texto livre.
+ */
+export interface ScheduledMessage {
+  id: string;
+  account_id: string;
+  conversation_id: string;
+  contact_id: string;
+  channel_id: string | null;
+  template_name: string;
+  template_language: string;
+  template_params: string[];
+  /** Corpo já renderizado — o que o lead vai ler. */
+  preview: string;
+  scheduled_at: string;
+  status: 'pending' | 'sending' | 'sent' | 'failed' | 'canceled';
+  attempts: number;
+  error: string | null;
+  wa_message_id: string | null;
+  sent_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QuickReply {
   id: string;
   account_id: string;

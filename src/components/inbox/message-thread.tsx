@@ -51,6 +51,8 @@ import {
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
+import { ScheduleMessageDialog } from "./schedule-message-dialog";
+import { ScheduledMessagesBar } from "./scheduled-messages-bar";
 import { buildReplyPreview } from "./reply-quote";
 import {
   InstagramGlyph,
@@ -198,6 +200,9 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  // Bump depois de agendar, para a faixa de pendentes recarregar.
+  const [scheduleToken, setScheduleToken] = useState(0);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -1214,6 +1219,16 @@ export function MessageThread({
         )}
       </div>
 
+      {/* Agendamentos pendentes — acima do compositor, sempre visíveis.
+          Como não cancelamos automaticamente quando o lead responde, é
+          aqui que o vendedor vê o que está engatilhado e decide. */}
+      {!isInstagram && (
+        <ScheduledMessagesBar
+          conversationId={conversation.id}
+          refreshToken={scheduleToken}
+        />
+      )}
+
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
@@ -1221,6 +1236,10 @@ export function MessageThread({
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
+        // Agendamento é via template HSM — não existe no Instagram.
+        onOpenSchedule={
+          isInstagram || !contact ? undefined : () => setScheduleOpen(true)
+        }
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
         isInstagram={isInstagram}
@@ -1234,6 +1253,19 @@ export function MessageThread({
           (conversation as { channel_id?: string | null } | null)?.channel_id
         }
       />
+
+      {contact && (
+        <ScheduleMessageDialog
+          open={scheduleOpen}
+          onOpenChange={setScheduleOpen}
+          conversationId={conversation.id}
+          contactId={contact.id}
+          channelId={
+            (conversation as { channel_id?: string | null } | null)?.channel_id
+          }
+          onScheduled={() => setScheduleToken((t) => t + 1)}
+        />
+      )}
     </div>
   );
 }
