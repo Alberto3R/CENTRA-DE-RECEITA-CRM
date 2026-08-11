@@ -70,7 +70,10 @@ export function ScheduleMessageDialog({
   channelId,
   onScheduled,
 }: ScheduleMessageDialogProps) {
-  const { accountId } = useAuth();
+  // `profile.id` é a PK de profiles, que NÃO é o auth uid — created_by
+  // referencia profiles(id). Usar session.user.id aqui viola a FK e o
+  // insert falha inteiro.
+  const { accountId, profile } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
@@ -143,9 +146,6 @@ export function ScheduleMessageDialog({
     setSaving(true);
 
     const supabase = createClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
 
     const { error } = await supabase.from("scheduled_messages").insert({
       account_id: accountId,
@@ -157,12 +157,14 @@ export function ScheduleMessageDialog({
       template_params: bodyVars.map((_, i) => params[i] ?? ""),
       preview,
       scheduled_at: new Date(when).toISOString(),
-      created_by: session?.user?.id ?? null,
+      created_by: profile?.id ?? null,
     });
 
     setSaving(false);
     if (error) {
-      toast.error("Não foi possível agendar a mensagem.");
+      // Mostrar o motivo real: a mensagem genérica escondeu uma violação
+      // de FK e o agendamento falhava em silêncio para o vendedor.
+      toast.error(`Não foi possível agendar: ${error.message}`);
       return;
     }
     toast.success("Mensagem agendada.");
@@ -171,6 +173,7 @@ export function ScheduleMessageDialog({
   }, [
     selected,
     accountId,
+    profile?.id,
     whenValid,
     missingParam,
     conversationId,
