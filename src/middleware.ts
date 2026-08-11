@@ -82,12 +82,17 @@ export async function middleware(request: NextRequest) {
   }
 
   // API routes that need auth. Exceptions (autenticam por conta própria, sem
-  // sessão de usuário): o /webhook (verificação da Meta) e o /broadcast/process
-  // (dreno do worker, autenticado pelo segredo do cron via header).
+  // sessão de usuário): o /webhook (verificação da Meta) e os drenos de worker
+  // chamados pelo pg_cron, que se autenticam pelo segredo no header.
+  //
+  // ⚠️ Todo endpoint novo chamado por cron sob /api/whatsapp/ precisa entrar
+  // aqui. Sem isto o middleware devolve 401 antes da rota rodar — e o sintoma
+  // é idêntico ao de segredo errado, o que torna o diagnóstico enganoso.
   const precisaAuthApi =
     (request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook') &&
-      !request.nextUrl.pathname.includes('/broadcast/process')) ||
+      !request.nextUrl.pathname.includes('/broadcast/process') &&
+      !request.nextUrl.pathname.includes('/scheduled/process')) ||
     // /api/ccc/* (console do consultor) exige usuário logado, exceto o cron de
     // acompanhamento, que se autentica pelo próprio segredo via header.
     (request.nextUrl.pathname.startsWith('/api/ccc/') &&
