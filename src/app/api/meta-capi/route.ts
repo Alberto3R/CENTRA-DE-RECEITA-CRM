@@ -32,7 +32,23 @@ const WABA = '824812527258696' // canal cujo system user token gerencia o pixel
 
 // 'LeadQualificado' é evento próprio: só dispara para quem bate o ICP. Serve
 // para a campanha otimizar pelo lead que a gente QUER, não por lead qualquer.
-const EVENTOS_OK = new Set(['PageView', 'ViewContent', 'Lead', 'LeadQualificado'])
+//
+// 'Schedule' é o padrão da Meta para "compromisso agendado" — o sinal de fundo
+// de funil mais valioso que a gente tem. Ele NÃO pode vir pelo caminho do
+// `fireConversion` (lib/conversions/capi.ts), porque aquele exige `ctwa_clid` e
+// só existe para lead de Click-to-WhatsApp; lead vindo de landing tem `fbclid` e
+// era descartado com `no_ctwa_clid` — na prática a Meta nunca soube de nenhuma
+// reunião marcada. Aqui ele entra pelo mesmo caminho que já funciona (website +
+// telefone/e-mail hasheados). 'LeadSubmitted' fica aceito por compatibilidade
+// com o `capi_event` configurado na etapa "Raio-X agendado".
+const EVENTOS_OK = new Set([
+  'PageView',
+  'ViewContent',
+  'Lead',
+  'LeadQualificado',
+  'Schedule',
+  'LeadSubmitted',
+])
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _admin: any = null
