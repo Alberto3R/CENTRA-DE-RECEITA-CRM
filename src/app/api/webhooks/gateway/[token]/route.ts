@@ -160,6 +160,34 @@ async function tagContact(
   await db.from('contact_tags').insert({ contact_id: contactId, tag_id: tagId })
 }
 
+// Vínculo de tag JÁ EXISTENTE (a escolhida na config do webhook). Diferente
+// do tagContact acima, que casa por nome e cria se faltar: aqui o id veio de
+// um seletor, então não há o que criar nem por que arriscar casar errado —
+// `tags` não tem unique em (account_id, name) e o ilike pode pegar a gêmea.
+async function tagContactById(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  accountId: string,
+  contactId: string,
+  tagId: string | null | undefined,
+) {
+  if (!tagId) return
+  // Confere que a tag é DESTA conta antes de vincular. A config é escrita
+  // por admin da conta, mas contact_tags não tem account_id — sem esta
+  // checagem um id trocado viraria vínculo cross-tenant silencioso.
+  const { data: tag } = await db
+    .from('tags')
+    .select('id')
+    .eq('id', tagId)
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (!tag) {
+    console.warn('[gateway] default_tag_id não pertence à conta; ignorado')
+    return
+  }
+  await db.from('contact_tags').insert({ contact_id: contactId, tag_id: tagId })
+}
+
 // Dispara o template aprovado de recuperação (ex.: eqv_pix_pendente) pro
 // lead com PIX pendente. Convenção do template: corpo {{1}} = primeiro nome;
 // botão URL {{1}} = id do produto (link de finalizar o pagamento). O agente
@@ -396,6 +424,11 @@ export async function POST(
   const productTag = str(product.name)
   await tagContact(db, cfg.account_id, ownerId, contactId, productTag)
 
+  // Tag fixa da configuração: identifica de qual webhook o lead veio.
+  // Aplicada a TODO lead deste webhook, independente do evento e de o
+  // negócio ser criado, atualizado ou nem tocado.
+  await tagContactById(db, cfg.account_id, contactId, cfg.default_tag_id)
+
   // Recuperação de venda (PIX pendente): tag "Recuperação" + dispara o
   // template aprovado; o agente da conta assume quando a pessoa responde.
   const isRecovery = currentStatus === 'waiting_payment' || /waiting|pix|pend|billet/i.test(eventKey)
@@ -427,23 +460,45 @@ export async function POST(
   // gerar vários eventos (abandonou → comprou). Mantemos UM negócio aberto
   // por contato no funil e só AVANÇAMOS de etapa (nunca puxamos pra trás —
   // nem por evento, nem desfazendo um avanço manual do time).
+  //
+  // deal_mode / keep_stage vêm da configuração do webhook:
+  //   update_or_create (padrão) — atualiza o aberto, cria se não houver;
+  //   update_only               — nunca abre negócio novo;
+  //   always_create             — sempre abre um novo, sem procurar.
+  // keep_stage congela a etapa do negócio existente: o lead que já está no
+  // funil fica onde está e só recebe a tag.
+  const dealMode = str(cfg.deal_mode) ?? 'update_or_create'
+  const keepStage = cfg.keep_stage === true
+
   const { data: targetStage } = await db
     .from('pipeline_stages').select('position').eq('id', target).maybeSingle()
 
-  const { data: openDeal } = await db
-    .from('deals')
-    .select('id, stage_id')
-    .eq('account_id', cfg.account_id)
-    .eq('pipeline_id', pipelineId)
-    .eq('contact_id', contactId)
-    .eq('status', 'open')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const openDeal =
+    dealMode === 'always_create'
+      ? null
+      : (
+          await db
+            .from('deals')
+            .select('id, stage_id, value')
+            .eq('account_id', cfg.account_id)
+            .eq('pipeline_id', pipelineId)
+            .eq('contact_id', contactId)
+            .eq('status', 'open')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        ).data
+
+  const amount =
+    typeof sale.amount === 'number'
+      ? sale.amount
+      : typeof product.amount === 'number'
+        ? product.amount
+        : 0
 
   if (openDeal) {
     let advanced = false
-    if (targetStage) {
+    if (targetStage && !keepStage) {
       const { data: curStage } = await db
         .from('pipeline_stages').select('position').eq('id', openDeal.stage_id).maybeSingle()
       if (curStage && targetStage.position > curStage.position) {
@@ -454,6 +509,17 @@ export async function POST(
         advanced = true
       }
     }
+
+    // Atualiza o negócio com o que o evento trouxe. Só PREENCHE o valor
+    // quando ainda está zerado — mesma regra do patch de nome/e-mail do
+    // contato: a integração completa lacuna, não sobrescreve o que uma
+    // pessoa do time já ajustou à mão.
+    const patch: Record<string, unknown> = {
+      notes: `Gateway ${cfg.provider} · pedido ${orderId} · ${eventKey}${str(sale.method) ? ` · ${sale.method}` : ''}`,
+      updated_at: new Date().toISOString(),
+    }
+    if (amount > 0 && Number(openDeal.value ?? 0) === 0) patch.value = amount
+    await db.from('deals').update(patch).eq('id', openDeal.id)
     // Rotula o evento de mudança de etapa (gravado pelo trigger) com a origem
     // da integração — vira "Mudou de etapa … via Hotmart: compra aprovada".
     if (advanced) {
@@ -484,17 +550,37 @@ export async function POST(
       }
     }
     return NextResponse.json(
-      { ok: true, action: eventKey, contact_id: contactId, deal_id: openDeal.id, advanced, tag: productTag },
+      {
+        ok: true,
+        action: eventKey,
+        contact_id: contactId,
+        deal_id: openDeal.id,
+        updated: true,
+        advanced,
+        stage_kept: keepStage,
+        tag: productTag,
+      },
       { status: 200 },
     )
   }
 
-  const amount =
-    typeof sale.amount === 'number'
-      ? sale.amount
-      : typeof product.amount === 'number'
-        ? product.amount
-        : 0
+  // Não há negócio aberto. Em update_only a integração para aqui de
+  // propósito: o contato foi criado e tagueado, mas abrir negócio é
+  // decisão do time, não do gateway.
+  if (dealMode === 'update_only') {
+    return NextResponse.json(
+      {
+        ok: true,
+        action: eventKey,
+        contact_id: contactId,
+        deal_id: null,
+        created: false,
+        reason: 'update_only',
+        tag: productTag,
+      },
+      { status: 200 },
+    )
+  }
   const { data: deal } = await db
     .from('deals')
     .insert({

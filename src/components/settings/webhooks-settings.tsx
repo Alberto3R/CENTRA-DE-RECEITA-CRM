@@ -44,6 +44,9 @@ interface Cfg {
   enabled: boolean;
   recovery_template: string | null;
   auto_route_by_name: boolean;
+  default_tag_id: string | null;
+  deal_mode: "update_or_create" | "update_only" | "always_create";
+  keep_stage: boolean;
 }
 
 function newToken() {
@@ -60,6 +63,7 @@ export function WebhooksSettings() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [configs, setConfigs] = useState<Cfg[]>([]);
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Cfg | null>(null);
   const [saving, setSaving] = useState(false);
@@ -68,14 +72,16 @@ export function WebhooksSettings() {
   const load = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
-    const [{ data: ps }, { data: ss }, { data: cs }] = await Promise.all([
+    const [{ data: ps }, { data: ss }, { data: cs }, { data: tg }] = await Promise.all([
       supabase.from("pipelines").select("id, name").eq("account_id", accountId).order("name"),
       supabase.from("pipeline_stages").select("id, name, position, pipeline_id").order("position"),
       supabase.from("gateway_webhook_config").select("*").eq("account_id", accountId).order("created_at"),
+      supabase.from("tags").select("id, name").eq("account_id", accountId).order("name"),
     ]);
     setPipelines((ps as Pipeline[]) ?? []);
     setStages((ss as Stage[]) ?? []);
     setConfigs((cs as Cfg[]) ?? []);
+    setTags((tg as { id: string; name: string }[]) ?? []);
     setLoading(false);
   }, [accountId, supabase]);
 
@@ -101,6 +107,9 @@ export function WebhooksSettings() {
       enabled: true,
       recovery_template: "",
       auto_route_by_name: false,
+      default_tag_id: null,
+      deal_mode: "update_or_create",
+      keep_stage: false,
     });
   }
 
@@ -175,6 +184,9 @@ export function WebhooksSettings() {
       enabled: editing.enabled,
       recovery_template: editing.recovery_template?.trim() || null,
       auto_route_by_name: editing.auto_route_by_name,
+      default_tag_id: editing.default_tag_id,
+      deal_mode: editing.deal_mode,
+      keep_stage: editing.keep_stage,
     };
     const { error } = editing.id
       ? await supabase.from("gateway_webhook_config").update(row).eq("id", editing.id)
@@ -418,6 +430,86 @@ export function WebhooksSettings() {
                     </span>
                   </span>
                 </label>
+
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Identificação e negócio
+                  </p>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground">
+                      Marcar o lead com a tag
+                    </Label>
+                    <select
+                      value={editing.default_tag_id ?? ""}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          default_tag_id: e.target.value || null,
+                        })
+                      }
+                      className={selectCls}
+                    >
+                      <option value="">Nenhuma</option>
+                      {tags.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      Aplicada a todo lead que entrar por este webhook, mesmo
+                      quando o negócio não é criado nem movido.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground">
+                      Quando o lead já tem negócio no funil
+                    </Label>
+                    <select
+                      value={editing.deal_mode}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          deal_mode: e.target.value as Cfg["deal_mode"],
+                        })
+                      }
+                      className={selectCls}
+                    >
+                      <option value="update_or_create">
+                        Atualizar o existente, ou criar se não houver
+                      </option>
+                      <option value="update_only">
+                        Somente atualizar — nunca criar negócio novo
+                      </option>
+                      <option value="always_create">
+                        Sempre criar um negócio novo
+                      </option>
+                    </select>
+                  </div>
+
+                  <label className="flex items-start gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={editing.keep_stage}
+                      disabled={editing.deal_mode === "always_create"}
+                      onChange={(e) =>
+                        setEditing({ ...editing, keep_stage: e.target.checked })
+                      }
+                      className="mt-0.5 size-4 accent-[var(--primary)] disabled:opacity-50"
+                    />
+                    <span>
+                      Manter a etapa atual
+                      <span className="block text-xs text-muted-foreground">
+                        O lead que já está no funil fica onde está — o webhook
+                        só aplica a tag, sem empurrar ele de etapa por baixo do
+                        time. Não vale para negócio novo, que sempre entra na
+                        etapa mapeada.
+                      </span>
+                    </span>
+                  </label>
+                </div>
 
                 <label className="flex items-center gap-2 text-sm text-foreground">
                   <input
