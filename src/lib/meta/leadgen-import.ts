@@ -10,6 +10,7 @@
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { notifyTeamNewLead } from '@/lib/notifications/lead-alert'
+import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
@@ -84,6 +85,75 @@ function classifyVSC(fields: Record<string, string>): 'verde' | 'amarelo' | 'ver
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
+
+// Abertura imediata do lead de formulário nativo.
+//
+// A `diag-cadencia` só roda de hora em hora e ainda espera 2h antes do
+// primeiro toque — carência que existe para não atropelar a abertura que o
+// intake do quiz já enfileira. Lead de formulário nativo não tem intake, então
+// essa espera era só atraso: até 3h para falar com quem acabou de levantar a
+// mão em um anúncio pago.
+//
+// Aqui a abertura é enfileirada no ato do cadastro; o `broadcast-drain`
+// (pg_cron, 1 min) envia. O nome do broadcast segue o padrão que a cadência lê
+// (`Diag abertura · nome · contact_id`), então ela conta este envio como toque
+// 1 e continua do toque 2 — sem mensagem repetida.
+const TPL_ABERTURA_LEADGEN = 'diag_toque3_consultoria'
+
+async function enfileiraAbertura(
+  db: Db,
+  accountId: string,
+  ownerId: string,
+  contactId: string,
+  nomeCompleto: string,
+): Promise<string> {
+  const canal = await resolveChannelConfig(db, accountId)
+  if (!canal?.id) return 'sem_canal'
+
+  const { data: tpl } = await db
+    .from('message_templates')
+    .select('status')
+    .eq('channel_id', canal.id)
+    .eq('language', 'pt_BR')
+    .eq('name', TPL_ABERTURA_LEADGEN)
+    .maybeSingle()
+  if ((tpl as { status?: string } | null)?.status !== 'APPROVED') return 'template_nao_aprovado'
+
+  const nome = String(nomeCompleto || '').split(/\s+/)[0] || 'tudo bem'
+  const { data: bc, error } = await db
+    .from('broadcasts')
+    .insert({
+      account_id: accountId,
+      user_id: ownerId,
+      channel_id: canal.id,
+      name: `Diag abertura · ${nome} · ${contactId}`,
+      template_name: TPL_ABERTURA_LEADGEN,
+      template_language: 'pt_BR',
+      template_variables: { '1': { type: 'static', value: nome } },
+      status: 'draft',
+      total_recipients: 1,
+      sent_count: 0,
+      delivered_count: 0,
+      read_count: 0,
+      replied_count: 0,
+      failed_count: 0,
+    })
+    .select('id')
+    .single()
+  if (error || !bc) return 'erro_broadcast'
+
+  await db.from('broadcast_recipients').insert({
+    broadcast_id: (bc as { id: string }).id,
+    contact_id: contactId,
+    status: 'pending',
+  })
+  // scheduled_at no passado = o drain pega na próxima passada (até 1 min)
+  await db
+    .from('broadcasts')
+    .update({ status: 'scheduled', scheduled_at: new Date(Date.now() - 60000).toISOString() })
+    .eq('id', (bc as { id: string }).id)
+  return 'abertura_enfileirada'
+}
 
 // token do system user (cifrado no canal) → page access token
 export async function pageToken(db: Db, pageId: string): Promise<string | null> {
@@ -362,6 +432,12 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     classificacao: fit,
     raw: { leadgen_id: lead.id, ...answers },
   })
+
+  // Abertura no ato, só para o funil de formulário nativo. O CCC segue como
+  // estava (quem fala com ele é a esteira própria dele).
+  if (gate === 'vsc' && phone && contactId && ownerId) {
+    await enfileiraAbertura(db, route.accountId, ownerId, contactId, name).catch(() => {})
+  }
 
   // Alerta para TODO lead novo, inclusive vermelho. Antes só verde/amarelo
   // avisavam, e o lead fora do gate entrava mudo — a gente só descobria
