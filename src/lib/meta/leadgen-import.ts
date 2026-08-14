@@ -34,6 +34,54 @@ const STAGE_BY_FIT: Record<string, string> = {
   vermelho: 'Off-gate / Perdido',
 }
 
+// Rota por CAMPANHA — precisa vir antes da rota por página, porque a mesma
+// página (Alberto Oliveira) serve mais de uma campanha com formulários
+// diferentes. Sem isso, o lead do VSC caía no gate do CCC, que lê perguntas
+// que o formulário do VSC não tem, e ia parar num estágio que a cadência de
+// WhatsApp não varre — ou seja, ninguém falava com ele.
+const CAMPAIGN_ROUTES: Record<
+  string,
+  { pipeline: string; stage: string; origem: string; gate: 'ccc' | 'vsc' }
+> = {
+  // VSC · Formulário Nativo | Leads (ABO)
+  '120249257494000447': {
+    pipeline: 'Tráfego Pago',
+    // "Prospecção" é o único estágio que a diag-cadencia varre. Todo lead
+    // entra aqui, inclusive fora do ICP: o fit fica registrado nas notas,
+    // mas ninguém é enterrado num estágio silencioso.
+    stage: 'Prospecção',
+    origem: 'meta-leadform-vsc',
+    gate: 'vsc',
+  },
+}
+
+// O formulário do VSC foi montado pela interface, então a Meta gerou os
+// nomes dos campos sozinha (algo como "quantos_vendedores_voce_tem_hoje").
+// Casar por pedaço do nome em vez de nome exato evita depender desse slug.
+function acha(fields: Record<string, string>, ...termos: string[]): string {
+  for (const [k, v] of Object.entries(fields)) {
+    const chave = k.toLowerCase()
+    if (termos.some((t) => chave.includes(t))) return v
+  }
+  return ''
+}
+
+// Gate do VSC: o ICP é dono com time e volume. Sem time e sem faturamento,
+// é autônomo — entra, mas marcado.
+function classifyVSC(fields: Record<string, string>): 'verde' | 'amarelo' | 'vermelho' {
+  const vend = acha(fields, 'vendedor')
+  const fat = acha(fields, 'faturamento')
+  const oport = acha(fields, 'oportunidade')
+  const semTime = vend.startsWith('Só eu')
+  const fatBaixo = fat.startsWith('Até')
+  if (semTime && fatBaixo) return 'vermelho'
+  const timeReal = vend.startsWith('2 a 4') || vend.startsWith('5 ou mais')
+  const fatReal = !fatBaixo && fat !== ''
+  const volume = !oport.startsWith('Até 50') && oport !== ''
+  if (timeReal && fatReal && volume) return 'verde'
+  return 'amarelo'
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
@@ -161,14 +209,31 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
   const name = fields.full_name ?? 'Lead (Form Meta)'
   const email = fields.email ?? null
   const phoneRaw = fields.phone_number ?? null
-  const answers = {
-    vendedores: fields.vendedores ?? null,
-    usa_crm: fields.usa_crm ?? null,
-    faturamento: fields.faturamento ?? null,
-    origem_leads: fields.origem_leads ?? null,
-    quando: fields.quando ?? null,
-  }
-  const fit = classify(fields)
+  // campanha manda; página é o fallback (comportamento antigo, CCC)
+  const campanha = lead.campaign_id ? CAMPAIGN_ROUTES[String(lead.campaign_id)] : undefined
+  const gate = campanha?.gate ?? 'ccc'
+  const origem = campanha?.origem ?? route.origem
+  const pipelineNome = campanha?.pipeline ?? route.pipeline
+
+  const answers =
+    gate === 'vsc'
+      ? {
+          vendedores: acha(fields, 'vendedor') || null,
+          faturamento: acha(fields, 'faturamento') || null,
+          oportunidades: acha(fields, 'oportunidade') || null,
+          usa_crm: null,
+          origem_leads: null,
+          quando: null,
+        }
+      : {
+          vendedores: fields.vendedores ?? null,
+          usa_crm: fields.usa_crm ?? null,
+          faturamento: fields.faturamento ?? null,
+          origem_leads: fields.origem_leads ?? null,
+          quando: fields.quando ?? null,
+          oportunidades: null,
+        }
+  const fit = gate === 'vsc' ? classifyVSC(fields) : classify(fields)
 
   const [{ data: acc }, { data: pipeline }] = await Promise.all([
     db
@@ -180,7 +245,7 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
       .from('pipelines')
       .select('id')
       .eq('account_id', route.accountId)
-      .eq('name', route.pipeline)
+      .eq('name', pipelineNome)
       .maybeSingle(),
   ])
   const ownerId = (acc as { owner_user_id?: string } | null)?.owner_user_id
@@ -191,7 +256,7 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     .from('pipeline_stages')
     .select('id')
     .eq('pipeline_id', pipelineId)
-    .eq('name', STAGE_BY_FIT[fit])
+    .eq('name', campanha?.stage ?? STAGE_BY_FIT[fit])
     .maybeSingle()
   const stageId = (stage as { id?: string } | null)?.id ?? null
 
@@ -240,14 +305,24 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     }
   }
 
-  const resumo = [
-    `Formulário Meta (CCC) · fit ${fit.toUpperCase()}`,
-    `Vendedores: ${answers.vendedores ?? '—'}`,
-    `CRM: ${answers.usa_crm ?? '—'}`,
-    `Faturamento/mês: ${answers.faturamento ?? '—'}`,
-    `Origem dos leads: ${answers.origem_leads ?? '—'}`,
-    `Quando: ${answers.quando ?? '—'}`,
-  ].join('\n')
+  const rotulo = gate === 'vsc' ? 'VSC' : 'CCC'
+  const resumo = (
+    gate === 'vsc'
+      ? [
+          `Formulário Meta (VSC) · fit ${fit.toUpperCase()}`,
+          `Vendedores: ${answers.vendedores ?? '—'}`,
+          `Faturamento/mês: ${answers.faturamento ?? '—'}`,
+          `Oportunidades/mês: ${answers.oportunidades ?? '—'}`,
+        ]
+      : [
+          `Formulário Meta (CCC) · fit ${fit.toUpperCase()}`,
+          `Vendedores: ${answers.vendedores ?? '—'}`,
+          `CRM: ${answers.usa_crm ?? '—'}`,
+          `Faturamento/mês: ${answers.faturamento ?? '—'}`,
+          `Origem dos leads: ${answers.origem_leads ?? '—'}`,
+          `Quando: ${answers.quando ?? '—'}`,
+        ]
+  ).join('\n')
   const { data: deal } = await db
     .from('deals')
     .insert({
@@ -256,7 +331,7 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
       pipeline_id: pipelineId,
       stage_id: stageId,
       contact_id: contactId,
-      title: `${name} — Form Meta CCC (${fit})`,
+      title: `${name} — Form Meta ${rotulo} (${fit})`,
       status: 'open',
       currency: (acc as { default_currency?: string } | null)?.default_currency ?? 'BRL',
       notes: resumo,
@@ -288,15 +363,22 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     raw: { leadgen_id: lead.id, ...answers },
   })
 
-  if ((fit === 'verde' || fit === 'amarelo') && phone) {
+  // Alerta para TODO lead novo, inclusive vermelho. Antes só verde/amarelo
+  // avisavam, e o lead fora do gate entrava mudo — a gente só descobria
+  // abrindo o CRM. Se pagamos pelo lead, ele merece pelo menos um aviso.
+  if (phone) {
     await notifyTeamNewLead({
       supabase: db,
       accountId: route.accountId,
       nome: name,
       whatsapp: phone,
       status: fit,
-      origem: 'Formulário Meta (CCC)',
+      origem: `Formulário Meta (${rotulo})`,
       faturamento: answers.faturamento,
+      resumo:
+        gate === 'vsc'
+          ? `Vendedores: ${answers.vendedores ?? '—'} • faturamento/mês: ${answers.faturamento ?? '—'} • oportunidades/mês: ${answers.oportunidades ?? '—'}`
+          : null,
     }).catch(() => {})
   }
   return `imported_${fit}`
