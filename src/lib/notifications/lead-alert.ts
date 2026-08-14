@@ -25,6 +25,9 @@ export async function notifyTeamNewLead(params: {
   faturamento?: string | null
   awareness?: string | null
   angulo?: string | null
+  // Quando informado, substitui o {{2}} inteiro. Serve para funis cujas
+  // perguntas não são faturamento/consciência/ângulo (ex.: VSC).
+  resumo?: string | null
 }): Promise<{ ok: boolean; reason?: string }> {
   const { supabase, accountId } = params
 
@@ -43,7 +46,10 @@ export async function notifyTeamNewLead(params: {
 
   const dash = (v?: string | null) => (v && v.trim() ? v.trim() : '—')
   const param1 = `${dash(params.nome)} • ${dash(params.whatsapp)} • ${dash(params.status)} (origem: ${dash(params.origem) === '—' ? 'funil2' : params.origem})`
-  const param2 = `Faturamento ${dash(params.faturamento)} • consciência: ${dash(params.awareness)} • ângulo ${dash(params.angulo)}`
+  const param2 =
+    params.resumo && params.resumo.trim()
+      ? params.resumo.trim()
+      : `Faturamento ${dash(params.faturamento)} • consciência: ${dash(params.awareness)} • ângulo ${dash(params.angulo)}`
 
   try {
     const res = await fetch(`${GRAPH}/${wa.phone_number_id}/messages`, {
