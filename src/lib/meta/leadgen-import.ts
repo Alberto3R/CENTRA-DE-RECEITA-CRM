@@ -299,7 +299,16 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
   }
   const name = fields.full_name ?? 'Lead (Form Meta)'
   const email = fields.email ?? null
-  const phoneRaw = fields.phone_number ?? null
+  // ⚠️ O campo de telefone NÃO se chama sempre `phone_number`. No formulário do
+  // VSC, montado pela interface com o campo "Número do WhatsApp", a Meta manda
+  // `número_do_whatsapp`. Ler só `phone_number` deixava os 4 primeiros leads
+  // sem telefone — e sem telefone não sai abertura, não sai alerta e a
+  // cadência ignora o lead. Procura por nome e, em último caso, pelo formato.
+  const phoneRaw =
+    fields.phone_number ||
+    acha(fields, 'whats', 'telefone', 'phone', 'celular') ||
+    Object.values(fields).find((v) => /^\+?\d[\d\s()-]{9,}$/.test(String(v || ''))) ||
+    null
   // formulário manda; página é o fallback (comportamento antigo, CCC)
   const funil = lead.form_id ? FORM_ROUTES[String(lead.form_id)] : undefined
   const gate = funil?.gate ?? 'ccc'
