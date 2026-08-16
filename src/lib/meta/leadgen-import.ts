@@ -35,17 +35,21 @@ const STAGE_BY_FIT: Record<string, string> = {
   vermelho: 'Off-gate / Perdido',
 }
 
-// Rota por CAMPANHA — precisa vir antes da rota por página, porque a mesma
-// página (Alberto Oliveira) serve mais de uma campanha com formulários
-// diferentes. Sem isso, o lead do VSC caía no gate do CCC, que lê perguntas
-// que o formulário do VSC não tem, e ia parar num estágio que a cadência de
-// WhatsApp não varre — ou seja, ninguém falava com ele.
-const CAMPAIGN_ROUTES: Record<
+// Rota por FORMULÁRIO — precisa vir antes da rota por página, porque a mesma
+// página (Alberto Oliveira) serve mais de um funil com formulários diferentes.
+// Sem isso, o lead do VSC caía no gate do CCC, que lê perguntas que o
+// formulário do VSC não tem, e ia parar num estágio que a cadência de WhatsApp
+// não varre — ou seja, ninguém falava com ele.
+//
+// ⚠️ Roteia por form_id, NÃO por campaign_id: a Graph devolve `campaign_id`
+// nulo nos leads deste funil (verificado em 16/ago com 3 leads reais), então
+// rota por campanha nunca casa. `form_id` sempre vem.
+const FORM_ROUTES: Record<
   string,
   { pipeline: string; stage: string; origem: string; gate: 'ccc' | 'vsc' }
 > = {
-  // VSC · Formulário Nativo | Leads (ABO)
-  '120249257494000447': {
+  // VSC | Diagnóstico Comercial v2
+  '1599462141560144': {
     pipeline: 'Tráfego Pago',
     // "Prospecção" é o único estágio que a diag-cadencia varre. Todo lead
     // entra aqui, inclusive fora do ICP: o fit fica registrado nas notas,
@@ -56,29 +60,46 @@ const CAMPAIGN_ROUTES: Record<
   },
 }
 
-// O formulário do VSC foi montado pela interface, então a Meta gerou os
-// nomes dos campos sozinha (algo como "quantos_vendedores_voce_tem_hoje").
-// Casar por pedaço do nome em vez de nome exato evita depender desse slug.
+// O formulário do VSC foi montado pela interface, então a Meta gerou os nomes
+// dos campos sozinha ("quantos_vendedores_você_tem_hoje?") e devolve a resposta
+// como slug ("só_eu", "até_r$_50_mil"), não como o texto da opção. Casar por
+// pedaço do nome, e comparar sem acento/underscore, evita depender disso.
 function acha(fields: Record<string, string>, ...termos: string[]): string {
   for (const [k, v] of Object.entries(fields)) {
-    const chave = k.toLowerCase()
-    if (termos.some((t) => chave.includes(t))) return v
+    if (termos.some((t) => norm(k).includes(t))) return v
   }
   return ''
+}
+
+// "Até R$ 50 mil" e "até_r$_50_mil" precisam bater no mesmo lugar.
+function norm(s: string): string {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Slug da Meta → algo legível para as notas e o alerta.
+function legivel(v: string): string {
+  const t = String(v || '').replace(/_/g, ' ').trim()
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''
 }
 
 // Gate do VSC: o ICP é dono com time e volume. Sem time e sem faturamento,
 // é autônomo — entra, mas marcado.
 function classifyVSC(fields: Record<string, string>): 'verde' | 'amarelo' | 'vermelho' {
-  const vend = acha(fields, 'vendedor')
-  const fat = acha(fields, 'faturamento')
-  const oport = acha(fields, 'oportunidade')
-  const semTime = vend.startsWith('Só eu')
-  const fatBaixo = fat.startsWith('Até')
+  const vend = norm(acha(fields, 'vendedor'))
+  const fat = norm(acha(fields, 'faturamento'))
+  const oport = norm(acha(fields, 'oportunidade'))
+  const semTime = vend.startsWith('so eu')
+  const fatBaixo = fat.startsWith('ate')
   if (semTime && fatBaixo) return 'vermelho'
   const timeReal = vend.startsWith('2 a 4') || vend.startsWith('5 ou mais')
   const fatReal = !fatBaixo && fat !== ''
-  const volume = !oport.startsWith('Até 50') && oport !== ''
+  const volume = !oport.startsWith('ate 50') && oport !== ''
   if (timeReal && fatReal && volume) return 'verde'
   return 'amarelo'
 }
@@ -279,18 +300,18 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
   const name = fields.full_name ?? 'Lead (Form Meta)'
   const email = fields.email ?? null
   const phoneRaw = fields.phone_number ?? null
-  // campanha manda; página é o fallback (comportamento antigo, CCC)
-  const campanha = lead.campaign_id ? CAMPAIGN_ROUTES[String(lead.campaign_id)] : undefined
-  const gate = campanha?.gate ?? 'ccc'
-  const origem = campanha?.origem ?? route.origem
-  const pipelineNome = campanha?.pipeline ?? route.pipeline
+  // formulário manda; página é o fallback (comportamento antigo, CCC)
+  const funil = lead.form_id ? FORM_ROUTES[String(lead.form_id)] : undefined
+  const gate = funil?.gate ?? 'ccc'
+  const origem = funil?.origem ?? route.origem
+  const pipelineNome = funil?.pipeline ?? route.pipeline
 
   const answers =
     gate === 'vsc'
       ? {
-          vendedores: acha(fields, 'vendedor') || null,
-          faturamento: acha(fields, 'faturamento') || null,
-          oportunidades: acha(fields, 'oportunidade') || null,
+          vendedores: legivel(acha(fields, 'vendedor')) || null,
+          faturamento: legivel(acha(fields, 'faturamento')) || null,
+          oportunidades: legivel(acha(fields, 'oportunidade')) || null,
           usa_crm: null,
           origem_leads: null,
           quando: null,
@@ -326,7 +347,7 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     .from('pipeline_stages')
     .select('id')
     .eq('pipeline_id', pipelineId)
-    .eq('name', campanha?.stage ?? STAGE_BY_FIT[fit])
+    .eq('name', funil?.stage ?? STAGE_BY_FIT[fit])
     .maybeSingle()
   const stageId = (stage as { id?: string } | null)?.id ?? null
 
