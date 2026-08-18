@@ -1,4 +1,7 @@
-import { uploadResumableMedia } from '@/lib/whatsapp/meta-api';
+import {
+  resolveAppIdFromToken,
+  uploadResumableMedia,
+} from '@/lib/whatsapp/meta-api';
 import { isMetaHandleUrl } from '@/lib/whatsapp/media-url';
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators';
 
@@ -76,10 +79,15 @@ export async function ensureMediaHeaderHandle(
     );
   }
 
-  const appId = process.env.META_APP_ID;
+  // O app do Resumable Upload tem de ser o mesmo em que o token do canal
+  // foi emitido, e cada conta do CRM traz o app dela — por isso o padrão
+  // é perguntar à Meta a quem o token pertence. META_APP_ID continua
+  // valendo como override manual (deploys de instância única).
+  const appId =
+    process.env.META_APP_ID || (await resolveAppIdFromToken(accessToken));
   if (!appId) {
     throw new Error(
-      `${headerType}-header templates need META_APP_ID set (used for Meta’s Resumable Upload). Add it to your environment, or remove the ${headerType} header.`
+      `Não foi possível identificar o app da Meta deste canal (necessário para enviar o ${headerType} do cabeçalho). Reconecte o canal do WhatsApp ou defina META_APP_ID no ambiente.`
     );
   }
 

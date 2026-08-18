@@ -774,6 +774,44 @@ export interface UploadResumableMediaArgs {
  * handle to use as `example.header_handle` when creating/editing a
  * template with a media header.
  */
+/**
+ * Descobre o App ID dono de um access token, perguntando à própria Meta.
+ *
+ * O Resumable Upload precisa do app em que o token foi emitido — enviar o
+ * app de outro tenant devolve erro de permissão. Como o CRM é
+ * multi-conta e cada canal traz o token do SEU app da Meta, não existe um
+ * app id único que sirva para todo mundo: uma env global só funciona para
+ * o primeiro cliente e quebra silenciosamente para os demais.
+ *
+ * `GET /app` resolve isso — devolve o app do token que assina a chamada.
+ * O resultado é memoizado por token porque não muda enquanto o token vive.
+ */
+const appIdByToken = new Map<string, string>()
+
+export async function resolveAppIdFromToken(
+  accessToken: string,
+): Promise<string | null> {
+  const cached = appIdByToken.get(accessToken)
+  if (cached) return cached
+
+  let res: Response
+  try {
+    res = await fetch(
+      `${META_API_BASE}/app?access_token=${encodeURIComponent(accessToken)}`,
+    )
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+
+  const data = (await res.json().catch(() => null)) as { id?: string } | null
+  const appId = data?.id
+  if (!appId) return null
+
+  appIdByToken.set(accessToken, appId)
+  return appId
+}
+
 export async function uploadResumableMedia(
   args: UploadResumableMediaArgs,
 ): Promise<{ handle: string }> {
