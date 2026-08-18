@@ -13,6 +13,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import {
+  isMetaHandleUrl,
+  META_HANDLE_URL_MESSAGE,
+} from '@/lib/whatsapp/media-url';
 
 type VariableType = 'static' | 'field' | 'custom_field';
 
@@ -152,11 +156,16 @@ export function Step3Personalize({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaHeaderType, template.header_media_url]);
 
-  const headerMediaError = useMemo<'missing' | 'invalid' | null>(() => {
+  const headerMediaError = useMemo<'missing' | 'invalid' | 'handle' | null>(() => {
     if (!mediaHeaderType) return null;
     const value = headerMediaUrl.trim();
     if (!value) return 'missing';
     if (!isValidHttpUrl(value)) return 'invalid';
+    // Um handle de upload da Meta parece uma URL de mídia e é o que se
+    // copia naturalmente depois de subir o arquivo no painel dela. Não é
+    // mídia buscável: a Meta aceita cada envio e não entrega nenhum, sem
+    // erro em lugar nenhum. Barra aqui.
+    if (isMetaHandleUrl(value)) return 'handle';
     return null;
   }, [mediaHeaderType, headerMediaUrl]);
 
@@ -285,7 +294,9 @@ export function Step3Personalize({
             <p className="mt-1.5 text-xs text-amber-300">
               {headerMediaError === 'missing'
                 ? 'É necessária uma URL de mídia para enviar este modelo.'
-                : 'Informe uma URL http(s) válida.'}
+                : headerMediaError === 'handle'
+                  ? META_HANDLE_URL_MESSAGE
+                  : 'Informe uma URL http(s) válida.'}
             </p>
           )}
         </div>

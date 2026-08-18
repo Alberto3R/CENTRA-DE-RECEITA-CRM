@@ -498,6 +498,15 @@ async function handleStatusUpdate(status: {
   if (status.status === 'sent' && !('sent_at' in update)) update.sent_at = tsIso
   if (status.status === 'delivered') update.delivered_at = tsIso
   if (status.status === 'read') update.read_at = tsIso
+  // Sem isto o painel mostra um "falhou" mudo: o motivo só era gravado
+  // em `messages`, e uma mensagem de broadcast não tem linha lá. Quem
+  // olha o disparo não tinha como saber se foi número inválido, mídia
+  // que a Meta não conseguiu buscar, ou bloqueio do destinatário.
+  if (status.status === 'failed') {
+    update.error_message = errorCode
+      ? `${errorTitle ?? 'Falha no envio'} (código ${errorCode})`
+      : (errorTitle ?? 'Falha no envio')
+  }
 
   const { error: recUpdateErr } = await supabaseAdmin()
     .from('broadcast_recipients')

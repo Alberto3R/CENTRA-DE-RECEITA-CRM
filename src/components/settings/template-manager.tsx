@@ -18,6 +18,10 @@ import {
   uploadAccountMedia,
   MEDIA_MAX_BYTES_BY_KIND,
 } from '@/lib/storage/upload-media';
+import {
+  isMetaHandleUrl,
+  META_HANDLE_URL_MESSAGE,
+} from '@/lib/whatsapp/media-url';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -511,14 +515,62 @@ export function TemplateManager() {
   const headerNeedsMedia =
     form.header_format !== 'none' && form.header_format !== 'text';
 
-  async function handleHeaderImageFile(file: File) {
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      toast.error('A imagem do cabeçalho deve ser JPEG ou PNG.');
+  /**
+   * Regras de upload por tipo de cabeçalho. Vídeo e documento estão aqui
+   * — não só imagem — porque um modelo cuja mídia só existe dentro da
+   * Meta (o usuário subiu o arquivo no painel dela) volta pra cá apenas
+   * com o handle e SEM mídia enviável: a Meta aceita cada disparo e não
+   * entrega nenhum. Subir o arquivo por aqui é o que garante uma URL de
+   * mídia de verdade.
+   */
+  const HEADER_MEDIA_RULES = {
+    image: {
+      accept: 'image/jpeg,image/png',
+      types: ['image/jpeg', 'image/png'],
+      label: 'imagem',
+      hint: 'JPEG ou PNG, ≤5 MB',
+      typeError: 'A imagem do cabeçalho deve ser JPEG ou PNG.',
+      max: MEDIA_MAX_BYTES_BY_KIND.image,
+      maxLabel: '5 MB',
+    },
+    video: {
+      accept: 'video/mp4,video/3gpp',
+      types: ['video/mp4', 'video/3gpp'],
+      label: 'vídeo',
+      hint: 'MP4 ou 3GPP, ≤16 MB',
+      typeError: 'O vídeo do cabeçalho deve ser MP4 ou 3GPP.',
+      max: MEDIA_MAX_BYTES_BY_KIND.video,
+      maxLabel: '16 MB',
+    },
+    document: {
+      accept: 'application/pdf',
+      types: ['application/pdf'],
+      label: 'documento',
+      hint: 'PDF, ≤16 MB',
+      typeError: 'O documento do cabeçalho deve ser PDF.',
+      max: MEDIA_MAX_BYTES_BY_KIND.document,
+      maxLabel: '16 MB',
+    },
+  } as const;
+
+  const headerMediaRule =
+    form.header_format === 'image' ||
+    form.header_format === 'video' ||
+    form.header_format === 'document'
+      ? HEADER_MEDIA_RULES[form.header_format]
+      : null;
+
+  const headerUrlIsHandle = isMetaHandleUrl(form.header_media_url);
+
+  async function handleHeaderMediaFile(file: File) {
+    if (!headerMediaRule) return;
+    if (!(headerMediaRule.types as readonly string[]).includes(file.type)) {
+      toast.error(headerMediaRule.typeError);
       return;
     }
-    if (file.size > MEDIA_MAX_BYTES_BY_KIND.image) {
+    if (file.size > headerMediaRule.max) {
       toast.error(
-        `A imagem tem ${(file.size / 1024 / 1024).toFixed(1)} MB — o limite da Meta é 5 MB.`,
+        `O arquivo tem ${(file.size / 1024 / 1024).toFixed(1)} MB — o limite da Meta é ${headerMediaRule.maxLabel}.`,
       );
       return;
     }
@@ -526,7 +578,7 @@ export function TemplateManager() {
     try {
       const { publicUrl } = await uploadAccountMedia('chat-media', file);
       setForm((f) => ({ ...f, header_media_url: publicUrl }));
-      toast.success('Imagem enviada.');
+      toast.success(`Arquivo enviado (${headerMediaRule.label}).`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha no upload.');
     } finally {
@@ -903,16 +955,16 @@ export function TemplateManager() {
 
               {headerNeedsMedia && (
                 <div className="space-y-2 mt-2">
-                  {form.header_format === 'image' && (
+                  {headerMediaRule && (
                     <div className="flex items-center gap-2">
                       <input
                         ref={headerFileRef}
                         type="file"
-                        accept="image/jpeg,image/png"
+                        accept={headerMediaRule.accept}
                         className="hidden"
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) void handleHeaderImageFile(f);
+                          if (f) void handleHeaderMediaFile(f);
                           e.target.value = '';
                         }}
                       />
@@ -928,10 +980,10 @@ export function TemplateManager() {
                         ) : (
                           <Upload className="h-3.5 w-3.5" />
                         )}
-                        Enviar imagem
+                        Enviar {headerMediaRule.label}
                       </Button>
                       <span className="text-[11px] text-muted-foreground">
-                        JPEG ou PNG, ≤5 MB
+                        {headerMediaRule.hint}
                       </span>
                     </div>
                   )}
@@ -943,18 +995,33 @@ export function TemplateManager() {
                     }
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
-                  {form.header_format === 'image' && form.header_media_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={form.header_media_url}
-                      alt="Exemplo de cabeçalho"
-                      className="max-h-28 rounded-md border border-border object-contain"
-                    />
+                  {headerUrlIsHandle && (
+                    <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-destructive">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {META_HANDLE_URL_MESSAGE}
+                    </p>
                   )}
+                  {form.header_format === 'image' &&
+                    form.header_media_url &&
+                    !headerUrlIsHandle && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={form.header_media_url}
+                        alt="Exemplo de cabeçalho"
+                        className="max-h-28 rounded-md border border-border object-contain"
+                      />
+                    )}
+                  {form.header_format === 'video' &&
+                    form.header_media_url &&
+                    !headerUrlIsHandle && (
+                      <video
+                        src={form.header_media_url}
+                        controls
+                        className="max-h-40 rounded-md border border-border"
+                      />
+                    )}
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    {form.header_format === 'image'
-                      ? 'Envie um JPEG/PNG (≤5 MB, ≥800×418 px recomendado) ou cole um link HTTPS público — fazemos o upload para a Meta para revisão automaticamente.'
-                      : 'Deve ser um link HTTPS acessível publicamente. A Meta o busca uma vez durante a revisão, então ele precisa ficar no ar por ~24 h.'}
+                    {'Envie o arquivo aqui (ou cole um link HTTPS público) — cuidamos do upload para a Meta. O arquivo precisa continuar acessível, porque a Meta o busca de novo a cada mensagem enviada. Não use o link que a Meta mostra ao subir a mídia no painel dela: aquilo é um identificador de upload, e o disparo sai como enviado sem nunca chegar.'}
                     {form.header_format === 'video' &&
                       ' Recomendado: MP4 / 3GPP, ≤16 MB, ≤60 segundos.'}
                     {form.header_format === 'document' &&

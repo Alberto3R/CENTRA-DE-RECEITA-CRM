@@ -374,6 +374,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           template_name: payload.template.name,
           template_language: payload.template.language ?? 'en_US',
           template_variables: payload.variables,
+          // Media-header templates need this on every send; the worker
+          // has no other reliable source (a synced template may only
+          // have a creation-time handle).
+          header_media_url: payload.headerMediaUrl?.trim() || null,
           audience_filter: {
             type: payload.audience.type,
             tagIds: payload.audience.tagIds,
@@ -619,6 +623,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           template_name: payload.template.name,
           template_language: payload.template.language ?? 'en_US',
           template_variables: payload.variables,
+          // Media-header templates need this on every send; the worker
+          // has no other reliable source (a synced template may only
+          // have a creation-time handle).
+          header_media_url: payload.headerMediaUrl?.trim() || null,
           audience_filter: {
             type: payload.audience.type,
             tagIds: payload.audience.tagIds,

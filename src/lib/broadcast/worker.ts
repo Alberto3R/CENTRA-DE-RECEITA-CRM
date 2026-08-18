@@ -82,6 +82,14 @@ interface BroadcastRow {
   template_name: string;
   template_language: string | null;
   template_variables: Record<string, VariableMapping> | null;
+  /**
+   * Mídia do cabeçalho escolhida no assistente (migration 089). Um modelo
+   * com header de imagem/vídeo/documento precisa mandar a mídia em TODA
+   * mensagem; sem isso aqui, o worker só teria o `header_media_url` do
+   * template — que é NULL em todo modelo criado no painel da Meta e
+   * sincronizado depois (esses só trazem o handle, que não é mídia).
+   */
+  header_media_url: string | null;
   status: string;
 }
 
@@ -175,6 +183,9 @@ async function drainBroadcast(
           language: b.template_language || "en_US",
           template: templateRow,
           params,
+          messageParams: b.header_media_url
+            ? { headerMediaUrl: b.header_media_url }
+            : undefined,
         });
         sentId = res.messageId;
         lastError = null;
@@ -335,7 +346,7 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
   const { data: sending } = await admin
     .from("broadcasts")
     .select(
-      "id, account_id, channel_id, template_name, template_language, template_variables, status, updated_at",
+      "id, account_id, channel_id, template_name, template_language, template_variables, header_media_url, status, updated_at",
     )
     .eq("status", "sending")
     .or(`scheduled_at.not.is.null,updated_at.lte.${staleIso}`)

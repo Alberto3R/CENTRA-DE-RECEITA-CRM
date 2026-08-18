@@ -15,6 +15,7 @@
  * ("button #3 has no `text`" beats "constraint violated").
  */
 
+import { isMetaHandleUrl, META_HANDLE_URL_MESSAGE } from './media-url';
 import type {
   MessageTemplate,
   TemplateButton,
@@ -161,6 +162,12 @@ export function validateHeader(
       }
     } catch {
       throw new Error('header_media_url must be a valid URL.');
+    }
+    // A Meta CDN handle is not media. Accepting one here produces a
+    // template that Meta approves and then never delivers — see
+    // `media-url.ts` for the full story.
+    if (isMetaHandleUrl(header_media_url)) {
+      throw new Error(META_HANDLE_URL_MESSAGE);
     }
   }
   return { variableCount: 0 };
