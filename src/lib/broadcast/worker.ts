@@ -309,6 +309,86 @@ async function materializeAudienceIfEmpty(
 }
 
 /**
+ * Colunas que o dreno lê de `broadcasts`. As opcionais são as que podem
+ * ainda não existir quando o código sobe antes da migration.
+ */
+const DRAIN_COLUMNS_BASE =
+  "id, account_id, channel_id, template_name, template_language, template_variables, status, updated_at";
+const DRAIN_COLUMNS_OPTIONAL = "header_media_url";
+
+/**
+ * O erro é "essa coluna não existe aqui"? PostgREST devolve PGRST204 com
+ * "schema cache" e o Postgres 42703 com "column ... does not exist".
+ */
+export function isMissingColumnError(
+  error: { code?: string | null; message?: string | null } | null,
+): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  if (code === "42703" || code === "PGRST204") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  if (msg.includes("schema cache")) return true;
+  return msg.includes("column") && msg.includes("does not exist");
+}
+
+/**
+ * Lista os broadcasts a drenar SEM deixar que um descompasso entre código
+ * e banco silencie a fila inteira.
+ *
+ * Isto já aconteceu: o deploy subiu com `header_media_url` no select antes
+ * da migration rodar. O select passou a falhar, o erro era descartado sem
+ * log, e TODA conta parou de disparar — a cadência automática ficou
+ * represada horas sem ninguém perceber, porque "nenhum broadcast pendente"
+ * e "não consegui ler os broadcasts" pareciam a mesma coisa.
+ *
+ * Agora uma coluna ausente degrada: seguimos com o conjunto mínimo (sem a
+ * mídia do cabeçalho) e gritamos no log, em vez de parar tudo em silêncio.
+ */
+async function fetchDrainableBroadcasts(
+  admin: Admin,
+  staleIso: string,
+): Promise<(BroadcastRow & { updated_at: string })[]> {
+  const run = (columns: string) =>
+    admin
+      .from("broadcasts")
+      .select(columns)
+      .eq("status", "sending")
+      .or(`scheduled_at.not.is.null,updated_at.lte.${staleIso}`)
+      .order("updated_at", { ascending: true })
+      .limit(20);
+
+  const full = await run(`${DRAIN_COLUMNS_BASE}, ${DRAIN_COLUMNS_OPTIONAL}`);
+  if (!full.error) {
+    return (full.data ?? []) as unknown as (BroadcastRow & { updated_at: string })[];
+  }
+
+  if (!isMissingColumnError(full.error)) {
+    console.error(
+      "[broadcast-worker] não consegui listar os disparos pendentes:",
+      full.error.message,
+    );
+    return [];
+  }
+
+  console.warn(
+    `[broadcast-worker] banco atrás do código (${full.error.message}). ` +
+      "Drenando sem a mídia de cabeçalho — rode a migration pendente para " +
+      "voltar ao normal.",
+  );
+  const minimal = await run(DRAIN_COLUMNS_BASE);
+  if (minimal.error) {
+    console.error(
+      "[broadcast-worker] não consegui listar os disparos nem no modo mínimo:",
+      minimal.error.message,
+    );
+    return [];
+  }
+  return ((minimal.data ?? []) as unknown as Record<string, unknown>[]).map(
+    (row) => ({ ...row, header_media_url: null }),
+  ) as (BroadcastRow & { updated_at: string })[];
+}
+
+/**
  * Seleciona broadcasts que precisam de dreno server-side e os processa dentro
  * de um orçamento total de envios (para caber no tempo do serverless):
  *   - 'scheduled' cujo scheduled_at venceu → vira 'sending' e drena;
@@ -326,12 +406,20 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
   // Agendados vencidos → sending. Se o broadcast chegou aqui sem nenhum
   // destinatário materializado (criado via API/SQL, fora da UI), resolve a
   // audiência por tags antes de promover.
-  const { data: dueScheduled } = await admin
+  const { data: dueScheduled, error: dueError } = await admin
     .from("broadcasts")
     .select("id")
     .eq("status", "scheduled")
     .lte("scheduled_at", nowIso)
     .limit(20);
+  if (dueError) {
+    // Mesma armadilha de antes: sem log, "deu erro" e "não tinha nada
+    // agendado" ficam indistinguíveis e o atraso passa despercebido.
+    console.error(
+      "[broadcast-worker] não consegui listar os agendados vencidos:",
+      dueError.message,
+    );
+  }
   for (const b of dueScheduled ?? []) {
     await materializeAudienceIfEmpty(admin, b.id);
     await admin.from("broadcasts").update({ status: "sending" }).eq("id", b.id);
@@ -343,20 +431,12 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
   //   - scheduled_at nulo (é um "Enviar agora" client-side) → só drena se
   //     ficou OCIOSO > 2min (a aba fechou no meio) — takeover, sem colidir
   //     com o cliente que está enviando.
-  const { data: sending } = await admin
-    .from("broadcasts")
-    .select(
-      "id, account_id, channel_id, template_name, template_language, template_variables, header_media_url, status, updated_at",
-    )
-    .eq("status", "sending")
-    .or(`scheduled_at.not.is.null,updated_at.lte.${staleIso}`)
-    .order("updated_at", { ascending: true })
-    .limit(20);
+  const sending = await fetchDrainableBroadcasts(admin, staleIso);
 
   let processed = 0;
   let touched = 0;
   let budget = totalBudget;
-  for (const b of (sending ?? []) as (BroadcastRow & { updated_at: string })[]) {
+  for (const b of sending) {
     if (budget <= 0) break;
     const n = await drainBroadcast(admin, b, Math.min(budget, 40));
     processed += n;
