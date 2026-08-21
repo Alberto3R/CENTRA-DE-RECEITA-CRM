@@ -32,12 +32,13 @@ function resolveVars(
   contact: { name?: string | null; phone?: string | null; email?: string | null; company?: string | null },
   customValues: Map<string, string> | undefined,
 ): string[] {
-  const keys = Object.keys(variables).sort((a, b) => {
-    const an = Number(a);
-    const bn = Number(b);
-    if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
-    return a.localeCompare(b);
-  });
+  // Só as chaves numéricas são variáveis do CORPO ({{1}}, {{2}}, …).
+  // Chaves não-numéricas (hoje `buttons`) carregam outra coisa e não podem
+  // entrar no array do body — entrariam como um parâmetro fantasma e a Meta
+  // recusaria o envio por contagem de variáveis divergente.
+  const keys = Object.keys(variables)
+    .filter((k) => Number.isFinite(Number(k)))
+    .sort((a, b) => Number(a) - Number(b));
   return keys.map((key) => {
     const v = variables[key];
     if (v.type === "static") return v.value;
@@ -52,6 +53,31 @@ function resolveVars(
     }
     return customValues?.get(v.value) ?? "";
   });
+}
+
+// Botões de URL dinâmica ({{1}} no fim da URL) exigem um parâmetro próprio
+// por botão, numerado pelo índice dele no template — numeração independente
+// da do corpo. O mapeamento vive em `template_variables.buttons`, no formato
+// { "0": { type: "custom_field", value: "<uuid>" } }.
+//
+// Sem isso, buildButtonComponent lança
+// "URL button #N uses {{1}} — requires a buttonParams[N] value" e o disparo
+// inteiro falha. Era o caso de todo template com link individual por pessoa.
+function resolveButtonParams(
+  variables: Record<string, unknown>,
+  contact: { name?: string | null; phone?: string | null; email?: string | null; company?: string | null },
+  customValues: Map<string, string> | undefined,
+): Record<number, string> | undefined {
+  const raw = variables?.buttons as Record<string, VariableMapping> | undefined;
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<number, string> = {};
+  for (const [idx, mapping] of Object.entries(raw)) {
+    const i = Number(idx);
+    if (!Number.isFinite(i) || !mapping) continue;
+    const [value] = resolveVars({ "1": mapping }, contact, customValues);
+    if (value) out[i] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 async function fetchCustomValues(
@@ -170,6 +196,11 @@ async function drainBroadcast(
     }
 
     const params = resolveVars(variables, contact!, customIndex.get(claim.contact_id));
+    const buttonParams = resolveButtonParams(
+      variables as Record<string, unknown>,
+      contact!,
+      customIndex.get(claim.contact_id),
+    );
 
     let sentId: string | null = null;
     let lastError: string | null = null;
@@ -183,9 +214,13 @@ async function drainBroadcast(
           language: b.template_language || "en_US",
           template: templateRow,
           params,
-          messageParams: b.header_media_url
-            ? { headerMediaUrl: b.header_media_url }
-            : undefined,
+          messageParams:
+            b.header_media_url || buttonParams
+              ? {
+                  ...(b.header_media_url ? { headerMediaUrl: b.header_media_url } : {}),
+                  ...(buttonParams ? { buttonParams } : {}),
+                }
+              : undefined,
         });
         sentId = res.messageId;
         lastError = null;
