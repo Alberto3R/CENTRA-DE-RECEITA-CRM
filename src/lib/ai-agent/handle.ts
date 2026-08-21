@@ -247,7 +247,9 @@ export async function maybeRunAgent(params: {
   // 1. Config do agente DO CANAL (multi-agente: 1 persona por número).
   const { data: cfg } = await supabase
     .from('ai_agent_config')
-    .select('enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message')
+    .select(
+      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message, scheduling_enabled',
+    )
     .eq('channel_id', channelId)
     .maybeSingle()
   if (!cfg || !cfg.enabled || !cfg.system_prompt?.trim()) return
@@ -360,7 +362,13 @@ export async function maybeRunAgent(params: {
         .eq('account_id', params.accountId)
         .maybeSingle(),
     ])
-    if (gconn && (sched?.enabled ?? true)) {
+    // `scheduling_enabled` é do CANAL e tem a palavra final. A conta pode ter
+    // agenda ligada para os canais de prospecção e mesmo assim negá-la ao canal
+    // de recrutamento, onde marcar reunião não faz parte do trabalho — e onde a
+    // agenda comercial já produziu resposta contradizendo convite oficial.
+    const schedulingAllowedForChannel = (cfg as { scheduling_enabled?: boolean | null })
+      .scheduling_enabled ?? true
+    if (schedulingAllowedForChannel && gconn && (sched?.enabled ?? true)) {
       const schedCfg: SchedulingConfig = {
         timezone: sched?.timezone ?? 'America/Sao_Paulo',
         slot_minutes: sched?.slot_minutes ?? 20,
