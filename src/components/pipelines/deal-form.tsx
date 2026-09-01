@@ -16,6 +16,7 @@ import type {
   Tag,
 } from "@/types";
 import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
+import { DealNotes } from "@/components/pipelines/deal-notes";
 import {
   Sheet,
   SheetContent,
@@ -255,11 +256,14 @@ export function DealForm({
       pipeline_id: pipelineId,
       stage_id: stageId,
       assigned_to: assignedTo || null,
-      notes: notes.trim() || null,
       expected_close_date: expectedCloseDate || null,
     };
 
     if (deal) {
+      // `notes` fica DE FORA no update: num negócio existente as notas
+      // vivem em `deal_notes` e o painel <DealNotes> salva sozinho.
+      // `deals.notes` é só o espelho derivado — reenviá-lo daqui gravaria
+      // por cima de texto que o usuário nem editou nesta tela.
       const { error } = await supabase
         .from("deals")
         .update(payload)
@@ -286,7 +290,15 @@ export function DealForm({
       }
       const { error } = await supabase
         .from("deals")
-        .insert({ ...payload, user_id: user.id, account_id: accountId, status: "open" });
+        .insert({
+          ...payload,
+          // Só na criação: o trigger de captura no banco transforma este
+          // texto na primeira nota do negócio.
+          notes: notes.trim() || null,
+          user_id: user.id,
+          account_id: accountId,
+          status: "open",
+        });
       if (error) {
         toast.error("Falha ao criar o negócio");
         setSaving(false);
@@ -516,15 +528,25 @@ export function DealForm({
               </select>
             </div>
 
-            <div className="grid gap-2">
-              <Label className="text-muted-foreground">Notas</Label>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Adicionar notas..."
-                className="min-h-[100px] border-border bg-muted text-foreground"
-              />
-            </div>
+            {/*
+              Negócio já criado → notas de verdade (múltiplas, com título),
+              da tabela deal_notes. Negócio novo ainda não tem id, então
+              segue no campo simples; o trigger de captura no banco
+              transforma esse texto na primeira nota.
+            */}
+            {deal?.id && accountId ? (
+              <DealNotes dealId={deal.id} accountId={accountId} />
+            ) : (
+              <div className="grid gap-2">
+                <Label className="text-muted-foreground">Notas</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Adicionar notas..."
+                  className="min-h-[100px] border-border bg-muted text-foreground"
+                />
+              </div>
+            )}
 
             {deal && (
               <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-3">
