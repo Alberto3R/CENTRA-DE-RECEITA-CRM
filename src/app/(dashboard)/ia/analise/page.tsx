@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Check,
   ChevronRight,
+  FileDown,
   FileText,
   History,
   Loader2,
@@ -570,6 +571,18 @@ export default function AnaliseCallPage() {
               ) : null}
             </div>
           </div>
+
+          {analiseId ? (
+            <a
+              href={`/ia/analise/${analiseId}/relatorio`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-fit items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              <FileDown className="size-4" />
+              Exportar PDF para o vendedor
+            </a>
+          ) : null}
 
           {analise.dados_faltantes.length > 0 ? (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">

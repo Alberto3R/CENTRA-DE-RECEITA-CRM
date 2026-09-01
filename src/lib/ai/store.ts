@@ -365,7 +365,34 @@ export async function funcaoDoUsuario(
  * Função comercial do dono de uma ligação (whatsapp_calls.user_id = o SDR/closer
  * que ligou). Usada para derivar a régua de análise. null se não achar.
  */
-export async function funcaoDoDonoDaCall(
+/**
+ * Vendedor do roster vinculado a um login do CRM (`sellers.linked_user_id`).
+ *
+ * Serve para carimbar `seller_id` na análise quando ela nasce de uma ligação
+ * ou conversa: sem isso o relatório em PDF sai sem o nome de quem conduziu —
+ * justamente a pessoa a quem o documento é mandado.
+ *
+ * Usa `limit(1)` em vez de `maybeSingle()` de propósito: se dois vendedores
+ * do roster apontarem para o mesmo login, isso é um problema de cadastro e
+ * não pode derrubar a análise.
+ */
+export async function sellerDoUsuario(
+  accountId: string,
+  userId: string | null | undefined,
+): Promise<string | null> {
+  if (!userId) return null;
+  const admin = supabaseAdmin();
+  const { data } = await admin
+    .from("sellers")
+    .select("id")
+    .eq("linked_user_id", userId)
+    .eq("account_id", accountId)
+    .limit(1);
+  return ((data as { id: string }[] | null)?.[0]?.id as string) ?? null;
+}
+
+/** user_id do dono de uma ligação. null se a call não for desta conta. */
+export async function donoDaCall(
   accountId: string,
   callId: string,
 ): Promise<string | null> {
@@ -376,14 +403,11 @@ export async function funcaoDoDonoDaCall(
     .eq("id", callId)
     .eq("account_id", accountId)
     .maybeSingle();
-  return funcaoDoUsuario(accountId, data?.user_id as string | null | undefined);
+  return (data?.user_id as string | null) ?? null;
 }
 
-/**
- * Função comercial de quem atende uma conversa (assigned_agent_id, senão o dono
- * user_id). Usada para derivar a régua de análise da conversa. null se não achar.
- */
-export async function funcaoDoDonoDaConversa(
+/** user_id de quem atende uma conversa (assigned_agent_id, senão o dono). */
+export async function donoDaConversa(
   accountId: string,
   conversationId: string,
 ): Promise<string | null> {
@@ -394,10 +418,32 @@ export async function funcaoDoDonoDaConversa(
     .eq("id", conversationId)
     .eq("account_id", accountId)
     .maybeSingle();
-  const owner =
+  return (
     (data?.assigned_agent_id as string | null) ??
-    (data?.user_id as string | null);
-  return funcaoDoUsuario(accountId, owner);
+    (data?.user_id as string | null) ??
+    null
+  );
+}
+
+export async function funcaoDoDonoDaCall(
+  accountId: string,
+  callId: string,
+): Promise<string | null> {
+  return funcaoDoUsuario(accountId, await donoDaCall(accountId, callId));
+}
+
+/**
+ * Função comercial de quem atende uma conversa (assigned_agent_id, senão o dono
+ * user_id). Usada para derivar a régua de análise da conversa. null se não achar.
+ */
+export async function funcaoDoDonoDaConversa(
+  accountId: string,
+  conversationId: string,
+): Promise<string | null> {
+  return funcaoDoUsuario(
+    accountId,
+    await donoDaConversa(accountId, conversationId),
+  );
 }
 
 /**
