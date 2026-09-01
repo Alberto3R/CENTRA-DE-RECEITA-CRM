@@ -216,6 +216,8 @@ export interface AnaliseDetalhe {
   created_at: string;
   tipo: string | null;
   seller_id: string | null;
+  /** Nome do lead da conversa analisada — identifica o documento exportado. */
+  lead_nome: string | null;
   analise: AnaliseCall;
 }
 
@@ -232,13 +234,26 @@ export async function buscarAnalisePorId(
   const { data, error } = await admin
     .from("ai_analyses")
     .select(
-      "id, created_at, tipo, seller_id, dimensoes, nota, perda_estimada_reais, perda_memoria_calculo, prescricoes",
+      "id, created_at, tipo, seller_id, conversation_id, dimensoes, nota, perda_estimada_reais, perda_memoria_calculo, prescricoes",
     )
     .eq("id", id)
     .eq("account_id", accountId)
     .maybeSingle();
   if (error) throw new Error(`Falha ao buscar análise: ${error.message}`);
   if (!data) return null;
+
+  // Nome do lead — o que identifica o relatório exportado. Análise de texto
+  // colado não tem conversa vinculada, e aí fica null mesmo.
+  let leadNome: string | null = null;
+  if (data.conversation_id) {
+    const { data: conv } = await admin
+      .from("conversations")
+      .select("contacts(name)")
+      .eq("id", data.conversation_id as string)
+      .maybeSingle();
+    const c = (conv as { contacts?: { name?: string } | null } | null)?.contacts;
+    leadNome = c?.name?.trim() || null;
+  }
 
   const bundle = (data.prescricoes ?? {}) as {
     prescricoes?: AnaliseCall["prescricoes"];
@@ -252,6 +267,7 @@ export async function buscarAnalisePorId(
     created_at: data.created_at as string,
     tipo: (data.tipo as string | null) ?? null,
     seller_id: (data.seller_id as string | null) ?? null,
+    lead_nome: leadNome,
     analise: {
       dimensoes: (data.dimensoes ?? {}) as AnaliseCall["dimensoes"],
       nota: data.nota as AnaliseCall["nota"],

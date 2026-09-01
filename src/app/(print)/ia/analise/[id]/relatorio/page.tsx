@@ -50,6 +50,7 @@ interface Detalhe {
   created_at: string;
   tipo: string | null;
   seller_id: string | null;
+  lead_nome: string | null;
   analise: Analise;
 }
 interface Seller {
@@ -107,6 +108,21 @@ function tomDoScore(score: number): "bom" | "medio" | "ruim" {
   return "ruim";
 }
 
+/**
+ * Dimensão que o modelo NÃO conseguiu avaliar — tipicamente porque o assunto
+ * nem apareceu na conversa (preço numa call de agendamento, por exemplo).
+ * Vem com score 0 e evidência sem timestamp real ("N/A").
+ *
+ * Precisa ser separada: ordenando só pela nota, uma dimensão não aplicável
+ * abre o relatório como "0/10", o item mais crítico da lista — e a pessoa lê
+ * como falha dela logo na primeira linha. Não é falha, é ausência de assunto.
+ */
+function naoAvaliada(d: Dimensao): boolean {
+  const ev = Array.isArray(d?.evidencias) ? d.evidencias : [];
+  if (ev.length === 0) return true;
+  return ev.every((e) => !e?.timestamp || /^n\s*\/?\s*a$/i.test(e.timestamp.trim()));
+}
+
 function reais(v: number | null) {
   if (v === null || Number.isNaN(v)) return null;
   return v.toLocaleString("pt-BR", {
@@ -149,12 +165,15 @@ const CSS = `
 .rel .nota{min-width:118px}
 .rel .nota .v{font-size:44px;font-weight:700;line-height:1;margin:4px 0 0}
 .rel .nota.bom .v{color:var(--bom)} .rel .nota.medio .v{color:var(--medio)} .rel .nota.ruim .v{color:var(--ruim)}
-.rel .perda{flex:1;min-width:210px}
-.rel .perda .v{font-size:27px;font-weight:700;line-height:1.15;margin:4px 0 0}
-.rel .perda .memo{font-size:13px;line-height:1.45;margin:6px 0 0;color:var(--fraco)}
-
+.rel .leiturabox{flex:1;min-width:260px}
+.rel .leiturabox .v{font-size:25px;font-weight:700;line-height:1.15;margin:4px 0 0}
+.rel .leiturabox .memo{font-size:13px;line-height:1.45;margin:6px 0 0;color:var(--fraco)}
 .rel .leitura{border-left:4px solid var(--verde);padding:2px 0 2px 14px;font-size:17px;
-  line-height:1.45;margin:0 0 34px;font-weight:500}
+  line-height:1.45;margin:0;font-weight:500}
+.rel .topo{margin-bottom:32px}
+
+.rel .naoavaliada{opacity:.75}
+.rel .naoavaliada h3{font-weight:500}
 
 .rel h2{font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:500;
   border-bottom:1px solid var(--linha2);padding-bottom:6px;margin:0 0 14px;color:var(--fraco)}
@@ -212,8 +231,18 @@ const CSS = `
   .rel .faltantes ul{font-size:12px}
   .rel .box{background:#F4F2EC}
   .rel .card{border-color:#d4d4d0}
-  .qe{break-inside:avoid;page-break-inside:avoid}
-  .qa{break-before:page;page-break-before:always}
+  .rel section{margin-bottom:22px}
+  .rel .grid{gap:10px}
+  .rel .card{padding:11px 13px}
+  .rel .evs{gap:8px}
+  .rel .naoavaliada{opacity:1;color:#4A463D}
+  /* break-inside:avoid fica só nos cards. Aplicado na section inteira,
+     empurrava blocos grandes pra página seguinte e deixava meia folha
+     em branco — foi o que aconteceu na página dos Próximos passos. */
+  .qe{break-inside:auto;page-break-inside:auto}
+  .rel .card{break-inside:avoid;page-break-inside:avoid}
+  .rel .cab,.rel .topo{break-inside:avoid;page-break-inside:avoid}
+  .rel h2{break-after:avoid;page-break-after:avoid}
 }
 `;
 
@@ -266,9 +295,18 @@ export default function RelatorioAnalisePage() {
 
   const a = detalhe.analise;
   const vendedor = sellers.find((s) => s.id === detalhe.seller_id);
-  const dims = Object.entries(a.dimensoes).sort((x, y) => x[1].score - y[1].score);
+  const todas = Object.entries(a.dimensoes);
+  // Avaliadas primeiro, da mais fraca pra mais forte; as não avaliadas vão
+  // pro fim, fora da régua de cor — senão abrem o relatório como "0/10".
+  const dims = todas
+    .filter(([, d]) => !naoAvaliada(d))
+    .sort((x, y) => x[1].score - y[1].score);
+  const semAvaliar = todas.filter(([, d]) => naoAvaliada(d));
   const perda = reais(a.perda_estimada_reais);
   const tomNota = a.nota === "A" ? "bom" : a.nota === "B" ? "medio" : "ruim";
+  const titulo =
+    detalhe.lead_nome ??
+    (vendedor?.nome ? `Call de ${vendedor.nome}` : "Análise de conversa");
 
   return (
     <>
@@ -295,8 +333,9 @@ export default function RelatorioAnalisePage() {
         <div className="folha">
           <header className="cab qe">
             <p className="kicker mono fraco">Sales 3R · Análise de conversa</p>
-            <h1>{vendedor?.nome ?? "Relatório da conversa"}</h1>
+            <h1>{titulo}</h1>
             <p className="sub mono fraco">
+              {vendedor?.nome ? `${vendedor.nome} · ` : ""}
               {vendedor?.funcao
                 ? `${FUNCAO_ROTULO[vendedor.funcao] ?? vendedor.funcao} · `
                 : ""}
@@ -305,23 +344,28 @@ export default function RelatorioAnalisePage() {
             </p>
           </header>
 
+          {/* Nota + veredito juntos: sem perda estimada o box da nota ficava
+              sozinho num mar de branco. */}
           <section className="topo qe">
             <div className={`box nota ${tomNota}`}>
               <p className="rot mono">Nota</p>
               <p className="v">{a.nota}</p>
             </div>
-            {perda && (
-              <div className="box perda">
-                <p className="rot mono">Estimativa de perda nesta conversa</p>
-                <p className="v">{perda}</p>
-                {a.perda_memoria_calculo && (
-                  <p className="memo">{a.perda_memoria_calculo}</p>
-                )}
-              </div>
-            )}
+            <div className="box leiturabox">
+              <p className="leitura">{VEREDITO[a.nota] ?? VEREDITO.B}</p>
+              {perda && (
+                <>
+                  <p className="rot mono" style={{ marginTop: 14 }}>
+                    Estimativa de perda nesta conversa
+                  </p>
+                  <p className="v">{perda}</p>
+                  {a.perda_memoria_calculo && (
+                    <p className="memo">{a.perda_memoria_calculo}</p>
+                  )}
+                </>
+              )}
+            </div>
           </section>
-
-          <p className="leitura">{VEREDITO[a.nota] ?? VEREDITO.B}</p>
 
           {a.prescricoes.length > 0 && (
             <section>
@@ -356,7 +400,7 @@ export default function RelatorioAnalisePage() {
             </section>
           )}
 
-          <section className="qa">
+          <section>
             <h2 className="mono">Dimensões avaliadas</h2>
             <p className="fraco" style={{ fontSize: 14, margin: "-6px 0 16px" }}>
               Da mais fraca para a mais forte. As citações são trechos reais da conversa.
@@ -398,6 +442,29 @@ export default function RelatorioAnalisePage() {
               })}
             </div>
           </section>
+
+          {semAvaliar.length > 0 && (
+            <section className="qe">
+              <h2 className="mono">Não apareceu nesta conversa</h2>
+              <p className="fraco" style={{ fontSize: 14, margin: "-6px 0 14px" }}>
+                O assunto não veio à tona — não conta como erro, e por isso fica
+                fora da régua de nota.
+              </p>
+              <div className="grid">
+                {semAvaliar.map(([chave, d]) => (
+                  <div key={chave} className="card naoavaliada qe">
+                    <div className="dimtopo">
+                      <h3>{rotularDimensao(chave)}</h3>
+                      <span className="mono fraco" style={{ fontSize: 12 }}>
+                        não avaliada
+                      </span>
+                    </div>
+                    {d.resumo && <p className="resumo">{d.resumo}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {a.dados_faltantes.length > 0 && (
             <section className="faltantes qe">
