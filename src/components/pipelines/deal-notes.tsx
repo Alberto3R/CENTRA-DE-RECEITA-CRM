@@ -132,9 +132,13 @@ export function DealNotes({
     return <p className="text-sm text-muted-foreground">Carregando notas…</p>;
   }
 
+  // `min-w-0` em toda a cadeia é obrigatório: sem isso o conteúdo das notas
+  // (fbclid, UTMs, URL do PDF — tokens únicos de 100+ caracteres sem espaço)
+  // força a largura mínima do container e empurra o painel inteiro pra fora
+  // da tela, levando junto os botões.
   return (
-    <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+    <div className="grid min-w-0 gap-3">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <Label className="text-muted-foreground">Notas</Label>
         {!criando && (
           <Button
@@ -151,19 +155,19 @@ export function DealNotes({
       </div>
 
       {criando && (
-        <div className="grid gap-2 rounded-lg border border-primary/40 bg-muted/40 p-3">
+        <div className="grid min-w-0 gap-2 rounded-lg border border-primary/40 bg-muted/40 p-3">
           <Input
             autoFocus
             value={novoTitulo}
             onChange={(e) => setNovoTitulo(e.target.value)}
             placeholder="Título da nota (ex: Qualificação SDR)"
-            className="h-8 border-border bg-background text-sm"
+            className="h-8 w-full min-w-0 border-border bg-background text-sm"
           />
           <Textarea
             value={novoCorpo}
             onChange={(e) => setNovoCorpo(e.target.value)}
             placeholder="O que você quer registrar…"
-            className="min-h-[90px] border-border bg-background text-sm"
+            className="min-h-[90px] w-full min-w-0 border-border bg-background text-sm"
           />
           <div className="flex justify-end gap-2">
             <Button
@@ -195,22 +199,25 @@ export function DealNotes({
         const protegida = KINDS_PROTEGIDOS.has(nota.kind);
         const editando = editandoId === nota.id;
         return (
-          <div key={nota.id} className="rounded-lg border border-border bg-muted/40">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <div key={nota.id} className="min-w-0 rounded-lg border border-border bg-muted/40">
+            <div className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2">
               {editando && !protegida ? (
                 <Input
                   value={rascunhoTitulo}
                   onChange={(e) => setRascunhoTitulo(e.target.value)}
-                  className="h-7 border-border bg-background text-sm"
+                  className="h-7 min-w-0 border-border bg-background text-sm"
                 />
               ) : (
-                <span className="flex-1 truncate text-sm font-medium text-foreground">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                   {nota.title}
                 </span>
               )}
 
               {protegida && (
-                <Badge variant="secondary" className="gap-1 text-[10px] font-normal">
+                <Badge
+                  variant="secondary"
+                  className="hidden shrink-0 gap-1 text-[10px] font-normal sm:inline-flex"
+                >
                   <Lock className="size-2.5" />
                   {ROTULO_KIND[nota.kind] ?? "automática"}
                 </Badge>
@@ -275,15 +282,18 @@ export function DealNotes({
               )}
             </div>
 
-            <div className="px-3 py-2">
+            <div className="min-w-0 px-3 py-2">
               {editando ? (
                 <Textarea
                   value={rascunhoCorpo}
                   onChange={(e) => setRascunhoCorpo(e.target.value)}
-                  className="min-h-[160px] border-border bg-background font-mono text-xs"
+                  className="min-h-[160px] w-full min-w-0 border-border bg-background font-mono text-xs"
                 />
               ) : (
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-muted-foreground">
+                // `overflow-wrap: anywhere` é o que realmente quebra token
+                // longo sem espaço (fbclid, URL do PDF). `break-words` sozinho
+                // não quebra — e aí o painel inteiro estoura pro lado.
+                <pre className="max-h-64 w-full min-w-0 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                   {nota.body || "—"}
                 </pre>
               )}

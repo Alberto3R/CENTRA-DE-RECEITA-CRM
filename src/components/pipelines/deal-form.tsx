@@ -368,9 +368,11 @@ export function DealForm({
                 <TabsTrigger value="historico">Histórico</TabsTrigger>
               </TabsList>
             )}
+            {/* min-w-0: sem isso um filho largo (nota com fbclid/URL longa)
+                estica o flex container e estoura a largura do painel. */}
             <TabsContent
               value="dados"
-              className="mt-0 flex-1 space-y-4 overflow-y-auto p-4"
+              className="mt-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-4"
             >
             <div className="grid gap-2">
               <Label className="text-muted-foreground">Título</Label>
