@@ -42,6 +42,9 @@ export async function POST(request: Request) {
     // Régua de análise: se veio sellerId, usa a função dele; senão, deriva de
     // quem atende a conversa (assigned_agent_id/dono). sdr = qualificar+agendar.
     let objetivo: ObjetivoAnalise = "closer";
+    // Além da régua, resolvemos QUEM atendeu: sem `seller_id` a análise fica
+    // órfã e o relatório em PDF sai sem o nome de quem vai recebê-lo.
+    let sellerId: string | null = body.sellerId ?? null;
     if (body.sellerId) {
       const seller = await store.buscarSeller(ctx.accountId, body.sellerId);
       if (!seller) {
@@ -52,9 +55,14 @@ export async function POST(request: Request) {
       }
       objetivo = objetivoDeFuncao(seller.funcao);
     } else {
-      objetivo = objetivoDeFuncao(
-        await store.funcaoDoDonoDaConversa(ctx.accountId, body.conversationId),
+      const dono = await store.donoDaConversa(
+        ctx.accountId,
+        body.conversationId,
       );
+      objetivo = objetivoDeFuncao(
+        await store.funcaoDoUsuario(ctx.accountId, dono),
+      );
+      sellerId = await store.sellerDoUsuario(ctx.accountId, dono);
     }
 
     // Lê a conversa do CRM (escopada pela conta) e serializa.
@@ -85,7 +93,7 @@ export async function POST(request: Request) {
       const salva = await store.inserirAnalise({
         accountId: ctx.accountId,
         documentId,
-        sellerId: body.sellerId ?? null,
+        sellerId,
         conversationId: body.conversationId,
         tipo: "whatsapp",
         analise: resultado.analise,

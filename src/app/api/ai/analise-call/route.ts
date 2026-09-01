@@ -53,6 +53,9 @@ export async function POST(request: Request) {
     // e deriva a RÉGUA de análise da função do vendedor (sdr → qualificar+agendar;
     // demais → closer/fechamento).
     let objetivo: ObjetivoAnalise = "closer";
+    // Além da régua, resolvemos QUEM conduziu: sem `seller_id` a análise fica
+    // órfã e o relatório em PDF sai sem o nome de quem vai recebê-lo.
+    let sellerId: string | null = body.sellerId ?? null;
     if (body.sellerId) {
       const seller = await store.buscarSeller(ctx.accountId, body.sellerId);
       if (!seller) {
@@ -63,16 +66,19 @@ export async function POST(request: Request) {
       }
       objetivo = objetivoDeFuncao(seller.funcao);
     } else if (body.callId) {
-      // Régua pela função de quem fez a ligação.
+      // Régua e autoria pela função de quem fez a ligação.
+      const dono = await store.donoDaCall(ctx.accountId, body.callId);
       objetivo = objetivoDeFuncao(
-        await store.funcaoDoDonoDaCall(ctx.accountId, body.callId),
+        await store.funcaoDoUsuario(ctx.accountId, dono),
       );
+      sellerId = await store.sellerDoUsuario(ctx.accountId, dono);
     } else if (body.ownerUserId) {
       // Régua pela função comercial do atendente selecionado (membro do CRM).
       // funcaoDoUsuario escopa por conta — usuário de fora vira null (closer).
       objetivo = objetivoDeFuncao(
         await store.funcaoDoUsuario(ctx.accountId, body.ownerUserId),
       );
+      sellerId = await store.sellerDoUsuario(ctx.accountId, body.ownerUserId);
     }
 
     const config = await carregarSalesConfig(ctx.supabase, ctx.accountId);
@@ -114,7 +120,7 @@ export async function POST(request: Request) {
       const salva = await store.inserirAnalise({
         accountId: ctx.accountId,
         documentId,
-        sellerId: body.sellerId ?? null,
+        sellerId,
         tipo: "call",
         analise: resultado.analise,
         promptVersao: resultado.promptVersao,
