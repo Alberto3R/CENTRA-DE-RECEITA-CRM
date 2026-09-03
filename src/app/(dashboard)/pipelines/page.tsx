@@ -25,6 +25,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GitBranch, Plus, ChevronDown, Settings, Search } from "lucide-react";
+import {
+  DateRangePicker,
+  dentroDoIntervalo,
+  type DateRange,
+} from "@/components/ui/date-range-picker";
 import { toast } from "sonner";
 import { useCan } from "@/hooks/use-can";
 import { useAuth } from "@/hooks/use-auth";
@@ -56,8 +61,15 @@ export default function PipelinesPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filtros do board
-  const [dateFilter, setDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  // Filtros do board. "custom" abre o calendário ao lado, que preenche
+  // `dateRange`; os presets continuam para o uso do dia a dia.
+  const [dateFilter, setDateFilter] = useState<
+    "all" | "today" | "7d" | "30d" | "custom"
+  >("all");
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: null,
+    to: null,
+  });
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -259,7 +271,11 @@ export default function PipelinesPage() {
       }
       if (dateFilter !== "all") {
         const created = new Date(d.created_at);
-        if (dateFilter === "today") {
+        if (dateFilter === "custom") {
+          // Período escolhido no calendário. Enquanto só a primeira ponta
+          // foi clicada o filtro já vale como "a partir de".
+          if (!dentroDoIntervalo(created, dateRange)) return false;
+        } else if (dateFilter === "today") {
           if (created.toDateString() !== now.toDateString()) return false;
         } else if (created < cutoff(dateFilter === "7d" ? 7 : 30)) return false;
       }
@@ -274,7 +290,7 @@ export default function PipelinesPage() {
       }
       return true;
     });
-  }, [deals, dateFilter, assigneeFilter, tagFilter, searchQuery]);
+  }, [deals, dateFilter, dateRange, assigneeFilter, tagFilter, searchQuery]);
 
   // Negócios exibidos NO BOARD. Diferente de `filteredDeals` (que alimenta
   // a régua de análise do topo com todos os status, senão "Perdidos no mês"
@@ -509,14 +525,28 @@ export default function PipelinesPage() {
           <span className="text-xs font-medium text-muted-foreground">Filtros</span>
           <select
             value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+            onChange={(e) => {
+              const next = e.target.value as typeof dateFilter;
+              setDateFilter(next);
+              // Sair do período personalizado zera o intervalo, senão o
+              // calendário volta preenchido de uma consulta antiga.
+              if (next !== "custom") setDateRange({ from: null, to: null });
+            }}
             className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
           >
             <option value="all">Data: todas</option>
             <option value="today">Criados hoje</option>
             <option value="7d">Últimos 7 dias</option>
             <option value="30d">Últimos 30 dias</option>
+            <option value="custom">Período no calendário…</option>
           </select>
+          {dateFilter === "custom" ? (
+            <DateRangePicker
+              value={dateRange}
+              onChange={setDateRange}
+              placeholder="Escolher período"
+            />
+          ) : null}
           <select
             value={assigneeFilter}
             onChange={(e) => setAssigneeFilter(e.target.value)}
@@ -558,6 +588,7 @@ export default function PipelinesPage() {
             <button
               onClick={() => {
                 setDateFilter("all");
+                setDateRange({ from: null, to: null });
                 setAssigneeFilter("");
                 setTagFilter("");
                 setStatusFilter("ativos");
