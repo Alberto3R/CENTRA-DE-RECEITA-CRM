@@ -17,6 +17,9 @@ import {
   resolveImportTagIds,
   type ContactTagAssignment,
 } from '@/lib/contacts/resolve-import-tags';
+import { bulkCreateDeals } from '@/lib/deals/bulk-create';
+import { PipelineStagePicker } from '@/components/pipelines/pipeline-stage-picker';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -135,11 +138,18 @@ export function ImportModal({
     new Map()
   );
   const [importing, setImporting] = useState(false);
+  // Criar negócios junto com a importação: escolhe funil/etapa aqui e a
+  // lista já entra no pipeline, sem um segundo passo na tela de Contatos.
+  const [criarNegocios, setCriarNegocios] = useState(false);
+  const [pipelineId, setPipelineId] = useState('');
+  const [stageId, setStageId] = useState('');
+  const [incluirExistentes, setIncluirExistentes] = useState(false);
   const [result, setResult] = useState<{
     imported: number;
     skipped: number;
     failed: number;
     tagsAssigned: number;
+    dealsCreated: number;
   } | null>(null);
 
   function reset() {
@@ -147,6 +157,10 @@ export function ImportModal({
     setParsedRows([]);
     setHasTagsColumn(false);
     setHasCompanyColumn(false);
+    setCriarNegocios(false);
+    setPipelineId('');
+    setStageId('');
+    setIncluirExistentes(false);
     setTagColorByKey(new Map());
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -225,22 +239,30 @@ export function ImportModal({
       skipped += inFileDupes;
 
       // 2) Skip numbers already in this account. One read of the
-      //    generated `phone_normalized` column (migration 022) → Set.
+      //    generated `phone_normalized` column (migration 022) → Map.
+      //    O id vem junto porque a criação de negócios pode querer
+      //    incluir também quem já existia (opção do usuário).
       const { data: existingRows } = await supabase
         .from('contacts')
-        .select('phone_normalized')
+        .select('id, phone_normalized')
         .eq('account_id', accountId);
-      const existing = new Set(
-        (existingRows ?? [])
-          .map(
-            (r) => (r as { phone_normalized: string | null }).phone_normalized
-          )
-          .filter((p): p is string => !!p)
-      );
+      const idByPhone = new Map<string, string>();
+      for (const r of (existingRows ?? []) as {
+        id: string;
+        phone_normalized: string | null;
+      }[]) {
+        if (r.phone_normalized) idByPhone.set(r.phone_normalized, r.id);
+      }
+
+      // Ids que vão para a criação de negócios: os recém-criados e,
+      // se o usuário pediu, os contatos do CSV que já existiam.
+      const dealContactIds: string[] = [];
 
       const toInsert = unique.filter((row) => {
-        if (existing.has(normalizeKey(row.phone))) {
+        const jaExiste = idByPhone.get(normalizeKey(row.phone));
+        if (jaExiste) {
           skipped++;
+          if (criarNegocios && incluirExistentes) dealContactIds.push(jaExiste);
           return false;
         }
         return true;
@@ -297,6 +319,7 @@ export function ImportModal({
 
             if (!singleErr && singleData) {
               imported++;
+              dealContactIds.push(singleData.id);
               if (source.tagNames.length > 0) {
                 tagAssignments.push({
                   contactId: singleData.id,
@@ -312,6 +335,7 @@ export function ImportModal({
         } else {
           const inserted = data ?? [];
           imported += inserted.length;
+          for (const row of inserted) dealContactIds.push(row.id);
           // inserted[j] ↔ chunk[j] only holds because a single INSERT
           // preserves RETURNING order. If this path is ever split into
           // parallel inserts, zip by phone or returned id instead.
@@ -339,7 +363,42 @@ export function ImportModal({
         toast.warning('Contatos importados, mas algumas atribuições de tag falharam.');
       }
 
-      setResult({ imported, skipped, failed, tagsAssigned });
+      // 6) Negócios no funil escolhido. Falha aqui também não pode
+      //    apagar o resultado da importação — os contatos já entraram.
+      let dealsCreated = 0;
+      if (criarNegocios && pipelineId && stageId && dealContactIds.length > 0) {
+        try {
+          const res = await bulkCreateDeals(supabase, {
+            contactIds: dealContactIds,
+            pipelineId,
+            stageId,
+            accountId,
+            userId: user.id,
+          });
+          dealsCreated = res.created;
+          if (res.created > 0) {
+            toast.success(
+              `${res.created} negócio${res.created !== 1 ? 's' : ''} criado${res.created !== 1 ? 's' : ''} no funil`
+            );
+          }
+          if (res.skipped > 0) {
+            toast.info(
+              `${res.skipped} contato${res.skipped !== 1 ? 's' : ''} já ${res.skipped !== 1 ? 'estavam' : 'estava'} nesse funil`
+            );
+          }
+          if (res.failed > 0) {
+            toast.error(
+              `Falha ao criar ${res.failed} negócio${res.failed !== 1 ? 's' : ''}`
+            );
+          }
+        } catch {
+          toast.warning(
+            'Contatos importados, mas a criação dos negócios falhou.'
+          );
+        }
+      }
+
+      setResult({ imported, skipped, failed, tagsAssigned, dealsCreated });
       if (imported > 0) {
         toast.success(
           `${imported} contato${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''}`
@@ -587,6 +646,57 @@ export function ImportModal({
             </div>
           )}
 
+          {!result && (
+            <div className="mt-4 space-y-3 rounded-xl border border-border bg-background/40 p-4">
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <Checkbox
+                  checked={criarNegocios}
+                  disabled={importing}
+                  onCheckedChange={(v) => setCriarNegocios(v === true)}
+                  aria-label="Criar negócios para os contatos importados"
+                />
+                <span className="text-sm text-popover-foreground">
+                  Criar negócios para estes contatos
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                    Cada contato importado entra no funil escolhido, com o
+                    nome dele no título do negócio.
+                  </span>
+                </span>
+              </label>
+
+              {criarNegocios && (
+                <div className="space-y-3 border-t border-border/70 pt-3">
+                  <PipelineStagePicker
+                    pipelineId={pipelineId}
+                    stageId={stageId}
+                    disabled={importing}
+                    compact
+                    onChange={(next) => {
+                      setPipelineId(next.pipelineId);
+                      setStageId(next.stageId);
+                    }}
+                  />
+
+                  <label className="flex cursor-pointer items-start gap-2.5">
+                    <Checkbox
+                      checked={incluirExistentes}
+                      disabled={importing}
+                      onCheckedChange={(v) => setIncluirExistentes(v === true)}
+                      aria-label="Incluir contatos que já existiam"
+                    />
+                    <span className="text-sm text-popover-foreground">
+                      Incluir também os contatos que já existiam
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                        Duplicados do CSV não viram contato novo, mas ganham
+                        negócio no funil. Quem já está no funil é pulado.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
           {result && (
             <div className="rounded-xl border border-border bg-background/50 p-4">
               <p className="text-sm font-medium text-popover-foreground">Importação concluída</p>
@@ -603,6 +713,14 @@ export function ImportModal({
                     {result.tagsAssigned} tag
                     {result.tagsAssigned !== 1 ? 's' : ''} atribuída
                     {result.tagsAssigned !== 1 ? 's' : ''}
+                  </div>
+                )}
+                {result.dealsCreated > 0 && (
+                  <div className="flex items-center gap-1.5 text-sm text-emerald-400">
+                    <CheckCircle className="size-4 shrink-0" />
+                    {result.dealsCreated} negócio
+                    {result.dealsCreated !== 1 ? 's' : ''} criado
+                    {result.dealsCreated !== 1 ? 's' : ''}
                   </div>
                 )}
                 {result.skipped > 0 && (
@@ -634,7 +752,11 @@ export function ImportModal({
           {!result && (
             <Button
               type="button"
-              disabled={parsedRows.length === 0 || importing}
+              disabled={
+                parsedRows.length === 0 ||
+                importing ||
+                (criarNegocios && (!pipelineId || !stageId))
+              }
               onClick={handleImport}
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
