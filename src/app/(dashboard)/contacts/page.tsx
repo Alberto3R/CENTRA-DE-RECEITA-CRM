@@ -48,16 +48,21 @@ import {
   SlidersHorizontal,
   Filter,
   X,
+  GitBranch,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
+import { BulkCreateDealsModal } from '@/components/contacts/bulk-create-deals-modal';
 import { CustomFieldsManager } from '@/components/contacts/custom-fields-manager';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { Checkbox } from '@/components/ui/checkbox';
 
 const PAGE_SIZE = 25;
+// Teto do "selecionar todos do filtro". Segura ação em massa acidental
+// sobre uma base inteira e mantém a consulta de ids barata.
+const SELECT_ALL_LIMIT = 2000;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
@@ -88,9 +93,13 @@ export default function ContactsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Bulk selection (page-scoped — only the loaded rows are selectable)
+  // Bulk selection. O checkbox do cabeçalho marca a PÁGINA; a barra de
+  // ações oferece "selecionar todos os N do filtro", que busca os ids do
+  // resultado inteiro (não só das 25 linhas carregadas).
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDealsOpen, setBulkDealsOpen] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
 
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
@@ -291,6 +300,55 @@ export default function ContactsPage() {
       else next.add(id);
       return next;
     });
+  }
+
+  // Seleciona TODOS os contatos que casam com a busca/tags atuais, não só
+  // os da página. Repete a mesma consulta do fetch, pedindo só os ids.
+  // Teto de segurança para não puxar uma base inteira sem querer.
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    const term = search.trim();
+    let ids: string[] = [];
+
+    if (selectedTagIds.length > 0) {
+      const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+        p_tag_ids: selectedTagIds,
+        p_search: term || null,
+        p_limit: SELECT_ALL_LIMIT,
+        p_offset: 0,
+      });
+      if (error) {
+        toast.error('Falha ao selecionar todos');
+        setSelectingAll(false);
+        return;
+      }
+      ids = ((data ?? []) as { contact: Contact }[]).map((r) => r.contact.id);
+    } else {
+      let query = supabase
+        .from('contacts')
+        .select('id')
+        .order('created_at', { ascending: false })
+        .limit(SELECT_ALL_LIMIT);
+      if (term) {
+        const like = `%${term}%`;
+        query = query.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+      }
+      const { data, error } = await query;
+      if (error) {
+        toast.error('Falha ao selecionar todos');
+        setSelectingAll(false);
+        return;
+      }
+      ids = (data ?? []).map((r) => (r as { id: string }).id);
+    }
+
+    setSelected(new Set(ids));
+    setSelectingAll(false);
+    if (ids.length < totalCount) {
+      toast.info(
+        `Selecionados os primeiros ${ids.length} de ${totalCount} — limite por vez.`
+      );
+    }
   }
 
   async function handleBulkDelete() {
@@ -498,10 +556,26 @@ export default function ContactsPage() {
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/40 px-4 py-2">
           <p className="text-sm text-foreground">
             <span className="font-medium">{selected.size}</span>{' '}
             {selected.size === 1 ? 'contato' : 'contatos'} selecionado{selected.size === 1 ? '' : 's'}
+            {/* Só oferece "todos do filtro" quando há mais do que já está
+                marcado — senão a linha vira ruído. */}
+            {totalCount > selected.size && (
+              <>
+                {' · '}
+                <button
+                  onClick={selectAllMatching}
+                  disabled={selectingAll}
+                  className="text-primary hover:underline disabled:opacity-60"
+                >
+                  {selectingAll
+                    ? 'Selecionando...'
+                    : `Selecionar todos os ${totalCount}${hasActiveFilters ? ' do filtro' : ''}`}
+                </button>
+              </>
+            )}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -512,6 +586,17 @@ export default function ContactsPage() {
             >
               Limpar
             </Button>
+            <GatedButton
+              variant="outline"
+              size="sm"
+              canAct={canEdit}
+              gateReason="create deals"
+              onClick={() => setBulkDealsOpen(true)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              <GitBranch className="size-4" />
+              Criar negócios
+            </GatedButton>
             <GatedButton
               variant="destructive"
               size="sm"
@@ -752,6 +837,14 @@ export default function ContactsPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={fetchContacts}
+      />
+
+      {/* Criar negócios para os contatos selecionados */}
+      <BulkCreateDealsModal
+        open={bulkDealsOpen}
+        onOpenChange={setBulkDealsOpen}
+        contactIds={[...selected]}
+        onCreated={() => setSelected(new Set())}
       />
 
       {/* Custom Fields Manager (admin+) */}
