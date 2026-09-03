@@ -58,6 +58,19 @@ export interface AccountContext {
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
   /**
+   * Suspensão de acesso (migrações 094/095). `suspendsAt` é o prazo
+   * anunciado no aviso; `suspended` diz se ele já venceu.
+   *
+   * O corte de verdade é o RLS — `is_account_member()` nega tudo depois
+   * do prazo. Isto aqui existe para o app conseguir MOSTRAR a tela certa
+   * em vez de uma sequência de listas vazias.
+   */
+  suspension: {
+    suspended: boolean;
+    suspendsAt: string | null;
+    reason: string | null;
+  };
+  /**
    * Preenchido quando o chamador é um platform admin com sessão de
    * impersonation ativa. Nesse caso `accountId`/`account` apontam para o
    * tenant impersonado e `role` é sempre `viewer`.
@@ -73,6 +86,25 @@ export interface AccountContext {
     expiresAt: string;
     reason: string;
   };
+}
+
+/**
+ * Prazo de suspensão vencido?
+ *
+ * Separado da consulta para poder ser testado nas bordas: sem prazo,
+ * prazo no futuro (ainda é só aviso), prazo vencido, e impersonation —
+ * que nunca é bloqueada, porque é como a Sales 3R entra na conta
+ * suspensa para inspecionar e resolver.
+ */
+export function prazoVencido(
+  suspendsAt: string | null | undefined,
+  opts: { impersonando?: boolean; agora?: number } = {},
+): boolean {
+  if (opts.impersonando) return false;
+  if (!suspendsAt) return false;
+  const prazo = new Date(suspendsAt).getTime();
+  if (!Number.isFinite(prazo)) return false;
+  return prazo <= (opts.agora ?? Date.now());
 }
 
 /**
@@ -144,11 +176,34 @@ export async function getCurrentAccount(): Promise<AccountContext> {
   // and takes down the entire account context (issue #294). A lookup by
   // id needs no relationship inference and is gated by the same accounts
   // RLS, so it stays robust against cache staleness and older schemas.
-  const { data: account, error: accountErr } = await supabase
+  type ContaLida = {
+    id: string;
+    name: string;
+    access_suspends_at?: string | null;
+    suspension_reason?: string | null;
+  };
+
+  let { data: account, error: accountErr } = await supabase
     .from("accounts")
-    .select("id, name")
+    .select("id, name, access_suspends_at, suspension_reason")
     .eq("id", effectiveAccountId)
-    .maybeSingle();
+    .maybeSingle<ContaLida>();
+
+  // Banco sem as colunas da migração 094 (ambiente atrasado, código no ar
+  // antes da migração): relê só o essencial. Este contexto sustenta o app
+  // INTEIRO — deixar o app cair por causa de uma coluna de aviso trocaria
+  // um recurso novo por um apagão geral.
+  if (accountErr) {
+    const retry = await supabase
+      .from("accounts")
+      .select("id, name")
+      .eq("id", effectiveAccountId)
+      .maybeSingle<ContaLida>();
+    if (!retry.error) {
+      account = retry.data;
+      accountErr = null;
+    }
+  }
 
   if (accountErr) {
     console.error("[getCurrentAccount] account fetch error:", accountErr);
@@ -160,12 +215,21 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     throw new ForbiddenError("Profile is not linked to an account");
   }
 
+  const suspendsAt = account.access_suspends_at ?? null;
+
   return {
     supabase,
     userId: user.id,
     accountId: effectiveAccountId,
     role: effectiveRole,
     account: { id: account.id, name: account.name },
+    suspension: {
+      suspended: prazoVencido(suspendsAt, {
+        impersonando: !!impersonation,
+      }),
+      suspendsAt,
+      reason: account.suspension_reason ?? null,
+    },
     ...(impersonation
       ? {
           impersonation: {
