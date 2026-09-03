@@ -39,6 +39,13 @@ export default async function DashboardLayout({
     redirect("/comecar");
   }
 
+  // Prazo vencido: o RLS já nega os dados (migração 095), então seguir
+  // renderizando o app entregaria um CRM de listas vazias e erros soltos.
+  // Manda para a tela que explica o corte e oferece a reativação.
+  if (ctx.suspension.suspended) {
+    redirect("/suspenso");
+  }
+
   // O banner é renderizado no servidor a partir do contexto que este
   // layout já carrega. Nada de buscar estado de impersonation no
   // cliente: seria uma requisição extra em toda navegação, para todo

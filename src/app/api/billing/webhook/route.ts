@@ -157,12 +157,20 @@ async function aplicarAssinatura(
     { onConflict: "stripe_subscription_id" },
   );
 
+  const voltouAFicarEmDia = status === "active" || status === "trialing";
+
   await admin
     .from("accounts")
     .update({
       plan: planoEfetivo(status, plan),
       subscription_status: status,
       stripe_subscription_id: sub.id,
+      // Pagou de novo, o corte cai junto (migrações 094/095). Sem isto o
+      // cliente reativa a assinatura e continua olhando a tela de conta
+      // suspensa — o RLS só volta a liberar quando o prazo some.
+      ...(voltouAFicarEmDia
+        ? { access_suspends_at: null, suspension_reason: null }
+        : {}),
     })
     .eq("id", accountId);
 }

@@ -74,7 +74,7 @@ export async function middleware(request: NextRequest) {
   // não está logado. A autorização de verdade é `requirePlatformAdmin()`
   // na página e em cada rota — middleware não sabe quem é platform admin
   // (a tabela exige service role), e não é lugar de decidir isso.
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/relatorios', '/painel-outbound', '/broadcasts', '/automations', '/settings', '/comecar', '/ccc', '/admin']
+  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/relatorios', '/painel-outbound', '/broadcasts', '/automations', '/settings', '/comecar', '/suspenso', '/ccc', '/admin']
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
