@@ -1213,7 +1213,7 @@ function WaitForm({
 interface SendTemplateCfg {
   template_name?: string;
   language?: string;
-  params?: { type: "static" | "field" | "var"; value: string }[];
+  params?: { type: "static" | "field" | "var" | "deal_note"; value: string }[];
   cadencia?: string;
   toque?: number;
   next_node_key?: string;
@@ -1273,7 +1273,10 @@ function SendTemplateForm({
 
   const atualizarParam = (
     i: number,
-    patch: Partial<{ type: "static" | "field" | "var"; value: string }>,
+    patch: Partial<{
+      type: "static" | "field" | "var" | "deal_note";
+      value: string;
+    }>,
   ) => {
     const proximo = params.map((p, idx) => (idx === i ? { ...p, ...patch } : p));
     onUpdateConfig({ params: proximo });
@@ -1351,7 +1354,11 @@ function SendTemplateForm({
                 <Select
                   value={p.type}
                   onValueChange={(v) => {
-                    const tipo = (v ?? "field") as "static" | "field" | "var";
+                    const tipo = (v ?? "field") as
+                      | "static"
+                      | "field"
+                      | "var"
+                      | "deal_note";
                     atualizarParam(i, {
                       type: tipo,
                       value: tipo === "field" ? "first_name" : "",
@@ -1365,6 +1372,7 @@ function SendTemplateForm({
                     <SelectItem value="field">Campo</SelectItem>
                     <SelectItem value="static">Texto fixo</SelectItem>
                     <SelectItem value="var">Variável do fluxo</SelectItem>
+                    <SelectItem value="deal_note">Nota do negócio</SelectItem>
                   </SelectContent>
                 </Select>
                 {p.type === "field" ? (
@@ -1387,7 +1395,13 @@ function SendTemplateForm({
                   <Input
                     value={p.value}
                     onChange={(e) => atualizarParam(i, { value: e.target.value })}
-                    placeholder={p.type === "var" ? "nome_da_variavel" : "texto"}
+                    placeholder={
+                      p.type === "var"
+                        ? "nome_da_variavel"
+                        : p.type === "deal_note"
+                          ? "PDF do diagnóstico"
+                          : "texto"
+                    }
                     className="flex-1 bg-muted"
                   />
                 )}

@@ -35,6 +35,7 @@
 import { supabaseAdmin } from "./admin-client";
 import { engineSendTemplate } from "@/lib/automations/meta-send";
 import { proximoRetorno } from "./schedule";
+import { extrairNotaDoNegocio } from "./deal-notes";
 import { resolveContactField } from "@/lib/broadcast/contact-fields";
 import {
   engineSendInteractiveButtons,
@@ -266,6 +267,8 @@ async function logEvent(
     | "started"
     | "node_entered"
     | "message_sent"
+    /** Ensaio: o que TERIA sido enviado (migração 099). */
+    | "shadow_send"
     | "reply_received"
     | "fallback_fired"
     | "handoff"
@@ -609,9 +612,30 @@ async function garantirConversa(
 async function resolverParamsDoTemplate(
   db: AdminClient,
   run: FlowRunRow,
-  params: { type: "static" | "field" | "var"; value: string }[] | undefined,
+  params:
+    | { type: "static" | "field" | "var" | "deal_note"; value: string }[]
+    | undefined,
 ): Promise<string[]> {
   if (!params?.length) return [];
+
+  // Notas do negócio, carregadas uma vez só se algum parâmetro pedir.
+  let notas: string | null = null;
+  if (params.some((p) => p.type === "deal_note")) {
+    const dealId =
+      typeof run.vars?.__deal_id === "string" ? run.vars.__deal_id : null;
+    const q = db.from("deals").select("notes");
+    const { data } = dealId
+      ? await q.eq("id", dealId).maybeSingle()
+      : await q
+          .eq("account_id", run.account_id)
+          .eq("contact_id", run.contact_id!)
+          .eq("status", "open")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+    notas = (data as { notes?: string | null } | null)?.notes ?? null;
+  }
+
   const precisaContato = params.some((p) => p.type === "field");
   let contato: {
     name?: string | null;
@@ -630,6 +654,7 @@ async function resolverParamsDoTemplate(
   return params.map((p) => {
     if (p.type === "static") return p.value;
     if (p.type === "field") return contato ? resolveContactField(p.value, contato) : "";
+    if (p.type === "deal_note") return extrairNotaDoNegocio(notas, p.value);
     const v = run.vars?.[p.value];
     return v === undefined || v === null ? "" : String(v);
   });
@@ -642,6 +667,17 @@ async function advanceFromNodeKey(
   nodes: Map<string, FlowNodeRow>,
 ): Promise<{ outcome: "advanced" | "completed" | "handed_off" }> {
   let currentKey: string | null = startNodeKey;
+
+  // Ensaio: o fluxo roda inteiro e registra o que TERIA mandado, sem mandar.
+  // É assim que uma régua nova roda ao lado da que está no ar sem ninguém
+  // receber mensagem em dobro enquanto os dois são comparados.
+  const { data: flowCfg } = await db
+    .from("flows")
+    .select("shadow_mode")
+    .eq("id", run.flow_id)
+    .maybeSingle();
+  const sombra = (flowCfg as { shadow_mode?: boolean } | null)?.shadow_mode === true;
+
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
   for (let safety = 0; safety < 64; safety += 1) {
@@ -664,12 +700,37 @@ async function advanceFromNodeKey(
       node_type: node.node_type,
     });
 
+    if (
+      sombra &&
+      (node.node_type === "send_buttons" ||
+        node.node_type === "send_list" ||
+        node.node_type === "collect_input")
+    ) {
+      // Daqui para a frente o ensaio dependeria de o cliente responder — e no
+      // ensaio ninguém foi perguntado. Encerra dizendo onde parou, em vez de
+      // deixar o run pendurado esperando uma resposta que nunca vem.
+      await logEvent(db, run.id, "shadow_send", node.node_key, {
+        node_type: node.node_type,
+        parou: "no_ensaio_ninguem_responde",
+      });
+      await endRun(db, run.id, "completed", "shadow_interativo");
+      return { outcome: "completed" };
+    }
+
     if (node.node_type === "start") {
       currentKey = (node.config as unknown as StartNodeConfig).next_node_key;
       continue;
     }
     if (node.node_type === "send_message") {
       const cfg = node.config as unknown as SendMessageNodeConfig;
+      if (sombra) {
+        await logEvent(db, run.id, "shadow_send", node.node_key, {
+          node_type: "send_message",
+          texto: interpolateVars(cfg.text, run.vars),
+        });
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       try {
         const { whatsapp_message_id } = await engineSendText({
           accountId: run.account_id,
@@ -695,6 +756,15 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === "send_media") {
       const cfg = node.config as unknown as SendMediaNodeConfig;
+      if (sombra) {
+        await logEvent(db, run.id, "shadow_send", node.node_key, {
+          node_type: "send_media",
+          media_type: cfg.media_type,
+          media_url: cfg.media_url,
+        });
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       try {
         const { whatsapp_message_id } = await engineSendMedia({
           accountId: run.account_id,
@@ -856,6 +926,19 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === "send_template") {
       const cfg = node.config as unknown as SendTemplateNodeConfig;
+      if (sombra) {
+        // Antes da reserva de propósito: ensaio que consome o toque faria a
+        // estreia pular esse mesmo toque, e o lead ficaria sem a mensagem.
+        await logEvent(db, run.id, "shadow_send", node.node_key, {
+          node_type: "send_template",
+          template_name: cfg.template_name,
+          params: await resolverParamsDoTemplate(db, run, cfg.params),
+          cadencia: cfg.cadencia ?? null,
+          toque: cfg.toque ?? null,
+        });
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       const conversationId = await garantirConversa(db, run);
       if (!conversationId) {
         await logEvent(db, run.id, "error", node.node_key, {

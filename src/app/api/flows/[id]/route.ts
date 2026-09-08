@@ -77,6 +77,8 @@ interface PutBody {
   trigger_config?: Record<string, unknown>
   /** Cadência: resposta do lead encerra a régua (migração 098). */
   stop_on_reply?: boolean
+  /** Ensaio sem envio (migração 099). */
+  shadow_mode?: boolean
   entry_node_id?: string | null
   fallback_policy?: Record<string, unknown>
   nodes?: Array<{
@@ -123,6 +125,8 @@ export async function PUT(
     flowPatch.trigger_config = body.trigger_config
   if (body.stop_on_reply !== undefined)
     flowPatch.stop_on_reply = body.stop_on_reply
+  if (body.shadow_mode !== undefined)
+    flowPatch.shadow_mode = body.shadow_mode
   if (body.entry_node_id !== undefined)
     flowPatch.entry_node_id = body.entry_node_id
   if (body.fallback_policy !== undefined)

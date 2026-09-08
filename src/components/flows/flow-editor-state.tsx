@@ -63,6 +63,8 @@ export interface BuilderState {
   trigger_type: "keyword" | "first_inbound_message" | "manual" | "deal_stage";
   /** Cadência: a resposta do lead encerra a régua e passa a bola. */
   stop_on_reply: boolean;
+  /** Ensaio: roda sem enviar, registrando o que teria mandado. */
+  shadow_mode: boolean;
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
   status: FlowRow["status"];
@@ -261,6 +263,7 @@ export function FlowEditorProvider({
     description: initialFlow.description ?? "",
     trigger_type: initialFlow.trigger_type,
     stop_on_reply: initialFlow.stop_on_reply ?? false,
+    shadow_mode: initialFlow.shadow_mode ?? false,
     trigger_config: initialFlow.trigger_config as Record<string, unknown>,
     entry_node_id: initialFlow.entry_node_id,
     status: initialFlow.status,
@@ -358,6 +361,7 @@ export function FlowEditorProvider({
           trigger_type: state.trigger_type,
           trigger_config: state.trigger_config,
           stop_on_reply: state.stop_on_reply,
+          shadow_mode: state.shadow_mode,
           entry_node_id: state.entry_node_id,
           nodes: state.nodes,
         }),

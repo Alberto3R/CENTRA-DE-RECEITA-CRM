@@ -220,7 +220,17 @@ export interface SendTemplateNodeConfig {
    * do contato (first_name, name, phone, email, company), `var` lê de
    * `flow_runs.vars`, `static` é literal.
    */
-  params?: { type: "static" | "field" | "var"; value: string }[];
+  params?: {
+    type: "static" | "field" | "var" | "deal_note";
+    /**
+     * `deal_note` lê uma linha rotulada das notas do negócio — é assim que a
+     * régua do Diagnóstico pega o link do PDF ("PDF do diagnóstico: …") e o
+     * buraco principal ("Maiores buracos: …"), que nascem no intake e vivem
+     * ali. Sem isso, copiar a régua para um fluxo perderia dois dos cinco
+     * toques.
+     */
+    value: string;
+  }[];
   /**
    * Marca o toque em `outbound_touches` antes de enviar (migração 096). Com
    * isso, dois caminhos tocando o mesmo lead não geram mensagem repetida —
@@ -298,6 +308,8 @@ export interface FlowRow {
    * faz o run avançar. Default false para não mudar os fluxos existentes.
    */
   stop_on_reply?: boolean;
+  /** Ensaio: roda o fluxo sem enviar, registrando `shadow_send`. */
+  shadow_mode?: boolean;
   trigger_config: KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
   entry_node_id: string | null;
   fallback_policy: FlowFallbackPolicy;

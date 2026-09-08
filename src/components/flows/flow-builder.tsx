@@ -304,6 +304,26 @@ function TriggerPanel({
           <label className="flex items-start gap-2 text-sm text-foreground">
             <input
               type="checkbox"
+              checked={state.shadow_mode}
+              onChange={(e) =>
+                setState((s) => ({ ...s, shadow_mode: e.target.checked }))
+              }
+              className="mt-0.5 size-4 accent-primary"
+            />
+            <span>
+              Ensaio (não envia nada)
+              <span className="block text-xs text-muted-foreground">
+                O fluxo roda inteiro e registra o que TERIA mandado. Use para
+                rodar uma régua nova ao lado da que já está no ar antes de
+                trocar as duas.
+              </span>
+            </span>
+          </label>
+        </div>
+        <div className="md:col-span-2">
+          <label className="flex items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
               checked={state.stop_on_reply}
               onChange={(e) =>
                 setState((s) => ({ ...s, stop_on_reply: e.target.checked }))
