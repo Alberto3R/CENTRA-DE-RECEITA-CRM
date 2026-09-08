@@ -45,6 +45,10 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
     label: "Falhou",
     classes: "bg-red-500/10 text-red-400 border-red-500/20",
   },
+  skipped: {
+    label: "Ignorado",
+    classes: "bg-slate-500/10 text-muted-foreground border-slate-500/20",
+  },
 };
 
 export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {
@@ -71,6 +75,9 @@ export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {
   failed: {
     label: "Falhou",
     classes: "bg-red-500/10 text-red-400 border-red-500/20",
+  },  skipped: {
+    label: "Ignorado",
+    classes: "bg-slate-500/10 text-muted-foreground border-slate-500/20",
   },
 };
 

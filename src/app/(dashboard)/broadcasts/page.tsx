@@ -62,6 +62,15 @@ export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Disparo de máquina não é disparo de gente. Cada toque de cadência, cada
+   * aviso automático, vira um "disparo" de um destinatário só porque o motor
+   * de envio é este — e em setembro/2026 a conta Sales 3R tinha 4.094 desses
+   * contra 3 disparos de verdade, o que tornava esta tela inútil. Eles seguem
+   * aqui (auditoria importa), mas atrás de um clique.
+   */
+  const [mostrarAutomaticos, setMostrarAutomaticos] = useState(false);
+  const [totalAutomaticos, setTotalAutomaticos] = useState(0);
 
   // Used to kick off polling only while something is actively sending.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -72,10 +81,20 @@ export default function BroadcastsPage() {
       const { data, error: fetchError } = await supabase
         .from('broadcasts')
         .select('*')
-        .order('created_at', { ascending: false });
+        .eq('kind', mostrarAutomaticos ? 'system' : 'manual')
+        .order('created_at', { ascending: false })
+        .limit(mostrarAutomaticos ? 200 : 1000);
 
       if (fetchError) throw fetchError;
       setBroadcasts(data ?? []);
+
+      // Contagem dos automáticos — o rótulo do botão diz quantos estão
+      // escondidos, para ninguém achar que sumiram.
+      const { count } = await supabase
+        .from('broadcasts')
+        .select('id', { count: 'exact', head: true })
+        .eq('kind', 'system');
+      setTotalAutomaticos(count ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao carregar disparos');
     } finally {
@@ -84,8 +103,10 @@ export default function BroadcastsPage() {
   }
 
   useEffect(() => {
+    setLoading(true);
     fetchBroadcasts();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrarAutomaticos]);
 
   const anySending = useMemo(
     () => broadcasts.some((b) => b.status === 'sending'),
@@ -181,18 +202,33 @@ export default function BroadcastsPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Disparos</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Envie mensagens em massa para seus contatos usando modelos aprovados.
+            {mostrarAutomaticos
+              ? 'Envios criados por cadências e automações — um por lead, para auditoria.'
+              : 'Envie mensagens em massa para seus contatos usando modelos aprovados.'}
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason="create broadcasts"
-          onClick={() => router.push('/broadcasts/new')}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          Novo Disparo
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          {(totalAutomaticos > 0 || mostrarAutomaticos) && (
+            <button
+              type="button"
+              onClick={() => setMostrarAutomaticos((v) => !v)}
+              className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {mostrarAutomaticos
+                ? 'Ver disparos manuais'
+                : `Ver automáticos (${totalAutomaticos})`}
+            </button>
+          )}
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create broadcasts"
+            onClick={() => router.push('/broadcasts/new')}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Novo Disparo
+          </GatedButton>
+        </div>
       </div>
 
       {broadcasts.length === 0 ? (

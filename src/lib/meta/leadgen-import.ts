@@ -141,6 +141,21 @@ async function enfileiraAbertura(
   if ((tpl as { status?: string } | null)?.status !== 'APPROVED') return 'template_nao_aprovado'
 
   const nome = String(nomeCompleto || '').split(/\s+/)[0] || 'tudo bem'
+
+  // Reserva o toque 1 ANTES de enfileirar. A `diag-cadencia` lê a mesma tabela,
+  // então ela não vai mandar a abertura de novo achando que este lead nunca foi
+  // tocado — e se dois caminhos tentarem abrir o mesmo contato ao mesmo tempo, o
+  // UNIQUE decide qual ganha. Ver migração 096.
+  const { data: reservou, error: erroReserva } = await db.rpc('reservar_toque', {
+    p_account: accountId,
+    p_contact: contactId,
+    p_cadencia: 'diagnostico',
+    p_toque: 1,
+    p_template: TPL_ABERTURA_LEADGEN,
+  })
+  if (erroReserva) return 'erro_reserva'
+  if (reservou !== true) return 'abertura_ja_registrada'
+
   const { data: bc, error } = await db
     .from('broadcasts')
     .insert({
@@ -148,6 +163,7 @@ async function enfileiraAbertura(
       user_id: ownerId,
       channel_id: canal.id,
       name: `Diag abertura · ${nome} · ${contactId}`,
+      kind: 'system',
       template_name: TPL_ABERTURA_LEADGEN,
       template_language: 'pt_BR',
       template_variables: { '1': { type: 'static', value: nome } },
@@ -161,12 +177,30 @@ async function enfileiraAbertura(
     })
     .select('id')
     .single()
-  if (error || !bc) return 'erro_broadcast'
+  if (error || !bc) {
+    // Reservou e não conseguiu enfileirar: devolve o toque para retentativa,
+    // senão o lead trava num toque que nunca saiu.
+    await db
+      .from('outbound_touches')
+      .update({ status: 'falhou', updated_at: new Date(Date.now() - 7 * 3600_000).toISOString() })
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .eq('cadencia', 'diagnostico')
+      .eq('toque', 1)
+    return 'erro_broadcast'
+  }
 
   await db.from('broadcast_recipients').insert({
     broadcast_id: (bc as { id: string }).id,
     contact_id: contactId,
     status: 'pending',
+  })
+  await db.rpc('vincular_broadcast_ao_toque', {
+    p_account: accountId,
+    p_contact: contactId,
+    p_cadencia: 'diagnostico',
+    p_toque: 1,
+    p_broadcast: (bc as { id: string }).id,
   })
   // scheduled_at no passado = o drain pega na próxima passada (até 1 min)
   await db

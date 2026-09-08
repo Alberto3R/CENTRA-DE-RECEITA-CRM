@@ -392,8 +392,12 @@ export interface Deal {
   assignee?: Profile;
 }
 
-export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
-export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
+// 'skipped' = todos os destinatários foram barrados pela trava
+// anti-repetição do motor; nada saiu, mas nada falhou na entrega.
+export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'skipped';
+// 'skipped' = o motor recusou o envio (trava anti-repetição). Não é falha
+// de entrega: a mensagem não deveria existir.
+export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
 
 export interface Broadcast {
   id: string;
@@ -499,6 +503,16 @@ export interface SendTemplateStepConfig {
   template_name: string;
   language?: string;
   variables?: Record<string, string>;
+  /**
+   * URL pública do arquivo que vai no CABEÇALHO do template (PDF, imagem…).
+   * É o único jeito de entregar um material para quem nunca nos mandou
+   * mensagem: fora da janela de 24h o WhatsApp só aceita template, e
+   * `send_document` (mensagem livre) é recusado pela Meta.
+   * Exige um template aprovado com header do tipo DOCUMENT/IMAGE.
+   */
+  header_media_url?: string;
+  /** Nome do arquivo como o destinatário vê no chat. */
+  header_filename?: string;
 }
 
 export interface SendDocumentStepConfig {

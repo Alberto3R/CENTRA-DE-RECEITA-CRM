@@ -8,6 +8,7 @@
 // variantes de telefone, template carregado 1×).
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { resolveContactField } from "@/lib/broadcast/contact-fields";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { resolveChannelConfig } from "@/lib/whatsapp/channel";
 import { sendTemplateMessage } from "@/lib/whatsapp/meta-api";
@@ -42,15 +43,7 @@ function resolveVars(
   return keys.map((key) => {
     const v = variables[key];
     if (v.type === "static") return v.value;
-    if (v.type === "field") {
-      const map: Record<string, string | null | undefined> = {
-        name: contact.name,
-        phone: contact.phone,
-        email: contact.email,
-        company: contact.company,
-      };
-      return map[v.value] ?? "";
-    }
+    if (v.type === "field") return resolveContactField(v.value, contact);
     return customValues?.get(v.value) ?? "";
   });
 }
@@ -123,6 +116,58 @@ interface BroadcastRow {
  * Envia até `maxSend` destinatários pending de um broadcast. Retorna quantos
  * foram processados (enviados+falhos). Se 0, não havia pending disponível.
  */
+/**
+ * Trava anti-repetição: quem já recebeu ESTE template nas últimas 24h não
+ * recebe de novo, não importa quem enfileirou.
+ *
+ * Existe por causa do incidente de 02→08/set/2026: a régua do Diagnóstico
+ * perdeu a noção de quais toques já tinha dado e reenfileirou a mesma abertura
+ * de hora em hora — 3.694 envios para 131 pessoas, algumas 76 vezes. A régua
+ * foi corrigida na raiz (migração 096: o estado virou linha com UNIQUE), mas
+ * uma régua é código e código volta a ter bug. Esta trava é o cinto: mora no
+ * ÚNICO ponto por onde todo template passa, então protege também as automações,
+ * os fluxos e o que ainda não foi escrito.
+ *
+ * 24h é o número certo por dois motivos: nenhuma cadência legítima toca a mesma
+ * pessoa com o mesmo template duas vezes no mesmo dia, e é a janela da própria
+ * Meta — repetição dentro dela é o que derruba a qualidade do número.
+ *
+ * Se a consulta falhar, deixamos passar. Foi engolir erro que causou o
+ * incidente, mas aqui a assimetria se inverte: falhar fechado paralisaria os
+ * disparos legítimos da empresa, e falhar aberto só devolve o comportamento
+ * anterior. O erro vai para o log em vez de virar silêncio.
+ */
+const JANELA_ANTI_REPETICAO_MS = 24 * 60 * 60 * 1000;
+
+async function contatosJaTocados(
+  admin: Admin,
+  accountId: string,
+  templateName: string,
+  contactIds: string[],
+): Promise<Set<string>> {
+  const bloqueados = new Set<string>();
+  if (!contactIds.length) return bloqueados;
+
+  const desde = new Date(Date.now() - JANELA_ANTI_REPETICAO_MS).toISOString();
+  const { data, error } = await admin
+    .from("broadcast_recipients")
+    .select("contact_id, broadcasts!inner(template_name, account_id)")
+    .in("contact_id", contactIds)
+    .in("status", ["sent", "delivered", "read", "replied"])
+    .gte("sent_at", desde)
+    .eq("broadcasts.template_name", templateName)
+    .eq("broadcasts.account_id", accountId);
+
+  if (error) {
+    console.error("[broadcast] trava anti-repetição indisponível:", error.message);
+    return bloqueados;
+  }
+  for (const row of (data ?? []) as { contact_id: string | null }[]) {
+    if (row.contact_id) bloqueados.add(row.contact_id);
+  }
+  return bloqueados;
+}
+
 async function drainBroadcast(
   admin: Admin,
   b: BroadcastRow,
@@ -171,9 +216,33 @@ async function drainBroadcast(
     (contacts ?? []).map((c) => [c.id as string, c]),
   );
   const customIndex = await fetchCustomValues(admin, contactIds);
+  const jaTocados = await contatosJaTocados(
+    admin,
+    b.account_id,
+    b.template_name,
+    contactIds,
+  );
 
   let processed = 0;
   for (const claim of claims) {
+    if (jaTocados.has(claim.contact_id)) {
+      // 'skipped', não 'failed': falha faz a régua insistir e suja a taxa de
+      // entrega do disparo. Isto aqui não é uma entrega que deu errado — é uma
+      // mensagem que não devia existir.
+      await admin
+        .from("broadcast_recipients")
+        .update({
+          status: "skipped",
+          error_message: "Bloqueado: mesmo template para este contato nas últimas 24h",
+          claimed_at: null,
+        })
+        .eq("id", claim.recipient_id);
+      console.warn(
+        `[broadcast] repetição bloqueada · template=${b.template_name} contato=${claim.contact_id}`,
+      );
+      processed++;
+      continue;
+    }
     const contact = contactById.get(claim.contact_id);
     const phone = contact?.phone as string | undefined;
     if (!phone) {
@@ -282,7 +351,20 @@ async function finalizeIfDone(admin: Admin, broadcastId: string): Promise<void> 
     .select("id", { count: "exact", head: true })
     .eq("broadcast_id", broadcastId)
     .eq("status", "failed");
-  const final = (total ?? 0) === 0 || failed === total ? "failed" : "sent";
+  // Disparo cujos destinatários foram TODOS barrados pela trava não é envio
+  // bem-sucedido nem falha de entrega — dizer 'sent' aqui seria contar como
+  // enviada uma mensagem que ninguém recebeu.
+  const { count: skipped } = await admin
+    .from("broadcast_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("broadcast_id", broadcastId)
+    .eq("status", "skipped");
+  const final =
+    (total ?? 0) === 0 || failed === total
+      ? "failed"
+      : skipped === total
+        ? "skipped"
+        : "sent";
   await admin.from("broadcasts").update({ status: final }).eq("id", broadcastId);
 }
 
