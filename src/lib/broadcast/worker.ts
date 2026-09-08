@@ -110,6 +110,8 @@ interface BroadcastRow {
    */
   header_media_url: string | null;
   status: string;
+  /** 'manual' (gente) | 'system' (cadência, automação). Ver migração 096. */
+  kind?: string | null;
 }
 
 /**
@@ -131,6 +133,11 @@ interface BroadcastRow {
  * 24h é o número certo por dois motivos: nenhuma cadência legítima toca a mesma
  * pessoa com o mesmo template duas vezes no mesmo dia, e é a janela da própria
  * Meta — repetição dentro dela é o que derruba a qualidade do número.
+ *
+ * Vale só para disparo de MÁQUINA (`kind = 'system'`). Disparo manual passa
+ * direto: um lembrete diário para a mesma lista, no mesmo horário, é uso
+ * legítimo e cairia bem em cima da janela de 24h. O problema que esta trava
+ * resolve é código repetindo sozinho, não pessoa decidindo repetir.
  *
  * Se a consulta falhar, deixamos passar. Foi engolir erro que causou o
  * incidente, mas aqui a assimetria se inverte: falhar fechado paralisaria os
@@ -216,12 +223,10 @@ async function drainBroadcast(
     (contacts ?? []).map((c) => [c.id as string, c]),
   );
   const customIndex = await fetchCustomValues(admin, contactIds);
-  const jaTocados = await contatosJaTocados(
-    admin,
-    b.account_id,
-    b.template_name,
-    contactIds,
-  );
+  const jaTocados =
+    b.kind === "system"
+      ? await contatosJaTocados(admin, b.account_id, b.template_name, contactIds)
+      : new Set<string>();
 
   let processed = 0;
   for (const claim of claims) {
@@ -431,7 +436,8 @@ async function materializeAudienceIfEmpty(
  */
 const DRAIN_COLUMNS_BASE =
   "id, account_id, channel_id, template_name, template_language, template_variables, status, updated_at";
-const DRAIN_COLUMNS_OPTIONAL = "header_media_url";
+// Colunas que podem não existir se o banco estiver atrás do código.
+const DRAIN_COLUMNS_OPTIONAL = "header_media_url, kind";
 
 /**
  * O erro é "essa coluna não existe aqui"? PostgREST devolve PGRST204 com
@@ -501,7 +507,9 @@ async function fetchDrainableBroadcasts(
     return [];
   }
   return ((minimal.data ?? []) as unknown as Record<string, unknown>[]).map(
-    (row) => ({ ...row, header_media_url: null }),
+    // Sem `kind`, a trava anti-repetição não roda: é o comportamento anterior
+    // à migração 096, que é exatamente o que "banco atrás do código" quer dizer.
+    (row) => ({ ...row, header_media_url: null, kind: null }),
   ) as (BroadcastRow & { updated_at: string })[];
 }
 
