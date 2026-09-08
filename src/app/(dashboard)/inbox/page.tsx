@@ -22,6 +22,10 @@ import { cn } from "@/lib/utils";
 // across reloads and sessions (device-scoped, like the theme prefs).
 const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
 
+// Intervalo do resync de segurança do inbox (lista + thread aberta).
+// Ver o efeito que o usa, mais abaixo, para o porquê.
+const INBOX_POLL_INTERVAL_MS = 30_000;
+
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -371,6 +375,11 @@ export default function InboxPage() {
    * WS throttled by the browser even without a full disconnect, so a
    * visibilitychange → visible is a reliable signal that we may have
    * missed events. Cheap to fire; the children dedupe on their own.
+   *
+   * `focus` e `online` entram pelo mesmo motivo: uma janela que volta
+   * ao primeiro plano sem trocar de aba não dispara visibilitychange, e
+   * uma reconexão de rede tampouco — nos dois casos o WS pode ter
+   * perdido eventos.
    */
   useEffect(() => {
     const onVisibility = () => {
@@ -378,10 +387,34 @@ export default function InboxPage() {
         setResyncToken((n) => n + 1);
       }
     };
+    const onOnline = () => setResyncToken((n) => n + 1);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+    window.addEventListener("online", onOnline);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+      window.removeEventListener("online", onOnline);
     };
+  }, []);
+
+  /**
+   * Rede de segurança periódica. Tudo acima depende do WebSocket avisar
+   * (ou de o usuário mexer na janela); quando o canal morre em silêncio
+   * — aba horas em segundo plano, o navegador estrangula os timers, o
+   * servidor derruba o canal — a tela fica congelada sem nenhum sinal.
+   * Foi o que aconteceu com a SDR: mensagem nova de lead às 15:01 só
+   * apareceu quando ela voltou para a aba, quase duas horas depois.
+   *
+   * Não checamos visibilidade de propósito: com a aba oculta o próprio
+   * navegador estrangula este timer para ~1x/min, que é exatamente a
+   * cadência que queremos ali.
+   */
+  useEffect(() => {
+    const id = setInterval(() => {
+      setResyncToken((n) => n + 1);
+    }, INBOX_POLL_INTERVAL_MS);
+    return () => clearInterval(id);
   }, []);
 
   /**

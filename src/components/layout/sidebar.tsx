@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { useTotalUnread } from "@/hooks/use-total-unread";
+import { useUnreadCounts } from "@/hooks/use-total-unread";
+import { useUnreadAlerts } from "@/hooks/use-unread-alerts";
 import { AccountSwitcher } from "./account-switcher";
 import {
   Brain,
@@ -146,7 +147,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const visibleNavItems = navItems.filter(
     (item) => !item.adminOnly || canEditSettings,
   );
-  const totalUnread = useTotalUnread();
+  // A sidebar está montada em todas as telas do app, então é daqui que
+  // sai o aviso global de mensagem nova (título da aba, som, notificação).
+  const unread = useUnreadCounts();
+  const totalUnread = unread.conversations;
+  useUnreadAlerts(unread);
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it

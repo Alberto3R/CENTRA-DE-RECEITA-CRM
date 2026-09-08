@@ -463,13 +463,47 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  /**
+   * Auto-scroll para o fim. Antes rolava a cada mudança do array de
+   * mensagens — o que passou a ser um problema quando o inbox ganhou
+   * resync periódico: um refetch que devolve exatamente as mesmas
+   * mensagens cria um array novo, e quem estivesse lendo o histórico
+   * era jogado para o rodapé a cada ciclo.
+   *
+   * Agora só rola quando faz sentido: ao abrir a conversa, ao carregar
+   * a thread pela primeira vez, e quando chega mensagem nova COM o
+   * usuário já no pé da lista (se ele subiu para ler, respeitamos).
+   */
+  const lastMessageIdRef = useRef<string | null>(null);
+  const lastConversationIdRef = useRef<string | null>(null);
+  const previousCountRef = useRef(0);
   useEffect(() => {
-    if (scrollRef.current) {
-      const el = scrollRef.current;
+    const el = scrollRef.current;
+
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    const conversationChanged = lastConversationIdRef.current !== conversationId;
+    const lastMessageChanged = lastMessageIdRef.current !== lastId;
+    const wasEmpty = previousCountRef.current === 0;
+
+    lastConversationIdRef.current = conversationId ?? null;
+    lastMessageIdRef.current = lastId;
+    previousCountRef.current = messages.length;
+
+    if (!el) return;
+
+    if (conversationChanged || wasEmpty) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (!lastMessageChanged) return;
+
+    // 160px de tolerância: o usuário "está no fim" mesmo tendo rolado
+    // um tiquinho para cima.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 160) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, conversationId]);
 
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
