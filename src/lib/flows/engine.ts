@@ -1528,3 +1528,56 @@ export async function processDueFlowWaits(budget = 50): Promise<{
 
   return { acordados, pulados };
 }
+
+/**
+ * Abre um run de CADÊNCIA e já o coloca para andar.
+ *
+ * Diferente do gatilho `deal_stage` clássico, que manda um template de
+ * abertura e depois fica esperando o lead responder: numa régua quem conduz é
+ * o fluxo, do primeiro toque ao último. Aqui o run nasce no nó de entrada e
+ * avança na hora — normalmente caindo num `wait`, que é onde ele fica.
+ */
+export async function iniciarRunDeCadencia(args: {
+  flowId: string;
+  accountId: string;
+  userId: string;
+  contactId: string;
+  entryNodeKey: string;
+  dealId?: string | null;
+}): Promise<{ ok: boolean; run_id?: string; motivo?: string }> {
+  const db = supabaseAdmin();
+
+  const { data: criado, error } = await db
+    .from("flow_runs")
+    .insert({
+      flow_id: args.flowId,
+      account_id: args.accountId,
+      user_id: args.userId,
+      contact_id: args.contactId,
+      conversation_id: null,
+      status: "active",
+      current_node_key: args.entryNodeKey,
+      vars: args.dealId ? { __deal_id: args.dealId } : {},
+    })
+    .select("*")
+    .single();
+  if (error || !criado) {
+    return { ok: false, motivo: error?.message ?? "insert_falhou" };
+  }
+
+  const run = criado as FlowRunRow;
+  await logEvent(db, run.id, "started", args.entryNodeKey, {
+    origem: "cadencia",
+    deal_id: args.dealId ?? null,
+  });
+
+  const nodes = await loadAllNodes(db, args.flowId);
+  await advanceFromNodeKey(db, run, args.entryNodeKey, nodes);
+  await db.rpc("increment_flow_execution_count", { p_flow_id: args.flowId });
+  await db
+    .from("flows")
+    .update({ last_executed_at: new Date().toISOString() })
+    .eq("id", args.flowId);
+
+  return { ok: true, run_id: run.id };
+}

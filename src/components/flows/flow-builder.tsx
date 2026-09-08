@@ -415,9 +415,16 @@ function TriggerPanel({
                 </SelectContent>
               </Select>
             </div>
+            {state.trigger_config.mode === "cadencia" && (
+              <p className="text-xs text-muted-foreground md:col-span-2">
+                Em cadência, o template de abertura é um nó do flow — o campo
+                acima é ignorado. O flow toma conta do primeiro toque ao
+                último, e o gatilho só decide quando ele começa.
+              </p>
+            )}
             <div className="md:col-span-2">
               <label className="mb-1 block text-xs text-muted-foreground">
-                Depois de enviar o template…
+                O que o gatilho faz
               </label>
               <Select
                 value={(state.trigger_config.mode as string) ?? "template_only"}
@@ -437,6 +444,9 @@ function TriggerPanel({
                   </SelectItem>
                   <SelectItem value="flow">
                     Continuar neste flow quando o lead responder
+                  </SelectItem>
+                  <SelectItem value="cadencia">
+                    Cadência — o flow conduz do primeiro toque ao último
                   </SelectItem>
                 </SelectContent>
               </Select>

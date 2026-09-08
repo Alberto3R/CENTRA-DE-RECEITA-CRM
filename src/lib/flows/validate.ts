@@ -195,15 +195,20 @@ function validateTrigger(
         message: "Informe ao menos uma etapa que dispara o flow.",
       });
     }
-    const tpl = trigger_config.template_name;
-    if (typeof tpl !== "string" || !tpl.trim()) {
-      issues.push({
-        severity: "error",
-        scope: "trigger",
-        field: "trigger_config.template_name",
-        message:
-          "Informe o template aprovado de abertura (mensagem ativa fora da janela de 24h exige HSM).",
-      });
+    // No modo cadência quem manda a abertura é um NÓ do fluxo, não o gatilho:
+    // exigir um template aqui faria sair uma mensagem a mais, fora da régua.
+    const modo = trigger_config.mode;
+    if (modo !== "cadencia") {
+      const tpl = trigger_config.template_name;
+      if (typeof tpl !== "string" || !tpl.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "trigger",
+          field: "trigger_config.template_name",
+          message:
+            "Informe o template aprovado de abertura (mensagem ativa fora da janela de 24h exige HSM).",
+        });
+      }
     }
   }
   // first_inbound_message / manual have no config; nothing to validate.

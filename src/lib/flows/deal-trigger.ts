@@ -26,6 +26,7 @@ import {
   phoneVariants,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
+import { iniciarRunDeCadencia } from "./engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = any;
@@ -35,7 +36,13 @@ interface DealStageTriggerConfig {
   stages?: string[]; // nomes das etapas que disparam
   template_name?: string; // HSM de abertura (obrigatório)
   template_param?: "first_name" | "full_name" | "none";
-  mode?: "template_only" | "flow";
+  /**
+   * template_only  manda o HSM e para.
+   * flow           manda o HSM e abre um run que espera a resposta.
+   * cadencia       NÃO manda nada aqui: o fluxo conduz do primeiro toque ao
+   *                último (é ele quem tem os nós de espera e de modelo).
+   */
+  mode?: "template_only" | "flow" | "cadencia";
 }
 
 interface FlowRowLite {
@@ -154,7 +161,12 @@ async function fireForEvent(
   ev: { id: string; deal_id: string; account_id: string },
 ): Promise<string> {
   const cfg = flow.trigger_config ?? {};
-  if (!cfg.template_name) return "skipped_no_template_configured";
+  const modo = cfg.mode ?? "template_only";
+  // Numa cadência o template de abertura é um NÓ do fluxo, não config do
+  // gatilho — exigir um aqui mandaria uma mensagem a mais, fora da régua.
+  if (modo !== "cadencia" && !cfg.template_name) {
+    return "skipped_no_template_configured";
+  }
 
   // deal → contato
   const { data: deal } = await db
@@ -181,6 +193,22 @@ async function fireForEvent(
     .eq("status", "active")
     .maybeSingle();
   if (activeRun) return "skipped_active_run_exists";
+
+  if (modo === "cadencia") {
+    if (!flow.entry_node_id) return "skipped_no_entry_node";
+    const r = await iniciarRunDeCadencia({
+      flowId: flow.id,
+      accountId: flow.account_id,
+      userId: flow.user_id,
+      contactId,
+      entryNodeKey: flow.entry_node_id,
+      dealId: ev.deal_id,
+    });
+    return r.ok ? "run_started" : `error:${r.motivo ?? "run"}`;
+  }
+
+  // Daqui para baixo é o caminho que manda HSM: o template é obrigatório.
+  if (!cfg.template_name) return "skipped_no_template_configured";
 
   // canal + template APROVADO (gate — igual maybeSendWelcome do /api/leads)
   const wa = await resolveChannelConfig(db, flow.account_id);
@@ -232,7 +260,7 @@ async function fireForEvent(
   if (!sent) return `error:send:${lastError.slice(0, 120)}`;
 
   // mode 'flow' → run aguardando a primeira resposta do lead
-  if ((cfg.mode ?? "template_only") === "flow" && flow.entry_node_id) {
+  if (modo === "flow" && flow.entry_node_id) {
     const { error: runErr } = await db.from("flow_runs").insert({
       flow_id: flow.id,
       account_id: flow.account_id,
