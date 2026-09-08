@@ -18,6 +18,9 @@ interface UseRealtimeOptions {
   enabled?: boolean;
 }
 
+/** Teto do backoff de reinscrição. */
+const MAX_RETRY_DELAY_MS = 30_000;
+
 export function useRealtime({
   channelName,
   onMessageEvent,
@@ -39,10 +42,35 @@ export function useRealtime({
     onConversationRef.current = onConversationEvent;
   });
 
+  /**
+   * Bumped quando o canal cai (CHANNEL_ERROR / TIMED_OUT / CLOSED) para
+   * refazer a inscrição. Sem isso um socket "zumbi" — o canal morre mas
+   * o supabase-js não recria a inscrição — deixa a tela congelada até o
+   * usuário recarregar: foi exatamente o que aconteceu com a aba da SDR
+   * ficando horas em segundo plano (o navegador estrangula os timers, o
+   * servidor derruba o canal por heartbeat perdido e nada mais chega).
+   */
+  const [retryToken, setRetryToken] = useState(0);
+  // Contador de tentativas seguidas, para o backoff exponencial. Zera a
+  // cada SUBSCRIBED.
+  const retryAttemptRef = useRef(0);
+
   useEffect(() => {
     if (!enabled) return;
 
     const supabase = createClient();
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleResubscribe = () => {
+      if (cancelled || retryTimer !== null) return;
+      const attempt = retryAttemptRef.current++;
+      const delay = Math.min(MAX_RETRY_DELAY_MS, 1000 * 2 ** attempt);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!cancelled) setRetryToken((n) => n + 1);
+      }, delay);
+    };
 
     const channel = supabase
       .channel(channelName)
@@ -69,17 +97,35 @@ export function useRealtime({
         }
       )
       .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
+        if (cancelled) return;
+        if (status === "SUBSCRIBED") {
+          retryAttemptRef.current = 0;
+          setIsConnected(true);
+          return;
+        }
+        // Qualquer outro estado é "não estamos recebendo eventos". O
+        // consumidor usa esse false → true seguinte como gatilho de
+        // resync, então marcar aqui é o que fecha o buraco.
+        setIsConnected(false);
+        if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          scheduleResubscribe();
+        }
       });
 
     channelRef.current = channel;
 
     return () => {
+      cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
       supabase.removeChannel(channel);
       channelRef.current = null;
       setIsConnected(false);
     };
-  }, [channelName, enabled]);
+  }, [channelName, enabled, retryToken]);
 
   const unsubscribe = useCallback(() => {
     if (channelRef.current) {
