@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
@@ -182,6 +183,26 @@ export function NodeConfigForm({
       return (
         <SetTagForm
           cfg={cfg as SetTagCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "wait":
+      return (
+        <WaitForm
+          cfg={cfg as WaitCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "send_template":
+      return (
+        <SendTemplateForm
+          cfg={cfg as SendTemplateCfg}
           allNodes={allNodes}
           currentKey={node.node_key}
           onUpdateConfig={onUpdateConfig}
@@ -1042,6 +1063,393 @@ function SendMediaForm({
         currentKey={currentKey}
         onChange={(v) => onUpdateConfig({ next_node_key: v })}
         label="Após enviar, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// wait
+// ============================================================
+
+interface WaitCfg {
+  dias?: number;
+  horas?: number;
+  minutos?: number;
+  janela?: { inicio?: string; fim?: string; dias_semana?: number[] };
+  next_node_key?: string;
+}
+
+const DIAS_DA_SEMANA = [
+  { n: 1, label: "Seg" },
+  { n: 2, label: "Ter" },
+  { n: 3, label: "Qua" },
+  { n: 4, label: "Qui" },
+  { n: 5, label: "Sex" },
+  { n: 6, label: "Sáb" },
+  { n: 0, label: "Dom" },
+];
+
+function WaitForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: WaitCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const janela = cfg.janela;
+  const dias = janela?.dias_semana ?? [1, 2, 3, 4, 5];
+
+  const alternarDia = (n: number) => {
+    const proximo = dias.includes(n) ? dias.filter((d) => d !== n) : [...dias, n];
+    onUpdateConfig({ janela: { ...janela, dias_semana: proximo.sort() } });
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3">
+        {(["dias", "horas", "minutos"] as const).map((campo) => (
+          <div key={campo}>
+            <label className="mb-1 block text-xs capitalize text-muted-foreground">
+              {campo}
+            </label>
+            <Input
+              type="number"
+              min={0}
+              value={String(cfg[campo] ?? 0)}
+              onChange={(e) =>
+                onUpdateConfig({ [campo]: Math.max(0, Number(e.target.value) || 0) })
+              }
+              className="bg-muted"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-md border border-border p-3">
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={!!janela}
+            onChange={(e) =>
+              onUpdateConfig({
+                janela: e.target.checked
+                  ? { inicio: "09:00", fim: "19:00", dias_semana: [1, 2, 3, 4, 5] }
+                  : null,
+              })
+            }
+            className="size-4 accent-primary"
+          />
+          Só falar em horário comercial
+        </label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Sem isso, uma espera de 1 dia começada às 22h manda a mensagem às 22h.
+        </p>
+
+        {janela && (
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">A partir de</label>
+                <Input
+                  type="time"
+                  value={janela.inicio ?? "09:00"}
+                  onChange={(e) => onUpdateConfig({ janela: { ...janela, inicio: e.target.value } })}
+                  className="bg-muted"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Até</label>
+                <Input
+                  type="time"
+                  value={janela.fim ?? "19:00"}
+                  onChange={(e) => onUpdateConfig({ janela: { ...janela, fim: e.target.value } })}
+                  className="bg-muted"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Dias</label>
+              <div className="flex flex-wrap gap-1">
+                {DIAS_DA_SEMANA.map((d) => (
+                  <button
+                    key={d.n}
+                    type="button"
+                    onClick={() => alternarDia(d.n)}
+                    className={
+                      dias.includes(d.n)
+                        ? "rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
+                        : "rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                    }
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <NextNodeRow
+        label="Depois da espera, ir para"
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+      />
+    </>
+  );
+}
+
+// ============================================================
+// send_template
+// ============================================================
+
+interface SendTemplateCfg {
+  template_name?: string;
+  language?: string;
+  params?: { type: "static" | "field" | "var"; value: string }[];
+  cadencia?: string;
+  toque?: number;
+  next_node_key?: string;
+}
+
+interface TemplateOption {
+  name: string;
+  language: string;
+}
+
+/** Só modelos APROVADOS — qualquer outro dá 400 na hora do envio. */
+function useApprovedTemplates(): TemplateOption[] {
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from("message_templates")
+          .select("name, language")
+          .eq("status", "APPROVED")
+          .order("name");
+        if (!cancelled && data) setTemplates(data as TemplateOption[]);
+      } catch {
+        // Sem lista, o campo cai para entrada livre.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return templates;
+}
+
+const CAMPOS_DE_CONTATO = [
+  { value: "first_name", label: "Primeiro nome" },
+  { value: "name", label: "Nome completo" },
+  { value: "company", label: "Empresa" },
+  { value: "email", label: "E-mail" },
+  { value: "phone", label: "Telefone" },
+];
+
+function SendTemplateForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SendTemplateCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const templates = useApprovedTemplates();
+  const params = cfg.params ?? [];
+
+  const atualizarParam = (
+    i: number,
+    patch: Partial<{ type: "static" | "field" | "var"; value: string }>,
+  ) => {
+    const proximo = params.map((p, idx) => (idx === i ? { ...p, ...patch } : p));
+    onUpdateConfig({ params: proximo });
+  };
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Modelo aprovado
+        </label>
+        {templates.length > 0 ? (
+          <Select
+            value={cfg.template_name ?? ""}
+            onValueChange={(v) => {
+              const nome = v ?? "";
+              const t = templates.find((x) => x.name === nome);
+              onUpdateConfig({ template_name: nome, language: t?.language ?? "pt_BR" });
+            }}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue placeholder="Escolha um modelo…" />
+            </SelectTrigger>
+            <SelectContent>
+              {templates.map((t) => (
+                <SelectItem key={`${t.name}:${t.language}`} value={t.name}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            value={cfg.template_name ?? ""}
+            onChange={(e) => onUpdateConfig({ template_name: e.target.value })}
+            placeholder="nome_do_modelo"
+            className="bg-muted"
+          />
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">
+          Modelo é o único jeito de falar com quem sumiu — a janela de 24h já
+          fechou.
+        </p>
+      </div>
+
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <label className="text-xs text-muted-foreground">
+            Variáveis do modelo, na ordem
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateConfig({
+                params: [...params, { type: "field", value: "first_name" }],
+              })
+            }
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            <Plus className="size-3" />
+            Adicionar
+          </button>
+        </div>
+        {params.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Nenhuma variável — o modelo será enviado como está.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {params.map((p, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="w-8 shrink-0 text-xs text-muted-foreground">
+                  {`{{${i + 1}}}`}
+                </span>
+                <Select
+                  value={p.type}
+                  onValueChange={(v) => {
+                    const tipo = (v ?? "field") as "static" | "field" | "var";
+                    atualizarParam(i, {
+                      type: tipo,
+                      value: tipo === "field" ? "first_name" : "",
+                    });
+                  }}
+                >
+                  <SelectTrigger className="w-32 bg-muted">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="field">Campo</SelectItem>
+                    <SelectItem value="static">Texto fixo</SelectItem>
+                    <SelectItem value="var">Variável do fluxo</SelectItem>
+                  </SelectContent>
+                </Select>
+                {p.type === "field" ? (
+                  <Select
+                    value={p.value}
+                    onValueChange={(v) => atualizarParam(i, { value: v ?? "" })}
+                  >
+                    <SelectTrigger className="flex-1 bg-muted">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CAMPOS_DE_CONTATO.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={p.value}
+                    onChange={(e) => atualizarParam(i, { value: e.target.value })}
+                    placeholder={p.type === "var" ? "nome_da_variavel" : "texto"}
+                    className="flex-1 bg-muted"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateConfig({ params: params.filter((_, idx) => idx !== i) })
+                  }
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label="Remover variável"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-md border border-border p-3">
+        <p className="text-xs font-medium text-foreground">
+          Contar como toque de cadência
+        </p>
+        <p className="mt-1 mb-2 text-xs text-muted-foreground">
+          Preenchido, o banco garante que esta pessoa recebe este toque uma vez
+          só — mesmo que outro caminho tente mandar de novo.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">Cadência</label>
+            <Input
+              value={cfg.cadencia ?? ""}
+              onChange={(e) =>
+                onUpdateConfig({ cadencia: e.target.value.trim() || undefined })
+              }
+              placeholder="ex.: diagnostico"
+              className="bg-muted"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">Nº do toque</label>
+            <Input
+              type="number"
+              min={1}
+              value={cfg.toque === undefined ? "" : String(cfg.toque)}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                onUpdateConfig({ toque: e.target.value === "" ? undefined : Math.max(1, n) });
+              }}
+              placeholder="1"
+              className="bg-muted"
+            />
+          </div>
+        </div>
+      </div>
+
+      <NextNodeRow
+        label="Depois de enviar, ir para"
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
       />
     </>
   );

@@ -75,6 +75,8 @@ interface PutBody {
   description?: string | null
   trigger_type?: 'keyword' | 'first_inbound_message' | 'manual' | 'deal_stage'
   trigger_config?: Record<string, unknown>
+  /** Cadência: resposta do lead encerra a régua (migração 098). */
+  stop_on_reply?: boolean
   entry_node_id?: string | null
   fallback_policy?: Record<string, unknown>
   nodes?: Array<{
@@ -119,6 +121,8 @@ export async function PUT(
   if (body.trigger_type !== undefined) flowPatch.trigger_type = body.trigger_type
   if (body.trigger_config !== undefined)
     flowPatch.trigger_config = body.trigger_config
+  if (body.stop_on_reply !== undefined)
+    flowPatch.stop_on_reply = body.stop_on_reply
   if (body.entry_node_id !== undefined)
     flowPatch.entry_node_id = body.entry_node_id
   if (body.fallback_policy !== undefined)

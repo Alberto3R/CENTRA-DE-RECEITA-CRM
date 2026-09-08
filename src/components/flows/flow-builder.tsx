@@ -300,6 +300,26 @@ function TriggerPanel({
             </SelectContent>
           </Select>
         </div>
+        <div className="md:col-span-2">
+          <label className="flex items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={state.stop_on_reply}
+              onChange={(e) =>
+                setState((s) => ({ ...s, stop_on_reply: e.target.checked }))
+              }
+              className="mt-0.5 size-4 accent-primary"
+            />
+            <span>
+              Encerrar quando o lead responder
+              <span className="block text-xs text-muted-foreground">
+                Ligue em cadências: quem respondeu virou conversa, e o próximo
+                toque automático depois disso queima o lead. A resposta passa
+                para o atendimento em vez de avançar o fluxo.
+              </span>
+            </span>
+          </label>
+        </div>
         {state.trigger_type === "deal_stage" && (
           <>
             <div>
