@@ -177,6 +177,61 @@ export interface SetTagNodeConfig {
 export type EndNodeConfig = Record<string, never>;
 
 /**
+/**
+ * Espera por TEMPO — a peça que faltava para uma cadência caber num fluxo.
+ *
+ * Diferente de todos os outros nós que suspendem: eles esperam o cliente
+ * falar, este espera o relógio. O run fica `active` com `resume_at`
+ * preenchido, e o worker de retomada o acorda.
+ */
+export interface WaitNodeConfig {
+  dias?: number;
+  horas?: number;
+  minutos?: number;
+  /**
+   * Sem janela, "+1 dia" às 22h vira mensagem às 22h. Com janela, o
+   * retorno é empurrado para o próximo horário em que a régua pode falar.
+   */
+  janela?: {
+    /** "09:00" */
+    inicio: string;
+    /** "19:00" — exclusivo. */
+    fim: string;
+    /** Dom=0 … Sáb=6. Default: seg a sex. */
+    dias_semana?: number[];
+    /** IANA. Default: America/Sao_Paulo. */
+    timezone?: string;
+  };
+  next_node_key: string;
+}
+
+/**
+ * Envio de template aprovado (HSM) — mensagem ativa FORA da janela de 24h.
+ *
+ * `send_message` só funciona com a janela aberta, o que nunca é o caso de um
+ * toque de reengajamento: o lead sumiu, por isso estamos falando com ele.
+ */
+export interface SendTemplateNodeConfig {
+  template_name: string;
+  /** Default pt_BR. */
+  language?: string;
+  /**
+   * Parâmetros do corpo, na ordem de {{1}}, {{2}}, … `field` resolve campo
+   * do contato (first_name, name, phone, email, company), `var` lê de
+   * `flow_runs.vars`, `static` é literal.
+   */
+  params?: { type: "static" | "field" | "var"; value: string }[];
+  /**
+   * Marca o toque em `outbound_touches` antes de enviar (migração 096). Com
+   * isso, dois caminhos tocando o mesmo lead não geram mensagem repetida —
+   * é a trava que faltava no incidente da cadência do Diagnóstico.
+   */
+  cadencia?: string;
+  toque?: number;
+  next_node_key: string;
+}
+
+/**
  * Total union — every concrete node_type the v1 engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
@@ -193,6 +248,8 @@ export type FlowNodeConfig =
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
+  | { node_type: "wait"; config: WaitNodeConfig }
+  | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig };
 
@@ -234,7 +291,13 @@ export interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "deal_stage";
+  /**
+   * Numa cadência, a resposta do lead ENCERRA o fluxo e passa a bola para o
+   * humano/IA — o contrário do fluxo conversacional, onde a resposta é o que
+   * faz o run avançar. Default false para não mudar os fluxos existentes.
+   */
+  stop_on_reply?: boolean;
   trigger_config: KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
   entry_node_id: string | null;
   fallback_policy: FlowFallbackPolicy;
@@ -279,6 +342,11 @@ export interface FlowRunRow {
   last_advanced_at: string;
   ended_at: string | null;
   end_reason: string | null;
+  /**
+   * Quando o worker de retomada deve acordar este run. Preenchido por um nó
+   * `wait`; nulo em todo run que espera o cliente, não o relógio.
+   */
+  resume_at?: string | null;
 }
 
 // ============================================================

@@ -171,6 +171,22 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         var_key: "answer",
         next_node_key: "",
       };
+    case "wait":
+      // Janela comercial ligada por padrão: um "+1 dia" configurado às 22h
+      // mandando mensagem às 22h é o erro que ninguém vê no editor.
+      return {
+        dias: 1,
+        horas: 0,
+        janela: { inicio: "09:00", fim: "19:00" },
+        next_node_key: "",
+      };
+    case "send_template":
+      return {
+        template_name: "",
+        language: "pt_BR",
+        params: [],
+        next_node_key: "",
+      };
     case "condition":
       return {
         subject: "var",

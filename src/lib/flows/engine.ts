@@ -33,6 +33,9 @@
  */
 
 import { supabaseAdmin } from "./admin-client";
+import { engineSendTemplate } from "@/lib/automations/meta-send";
+import { proximoRetorno } from "./schedule";
+import { resolveContactField } from "@/lib/broadcast/contact-fields";
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
@@ -53,8 +56,10 @@ import {
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
+  type SendTemplateNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
+  type WaitNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
 
@@ -116,7 +121,8 @@ export function isAutoAdvancing(node_type: string): boolean {
     node_type === "send_message" ||
     node_type === "send_media" ||
     node_type === "condition" ||
-    node_type === "set_tag"
+    node_type === "set_tag" ||
+    node_type === "send_template"
   );
 }
 
@@ -127,6 +133,15 @@ export function isSuspending(node_type: string): boolean {
     node_type === "send_list" ||
     node_type === "collect_input"
   );
+}
+
+/**
+ * Nó que suspende esperando o RELÓGIO, não o cliente. O run continua
+ * `active` (para a resposta do lead ainda poder interrompê-lo) com
+ * `resume_at` marcado; quem o acorda é o worker de retomada.
+ */
+export function isWaitingTime(node_type: string): boolean {
+  return node_type === "wait";
 }
 
 /** Nodes that end the run. */
@@ -544,6 +559,82 @@ async function endRun(
 // new current_node_key before returning.
 // ============================================================
 
+/**
+ * A conversa onde o toque vai aparecer. Um lead de cadência pode nunca ter
+ * conversado — o run nasce sem `conversation_id` — e o inbox precisa do balão
+ * mesmo assim, senão o vendedor atende alguém sem ver o que a régua mandou.
+ */
+async function garantirConversa(
+  db: AdminClient,
+  run: FlowRunRow,
+): Promise<string | null> {
+  if (run.conversation_id) return run.conversation_id;
+  if (!run.contact_id) return null;
+
+  const { data: existente } = await db
+    .from("conversations")
+    .select("id")
+    .eq("account_id", run.account_id)
+    .eq("contact_id", run.contact_id)
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  let conversationId = (existente as { id: string } | null)?.id ?? null;
+
+  if (!conversationId) {
+    const { data: nova } = await db
+      .from("conversations")
+      .insert({
+        account_id: run.account_id,
+        user_id: run.user_id,
+        contact_id: run.contact_id,
+        status: "open",
+      })
+      .select("id")
+      .single();
+    conversationId = (nova as { id: string } | null)?.id ?? null;
+  }
+
+  if (conversationId && conversationId !== run.conversation_id) {
+    await db
+      .from("flow_runs")
+      .update({ conversation_id: conversationId })
+      .eq("id", run.id);
+    run.conversation_id = conversationId;
+  }
+  return conversationId;
+}
+
+/** Parâmetros do corpo do template, na ordem de {{1}}, {{2}}, … */
+async function resolverParamsDoTemplate(
+  db: AdminClient,
+  run: FlowRunRow,
+  params: { type: "static" | "field" | "var"; value: string }[] | undefined,
+): Promise<string[]> {
+  if (!params?.length) return [];
+  const precisaContato = params.some((p) => p.type === "field");
+  let contato: {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    company?: string | null;
+  } | null = null;
+  if (precisaContato && run.contact_id) {
+    const { data } = await db
+      .from("contacts")
+      .select("name, phone, email, company")
+      .eq("id", run.contact_id)
+      .maybeSingle();
+    contato = data as typeof contato;
+  }
+  return params.map((p) => {
+    if (p.type === "static") return p.value;
+    if (p.type === "field") return contato ? resolveContactField(p.value, contato) : "";
+    const v = run.vars?.[p.value];
+    return v === undefined || v === null ? "" : String(v);
+  });
+}
+
 async function advanceFromNodeKey(
   db: AdminClient,
   run: FlowRunRow,
@@ -763,6 +854,120 @@ async function advanceFromNodeKey(
       }
       return { outcome: "advanced" };
     }
+    if (node.node_type === "send_template") {
+      const cfg = node.config as unknown as SendTemplateNodeConfig;
+      const conversationId = await garantirConversa(db, run);
+      if (!conversationId) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_sem_conversa",
+        });
+        await endRun(db, run.id, "failed", "send_template_sem_conversa");
+        return { outcome: "completed" };
+      }
+
+      // Reserva ANTES de enviar. Se outro caminho já deu este toque a este
+      // lead, o banco recusa e nós pulamos o envio em vez de repetir — a
+      // trava que faltava no incidente da cadência do Diagnóstico (096).
+      if (cfg.cadencia && cfg.toque !== undefined) {
+        const { data: reservou, error: erroReserva } = await db.rpc("reservar_toque", {
+          p_account: run.account_id,
+          p_contact: run.contact_id,
+          p_cadencia: cfg.cadencia,
+          p_toque: cfg.toque,
+          p_template: cfg.template_name,
+        });
+        if (erroReserva) {
+          // Não saber se já foi enviado é motivo para NÃO enviar.
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "reserva_indisponivel",
+            detail: erroReserva.message,
+          });
+          await endRun(db, run.id, "failed", "reserva_indisponivel");
+          return { outcome: "completed" };
+        }
+        if (reservou !== true) {
+          await logEvent(db, run.id, "node_entered", node.node_key, {
+            node_type: "send_template",
+            pulado: "toque_ja_dado",
+            toque: cfg.toque,
+          });
+          currentKey = cfg.next_node_key;
+          continue;
+        }
+      }
+
+      try {
+        const params = await resolverParamsDoTemplate(db, run, cfg.params);
+        const { whatsapp_message_id } = await engineSendTemplate({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId,
+          contactId: run.contact_id!,
+          templateName: cfg.template_name,
+          language: cfg.language ?? "pt_BR",
+          params,
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_template",
+          template_name: cfg.template_name,
+          whatsapp_message_id,
+        });
+      } catch (err) {
+        // Entrega falhou: devolve o toque para o lead poder ser tocado de
+        // novo mais tarde, senão a régua o abandona num toque que não saiu.
+        if (cfg.cadencia && cfg.toque !== undefined) {
+          await db
+            .from("outbound_touches")
+            .update({ status: "falhou", updated_at: new Date(Date.now() - 7 * 3600_000).toISOString() })
+            .eq("account_id", run.account_id)
+            .eq("contact_id", run.contact_id!)
+            .eq("cadencia", cfg.cadencia)
+            .eq("toque", cfg.toque);
+        }
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_template_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "wait") {
+      const cfg = node.config as unknown as WaitNodeConfig;
+      const acordaEm = proximoRetorno(new Date(), cfg);
+      const { error: erroEspera } = await db
+        .from("flow_runs")
+        .update({ resume_at: acordaEm.toISOString() })
+        .eq("id", run.id);
+      if (erroEspera) {
+        // Sem `resume_at` gravado ninguém acorda este run — deixá-lo
+        // "esperando" seria abandoná-lo em silêncio.
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "wait_sem_agendamento",
+          detail: erroEspera.message,
+        });
+        await endRun(db, run.id, "failed", "wait_sem_agendamento");
+        return { outcome: "completed" };
+      }
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        node_type: "wait",
+        acorda_em: acordaEm.toISOString(),
+      });
+      const marcou = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!marcou) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
       return { outcome: "handed_off" };
@@ -931,6 +1136,27 @@ async function handleReplyForActiveRun(
     reply_id: message.kind === "interactive_reply" ? message.reply_id : null,
     text_length: message.kind === "text" ? message.text.length : null,
   });
+
+  // Cadência: a resposta ENCERRA a régua e passa a bola.
+  //
+  // É o inverso do fluxo conversacional, onde a resposta é justamente o que
+  // faz o run avançar. Numa sequência de reengajamento, quem respondeu deixou
+  // de ser alvo de régua e virou conversa — insistir com o toque seguinte
+  // depois de a pessoa ter falado é o jeito mais rápido de queimar o lead.
+  // `consumed: false` de propósito: a mensagem segue para a IA/humano do
+  // canal, que é quem assume daqui em diante.
+  const { data: flowRow } = await db
+    .from("flows")
+    .select("stop_on_reply")
+    .eq("id", run.flow_id)
+    .maybeSingle();
+  if ((flowRow as { stop_on_reply?: boolean } | null)?.stop_on_reply) {
+    await logEvent(db, run.id, "completed", run.current_node_key, {
+      reason: "lead_respondeu_cadencia_encerrada",
+    });
+    await endRun(db, run.id, "handed_off", "lead_respondeu");
+    return { consumed: false, flow_run_id: run.id, outcome: "handed_off" };
+  }
 
   if (!run.current_node_key) {
     // Defensive — a run with status='active' but no current node is
@@ -1145,4 +1371,77 @@ async function startNewRun(
     flow_run_id: run.id,
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
+}
+
+// ============================================================
+// Retomada por tempo — o que faz o nó `wait` valer alguma coisa
+// ============================================================
+
+/**
+ * Acorda os runs cujo `resume_at` venceu e continua o fluxo a partir do nó
+ * seguinte ao `wait`.
+ *
+ * Chamado de minuto em minuto pelo pg_cron. Sem este worker, um nó de espera
+ * é um buraco: o run para e ninguém volta para buscá-lo — que é o modo mais
+ * silencioso de perder um lead, porque nada quebra e nada aparece em log.
+ */
+export async function processDueFlowWaits(budget = 50): Promise<{
+  acordados: number;
+  pulados: number;
+}> {
+  const db = supabaseAdmin();
+  let acordados = 0;
+  let pulados = 0;
+
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("status", "active")
+    .not("resume_at", "is", null)
+    .lte("resume_at", new Date().toISOString())
+    .order("resume_at", { ascending: true })
+    .limit(budget);
+  if (error) {
+    console.error("[flows] não consegui listar runs a retomar:", error.message);
+    return { acordados, pulados };
+  }
+
+  for (const run of (data ?? []) as FlowRunRow[]) {
+    // Claim atômico: zera `resume_at` só se ninguém tiver mexido desde a
+    // leitura. Duas instâncias do cron não podem acordar o mesmo run e
+    // mandar o toque duas vezes.
+    const { data: claimed } = await db
+      .from("flow_runs")
+      .update({ resume_at: null })
+      .eq("id", run.id)
+      .eq("resume_at", run.resume_at!)
+      .select("id");
+    if (!claimed?.length) {
+      pulados += 1;
+      continue;
+    }
+
+    const nodes = await loadAllNodes(db, run.flow_id);
+    const noAtual = run.current_node_key ? nodes.get(run.current_node_key) : null;
+    if (!noAtual || noAtual.node_type !== "wait") {
+      // O run acordou fora de um nó de espera — estado inconsistente que não
+      // pode virar envio às cegas.
+      await logEvent(db, run.id, "error", run.current_node_key, {
+        reason: "retomada_sem_no_de_espera",
+        node_type: noAtual?.node_type ?? null,
+      });
+      pulados += 1;
+      continue;
+    }
+
+    const cfg = noAtual.config as unknown as WaitNodeConfig;
+    await logEvent(db, run.id, "node_entered", noAtual.node_key, {
+      node_type: "wait",
+      acordou: true,
+    });
+    await advanceFromNodeKey(db, { ...run, resume_at: null }, cfg.next_node_key, nodes);
+    acordados += 1;
+  }
+
+  return { acordados, pulados };
 }

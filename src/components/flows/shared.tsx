@@ -17,6 +17,8 @@
  */
 
 import {
+  Clock,
+  FileText,
   Flag,
   GitFork,
   Inbox,
@@ -47,6 +49,8 @@ export type NodeType =
   | "collect_input"
   | "condition"
   | "set_tag"
+  | "wait"
+  | "send_template"
   | "handoff"
   | "end";
 
@@ -104,6 +108,16 @@ export const NODE_META: Record<
     label: "Marcar contato",
     icon: Tag,
     color: "text-pink-400",
+  },
+  wait: {
+    label: "Esperar",
+    icon: Clock,
+    color: "text-orange-400",
+  },
+  send_template: {
+    label: "Enviar modelo",
+    icon: FileText,
+    color: "text-lime-400",
   },
   handoff: {
     label: "Transferir para agente",
@@ -186,6 +200,26 @@ export function summarizeNode(node: BuilderNode): string | null {
       return rowCount > 0
         ? `${rowCount} ${rowCount === 1 ? "opção" : "opções"} em ${sections.length} ${sections.length === 1 ? "seção" : "seções"}`
         : null;
+    }
+    case "wait": {
+      const d = Number(cfg.dias ?? 0);
+      const h = Number(cfg.horas ?? 0);
+      const m = Number(cfg.minutos ?? 0);
+      const partes = [
+        d ? `${d} ${d === 1 ? "dia" : "dias"}` : "",
+        h ? `${h}h` : "",
+        m ? `${m}min` : "",
+      ].filter(Boolean);
+      const janela = cfg.janela as { inicio?: string; fim?: string } | undefined;
+      const dentro = janela?.inicio
+        ? ` · só entre ${janela.inicio} e ${janela.fim}`
+        : "";
+      return partes.length ? `Espera ${partes.join(" ")}${dentro}` : "Sem tempo definido";
+    }
+    case "send_template": {
+      const nome = typeof cfg.template_name === "string" ? cfg.template_name : "";
+      const toque = cfg.toque !== undefined ? ` · toque ${cfg.toque}` : "";
+      return nome ? `${nome}${toque}` : "Nenhum modelo escolhido";
     }
     case "send_media": {
       const mediaType =

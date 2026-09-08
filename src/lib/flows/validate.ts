@@ -275,6 +275,134 @@ function validateNode(
       break;
     }
 
+    case "wait": {
+      const cfg = node.config as {
+        dias?: number;
+        horas?: number;
+        minutos?: number;
+        janela?: { inicio?: string; fim?: string; dias_semana?: number[] };
+        next_node_key?: string;
+      };
+      const total = (cfg.dias ?? 0) + (cfg.horas ?? 0) + (cfg.minutos ?? 0);
+      if (!total) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "dias",
+          message: "O nó de espera precisa de um tempo (dias, horas ou minutos).",
+        });
+      }
+      const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (cfg.janela) {
+        if (!cfg.janela.inicio || !hhmm.test(cfg.janela.inicio)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "janela.inicio",
+            message: "Horário de início inválido — use HH:MM (ex.: 09:00).",
+          });
+        }
+        if (!cfg.janela.fim || !hhmm.test(cfg.janela.fim)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "janela.fim",
+            message: "Horário de fim inválido — use HH:MM (ex.: 19:00).",
+          });
+        }
+        if (
+          cfg.janela.inicio && cfg.janela.fim &&
+          hhmm.test(cfg.janela.inicio) && hhmm.test(cfg.janela.fim) &&
+          cfg.janela.inicio >= cfg.janela.fim
+        ) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "janela.fim",
+            message: "A janela fecha antes de abrir — nenhum toque sairia.",
+          });
+        }
+        if (cfg.janela.dias_semana && cfg.janela.dias_semana.length === 0) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "janela.dias_semana",
+            message: "Sem nenhum dia permitido, a espera nunca termina.",
+          });
+        }
+      }
+      if (!cfg.next_node_key?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "O nó de espera precisa apontar para o próximo passo.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `A espera aponta para um nó que não existe ("${cfg.next_node_key}").`,
+        });
+      }
+      break;
+    }
+
+    case "send_template": {
+      const cfg = node.config as {
+        template_name?: string;
+        cadencia?: string;
+        toque?: number;
+        next_node_key?: string;
+      };
+      if (!cfg.template_name?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "template_name",
+          message: "Escolha o modelo aprovado que será enviado.",
+        });
+      }
+      // Cadência e toque andam juntos: é o par que o banco usa para não
+      // deixar a mesma pessoa receber o mesmo toque duas vezes.
+      if ((cfg.cadencia && cfg.toque === undefined) || (!cfg.cadencia && cfg.toque !== undefined)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "cadencia",
+          message: "Cadência e número do toque precisam ser preenchidos juntos.",
+        });
+      }
+      if (!cfg.next_node_key?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "O envio de modelo precisa apontar para o próximo passo.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `O envio aponta para um nó que não existe ("${cfg.next_node_key}").`,
+        });
+      }
+      break;
+    }
+
     case "send_media": {
       const cfg = node.config as {
         media_type?: "image" | "video" | "document";
@@ -784,7 +912,9 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "wait":
+    case "send_template": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
