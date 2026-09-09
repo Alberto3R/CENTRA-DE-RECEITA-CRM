@@ -169,10 +169,26 @@ faz, ou o Alberto redefine a senha dela no Admin, entra, liga o IMAP e devolve a
 
 `imapflow@1.7.6` instalado e `verificarIMAP()` pronto — só falta a caixa aceitar.
 
-- `/api/email/poll` + job `pg_cron` a cada 2 min (padrão dos jobs existentes)
-- IMAP: buscar não-lidos, casar na conversa por `In-Reply-To`/`References`, criar contato se
-  o remetente for novo, marcar como lido (idempotência)
-- Inbox: **reusar `components/inbox/channel-display.tsx`** — contato de e-mail pode não ter
+**CÓDIGO PRONTO E PUBLICADO (09/set)** — falta só a caixa aceitar:
+
+- `src/lib/email/parse.ts` (18 testes): tira `Re:`/`Enc:` empilhados, corta o histórico
+  citado e a assinatura. Corte conservador — na dúvida sobra texto, porque cortar demais
+  esconde o que o lead disse. Mensagem que É só citação volta inteira, em vez de virar
+  balão vazio no inbox.
+- `src/lib/email/poll.ts`: casamento na ordem **thread → contato → conversa nova**. O
+  Message-ID que a resposta cita já está gravado no que enviamos, então a resposta cai na
+  conversa exata. Contato: prefere quem tem conversa aberta no canal, senão o mais recente
+  (por causa dos 111 e-mails repetidos). Remetente de sistema (mailer-daemon, no-reply)
+  não vira contato.
+- **Idempotência por UID, não por "não lido"**: a flag muda quando alguém abre a mensagem
+  no webmail, e a mesma resposta entraria duas vezes.
+- `/api/email/poll` (`runtime = 'nodejs'` — IMAP abre socket TCP) + job `email-poll`
+  (migração 100), **criado DESLIGADO**: com o IMAP fechado, 720 tentativas de conexão por
+  dia é o padrão que faz provedor bloquear a caixa. Ligar junto com o IMAP:
+  ```sql
+  select cron.alter_job((select jobid from cron.job where jobname='email-poll'), active := true);
+  ```
+- Inbox: reusa `components/inbox/channel-display.tsx` — contato de e-mail pode não ter
   telefone, igual ao do Instagram
 
 ### Fase 4 — Cadência
@@ -216,8 +232,15 @@ faz, ou o Alberto redefine a senha dela no Admin, entra, liga o IMAP e devolve a
 - [x] ~~Fase 1 — UI de configuração do canal~~ ✅ 27/ago — `/api/email/config` (GET/POST/DELETE),
       `/api/email/test` (SMTP e IMAP separados), `email-settings.tsx`, seção "E-mail" na
       navegação. Build de produção compila, typecheck/lint limpos.
-- [ ] Fase 3 — recebimento (`/api/email/poll` + job `pg_cron`)
+- [x] ~~Fase 3 — recebimento (`/api/email/poll` + job `pg_cron`)~~ ✅ 09/set — publicado,
+      job criado desligado esperando o IMAP
 - [ ] Fase 4 — passo de e-mail na cadência
+
+> ⚠️ **09/set:** ao retomar, descobri que TODO o trabalho de 27/ago (Fases 1 e 2 + UI)
+> estava só na árvore local, sem commit nem PR — 13 dias fora do controle de versão e fora
+> de produção. Publicado em `29ef8c9`. O banco estava adiantado em relação ao código no ar:
+> a migração 091 já estava aplicada e o canal já existia `connected`, mas a UI para
+> configurá-lo não existia para ninguém além desta máquina.
 
 ## 8. Resolvido
 
