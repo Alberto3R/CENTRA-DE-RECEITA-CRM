@@ -10,6 +10,7 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendInstagramReply } from '@/lib/instagram/send'
+import { conversaEhDeEmail, responderPorEmail } from '@/lib/email/reply'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -202,6 +203,63 @@ export async function POST(request: Request) {
         success: true,
         message_id: ig.messageId,
         instagram_message_id: ig.igMessageId,
+      })
+    }
+
+    // ── E-mail ──────────────────────────────────────────────────────────
+    // Quem manda é o CANAL da conversa, não o que o contato tem cadastrado: um
+    // lead pode ter telefone E e-mail, e a resposta precisa sair pelo mesmo
+    // caminho por onde ele falou. Vem antes da validação de telefone porque
+    // contato de e-mail costuma não ter telefone nenhum.
+    if (await conversaEhDeEmail(supabase, accountId, conversation.channel_id)) {
+      if (message_type !== 'text') {
+        return NextResponse.json(
+          { error: 'E-mail: apenas mensagens de texto são suportadas nesta fase.' },
+          { status: 400 },
+        )
+      }
+      const resposta = await responderPorEmail({
+        supabase,
+        accountId,
+        userId: user.id,
+        conversation: conversation as { id: string; channel_id?: string | null },
+        contact: contact as { id: string; email?: string | null; name?: string | null },
+        text: content_text,
+      })
+      if (!resposta.ok) {
+        return NextResponse.json(
+          { error: resposta.error },
+          { status: resposta.status ?? 500 },
+        )
+      }
+      try {
+        void supabaseAdmin()
+          .from('sdr_activities')
+          .insert({
+            account_id: accountId,
+            user_id: user.id,
+            contact_id: contact.id,
+            tipo: 'email',
+          })
+          .then(({ error }: { error: unknown }) => {
+            if (error)
+              console.warn(
+                '[sdr_activities] email auto-log failed:',
+                (error as { message?: string })?.message ?? error,
+              )
+          })
+      } catch (err) {
+        console.warn(
+          '[sdr_activities] email auto-log threw:',
+          err instanceof Error ? err.message : err,
+        )
+      }
+      return NextResponse.json({
+        success: true,
+        message_id: resposta.messageId,
+        subject: resposta.subject,
+        // Teto do dia estourado não impede responder, mas o operador precisa saber.
+        aviso: resposta.error,
       })
     }
 
