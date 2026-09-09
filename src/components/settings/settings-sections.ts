@@ -1,6 +1,7 @@
 import {
   AtSign,
   Bot,
+  Mail,
   CalendarClock,
   Coins,
   CreditCard,
@@ -34,6 +35,7 @@ export const SETTINGS_SECTIONS = [
   'billing',
   'whatsapp',
   'instagram',
+  'email',
   'templates',
   'quick-replies',
   'fields',
@@ -71,6 +73,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   billing: { id: 'billing', label: 'Assinatura', icon: CreditCard, group: 'account', adminOnly: true },
   whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace', adminOnly: true },
   instagram: { id: 'instagram', label: 'Instagram', icon: AtSign, group: 'workspace', adminOnly: true },
+  email: { id: 'email', label: 'E-mail', icon: Mail, group: 'workspace', adminOnly: true },
   templates: { id: 'templates', label: 'Modelos', icon: FileText, group: 'workspace', adminOnly: true },
   'quick-replies': { id: 'quick-replies', label: 'Respostas rápidas', icon: Zap, group: 'workspace', adminOnly: true },
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },

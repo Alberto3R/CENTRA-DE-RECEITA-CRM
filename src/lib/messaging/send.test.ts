@@ -21,7 +21,7 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (s: string) => `dec:${s}`,
 }))
 
-import { sendTextViaChannel, isInstagramChannel } from './send'
+import { sendTextViaChannel, isInstagramChannel, assuntoDoEmail } from './send'
 
 beforeEach(() => {
   waSend.mockClear()
@@ -83,5 +83,27 @@ describe('sendTextViaChannel', () => {
     await expect(
       sendTextViaChannel({ channel: null, contact: {}, text: 'x' }),
     ).rejects.toThrow()
+  })
+})
+
+// ── Assunto do e-mail (canal 'email', migration 091) ──────────────────────
+describe('assuntoDoEmail', () => {
+  it('usa o assunto informado', () => {
+    expect(assuntoDoEmail('Sobre o seu comercial', 'Prospecção')).toBe('Sobre o seu comercial')
+  })
+
+  it('cai no rótulo do canal quando não vem assunto', () => {
+    expect(assuntoDoEmail(undefined, 'Prospecção')).toBe('Prospecção')
+    expect(assuntoDoEmail(null, 'Prospecção')).toBe('Prospecção')
+  })
+
+  it('ignora assunto que é só espaço em branco', () => {
+    expect(assuntoDoEmail('   ', 'Prospecção')).toBe('Prospecção')
+  })
+
+  it('nunca devolve vazio — assunto em branco é descarte certo no spam', () => {
+    expect(assuntoDoEmail(undefined, undefined)).toBe('Contato')
+    expect(assuntoDoEmail('', '')).toBe('Contato')
+    expect(assuntoDoEmail('  ', '  ')).toBe('Contato')
   })
 })

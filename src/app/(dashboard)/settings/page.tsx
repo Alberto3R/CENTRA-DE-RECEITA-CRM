@@ -13,6 +13,7 @@ import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { BillingSettings } from '@/components/settings/billing-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { InstagramSettings } from '@/components/settings/instagram-settings';
+import { EmailSettings } from '@/components/settings/email-settings';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { QuickRepliesSettings } from '@/components/settings/quick-replies-settings';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
@@ -83,6 +84,7 @@ export default function SettingsPage() {
     billing: <BillingSettings />,
     whatsapp: <WhatsAppConfig />,
     instagram: <InstagramSettings />,
+    email: <EmailSettings />,
     templates: <TemplateManager />,
     'quick-replies': <QuickRepliesSettings />,
     fields: <FieldsAndTagsPanel />,
