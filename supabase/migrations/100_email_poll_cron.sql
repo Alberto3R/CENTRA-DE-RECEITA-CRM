@@ -25,3 +25,14 @@ SELECT cron.schedule(
     );
   $cron$
 );
+
+-- NASCE DESLIGADO. Enquanto o IMAP da caixa estiver fechado no painel do Zoho,
+-- cada passada seria uma tentativa de conexão recusada — 720 por dia, que é
+-- exatamente o padrão que faz provedor tratar a origem como ataque e bloquear
+-- a caixa. Ligar junto com o IMAP:
+--     select cron.alter_job((select jobid from cron.job where jobname='email-poll'),
+--                           active := true);
+SELECT cron.alter_job(
+  (SELECT jobid FROM cron.job WHERE jobname = 'email-poll'),
+  active := false
+);
