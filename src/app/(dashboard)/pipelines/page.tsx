@@ -126,7 +126,7 @@ export default function PipelinesPage() {
       const { data } = await supabase
         .from("deals")
         .select(
-          "*, contact:contacts(*, contact_tags(tag:tags(id, name, color))), assignee:profiles!deals_assigned_to_fkey(*)",
+          "*, contact:contacts(*, contact_tags(tag:tags(id, name, color)), conversations(id, last_message_at)), assignee:profiles!deals_assigned_to_fkey(*)",
         )
         .eq("pipeline_id", pipelineId)
         .order("created_at", { ascending: false });

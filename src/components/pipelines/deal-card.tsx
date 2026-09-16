@@ -1,8 +1,10 @@
 "use client";
 
 import type { Deal, PipelineStage } from "@/types";
-import { Calendar, Check, X } from "lucide-react";
+import Link from "next/link";
+import { Calendar, Check, MessageSquare, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
+import { buttonVariants } from "@/components/ui/button";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
 import { StartTemplateButton } from "@/components/whatsapp/start-template-button";
@@ -25,6 +27,19 @@ function contactTags(deal: Deal): TagLite[] {
   return (cts ?? []).map((ct) => ct.tag).filter((t): t is TagLite => !!t);
 }
 
+// Conversa mais recente do contato, embutida no mesmo select
+// (`conversations(id, last_message_at)`). Se existir, o card leva pra ela
+// em vez de oferecer iniciar uma nova.
+function latestConversationId(deal: Deal): string | null {
+  const convs = (deal.contact as unknown as {
+    conversations?: { id: string; last_message_at: string | null }[];
+  } | null)?.conversations;
+  if (!convs?.length) return null;
+  return convs.reduce((a, b) =>
+    (b.last_message_at ?? "") > (a.last_message_at ?? "") ? b : a,
+  ).id;
+}
+
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("pt-BR", {
     month: "short",
@@ -43,6 +58,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const contactLabel = deal.contact?.name || deal.contact?.phone || "Sem contato";
   const assigneeLabel = deal.assignee?.full_name || null;
   const tags = contactTags(deal);
+  const conversationId = latestConversationId(deal);
 
   return (
     <div
@@ -150,7 +166,22 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         >
           <WaCallButton contactId={deal.contact.id} compact />
           <TelnyxCallButton contactId={deal.contact.id} compact />
-          <StartTemplateButton contactId={deal.contact.id} />
+          {conversationId ? (
+            <Link
+              href={`/inbox?c=${conversationId}`}
+              title="Abrir conversa"
+              aria-label="Abrir conversa"
+              className={buttonVariants({
+                variant: "ghost",
+                size: "icon-sm",
+                className: "text-muted-foreground hover:text-primary",
+              })}
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Link>
+          ) : (
+            <StartTemplateButton contactId={deal.contact.id} />
+          )}
         </div>
       )}
     </div>
