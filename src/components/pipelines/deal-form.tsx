@@ -17,6 +17,7 @@ import type {
 } from "@/types";
 import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
 import { DealNotes } from "@/components/pipelines/deal-notes";
+import { PipelineStagePicker } from "@/components/pipelines/pipeline-stage-picker";
 import {
   Sheet,
   SheetContent,
@@ -52,6 +53,14 @@ interface DealFormProps {
   deal?: Deal | null;
   pipelineId: string;
   stages: PipelineStage[];
+  /**
+   * Deixa escolher o funil de destino ao ABRIR um negócio. Ligado no inbox:
+   * o lead caiu no WhatsApp e não tem funil óbvio, então quem decide é o
+   * usuário. Desligado no board de Funis, onde o funil é o da própria tela.
+   * Mover um negócio que já existe de funil é outra operação e não se faz
+   * por aqui — por isso só vale na criação.
+   */
+  allowPipelineChoice?: boolean;
   defaultStageId?: string;
   /** Pre-selects the contact when creating a deal (used from the inbox). */
   defaultContactId?: string;
@@ -70,6 +79,7 @@ export function DealForm({
   deal,
   pipelineId,
   stages,
+  allowPipelineChoice = false,
   defaultStageId,
   defaultContactId,
   lockContact = false,
@@ -86,6 +96,12 @@ export function DealForm({
   const [assignedTo, setAssignedTo] = useState("");
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
   const [notes, setNotes] = useState("");
+
+  // Funil escolhido no seletor. Só entra em jogo quando o chamador ligou
+  // `allowPipelineChoice` e estamos criando; fora disso vale o funil da tela.
+  const [chosenPipelineId, setChosenPipelineId] = useState(pipelineId);
+  const canPickPipeline = !deal && allowPipelineChoice;
+  const effectivePipelineId = canPickPipeline ? chosenPipelineId : pipelineId;
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -133,8 +149,19 @@ export function DealForm({
       setAssignedTo("");
       setExpectedCloseDate("");
       setNotes("");
+      // Reabrir o form recomeça no funil padrão do chamador — a escolha
+      // anterior não pode vazar para o próximo lead.
+      setChosenPipelineId(pipelineId);
     }
-  }, [open, deal, defaultStageId, defaultContactId, stages, defaultCurrency]);
+  }, [
+    open,
+    deal,
+    defaultStageId,
+    defaultContactId,
+    stages,
+    defaultCurrency,
+    pipelineId,
+  ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Motivos de perda da conta (fallback: lista padrão do sistema).
@@ -253,7 +280,7 @@ export function DealForm({
       value: parseFloat(value) || 0,
       currency,
       contact_id: contactId,
-      pipeline_id: pipelineId,
+      pipeline_id: effectivePipelineId,
       stage_id: stageId,
       assigned_to: assignedTo || null,
       expected_close_date: expectedCloseDate || null,
@@ -499,20 +526,34 @@ export function DealForm({
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label className="text-muted-foreground">Etapa</Label>
-              <select
-                value={stageId}
-                onChange={(e) => setStageId(e.target.value)}
-                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
-              >
-                {stages.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {canPickPipeline ? (
+              // Lead que caiu no WhatsApp: o funil é uma decisão do usuário,
+              // e o picker garante que a etapa sempre pertence ao funil.
+              <PipelineStagePicker
+                pipelineId={chosenPipelineId}
+                stageId={stageId}
+                onChange={(next) => {
+                  setChosenPipelineId(next.pipelineId);
+                  setStageId(next.stageId);
+                }}
+                compact
+              />
+            ) : (
+              <div className="grid gap-2">
+                <Label className="text-muted-foreground">Etapa</Label>
+                <select
+                  value={stageId}
+                  onChange={(e) => setStageId(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
+                >
+                  {stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label className="text-muted-foreground">Responsável</Label>

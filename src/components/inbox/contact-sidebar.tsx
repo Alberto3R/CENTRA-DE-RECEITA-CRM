@@ -67,9 +67,17 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
   >([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
-  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
-  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [stagesByPipeline, setStagesByPipeline] = useState<
+    Record<string, PipelineStage[]>
+  >({});
   const [dealFormOpen, setDealFormOpen] = useState(false);
+
+  // Funil sugerido ao abrir um negócio daqui (o primeiro da conta, mesma
+  // regra da tela de Funis). É só o ponto de partida: o form deixa escolher
+  // qualquer outro, porque um lead que caiu no WhatsApp não tem funil óbvio.
+  const pipeline = pipelines[0] ?? null;
+  const stages = pipeline ? (stagesByPipeline[pipeline.id] ?? []) : [];
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -109,37 +117,45 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
     }
   }, [contact]);
 
-  // Pipeline padrão da conta (o primeiro, mesma regra da tela de Pipelines)
-  // + suas etapas. Necessário para criar negócio e trocar etapa daqui.
-  const fetchPipeline = useCallback(async () => {
+  // TODOS os funis da conta + as etapas de cada um. Carregar só o primeiro
+  // (como era antes) prendia o negócio novo num funil escolhido pelo sistema
+  // e, pior, fazia o seletor de etapa de um negócio listar as etapas de outro
+  // funil — movendo o card para uma etapa que não é dele.
+  const fetchPipelines = useCallback(async () => {
     if (!accountId) return;
     const supabase = createClient();
     const { data: pipes } = await supabase
       .from("pipelines")
       .select("*")
       .eq("account_id", accountId)
-      .order("created_at")
-      .limit(1);
+      .order("created_at");
 
-    const first = (pipes?.[0] as Pipeline | undefined) ?? null;
-    setPipeline(first);
-    if (!first) {
-      setStages([]);
+    const list = (pipes ?? []) as Pipeline[];
+    setPipelines(list);
+    if (list.length === 0) {
+      setStagesByPipeline({});
       return;
     }
 
     const { data: st } = await supabase
       .from("pipeline_stages")
       .select("*")
-      .eq("pipeline_id", first.id)
+      .in(
+        "pipeline_id",
+        list.map((p) => p.id),
+      )
       .order("position");
-    setStages((st ?? []) as PipelineStage[]);
+
+    const grouped: Record<string, PipelineStage[]> = {};
+    for (const s of (st ?? []) as PipelineStage[]) {
+      (grouped[s.pipeline_id] ??= []).push(s);
+    }
+    setStagesByPipeline(grouped);
   }, [accountId]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchPipeline();
-  }, [fetchPipeline]);
+    fetchPipelines();
+  }, [fetchPipelines]);
 
   const handleTagsChange = useCallback((_ids: string[], nextTags: Tag[]) => {
     setTags(nextTags);
@@ -173,7 +189,6 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
   // Load on contact change. setContactData/setTags run inside async
   // Supabase callbacks, not synchronously in the effect body.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContactData();
   }, [fetchContactData]);
 
@@ -323,11 +338,11 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
                 size="sm"
                 className="h-6 gap-1 px-2 text-[10px]"
                 onClick={() => setDealFormOpen(true)}
-                disabled={!pipeline || stages.length === 0}
+                disabled={pipelines.length === 0}
                 title={
-                  pipeline
-                    ? "Criar negócio para este contato"
-                    : "Crie um pipeline antes de abrir negócios"
+                  pipelines.length > 0
+                    ? "Criar negócio para este contato — você escolhe o funil"
+                    : "Crie um funil antes de abrir negócios"
                 }
               >
                 <Plus className="size-3" />
@@ -338,7 +353,12 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
               {deals.length === 0 ? (
                 <p className="px-1 text-xs text-muted-foreground">Nenhum negócio</p>
               ) : (
-                deals.map((deal) => (
+                deals.map((deal) => {
+                  // As etapas têm de vir do funil DESTE negócio — listar as de
+                  // outro funil moveria o card para uma etapa que não existe
+                  // nele.
+                  const dealStages = stagesByPipeline[deal.pipeline_id] ?? [];
+                  return (
                   <div
                     key={deal.id}
                     className="rounded-lg bg-muted px-3 py-2"
@@ -351,7 +371,7 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
                         {deal.currency ?? "$"}
                         {deal.value.toLocaleString()}
                       </span>
-                      {stages.length > 0 ? (
+                      {dealStages.length > 0 ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] transition-opacity hover:opacity-80"
@@ -368,7 +388,7 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
                             align="end"
                             className="border-border bg-popover"
                           >
-                            {stages.map((s) => (
+                            {dealStages.map((s) => (
                               <DropdownMenuItem
                                 key={s.id}
                                 onClick={() => handleStageChange(deal.id, s)}
@@ -401,7 +421,8 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
                       )}
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -508,6 +529,7 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
           onOpenChange={setDealFormOpen}
           pipelineId={pipeline.id}
           stages={stages}
+          allowPipelineChoice
           defaultContactId={contact.id}
           lockContact
           onSaved={() => {
