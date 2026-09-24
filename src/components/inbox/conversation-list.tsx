@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown, Plus } from "lucide-react";
+import { Search, ChevronDown, Plus, Phone } from "lucide-react";
 import {
   InstagramGlyph,
   isInstagramContact,
@@ -67,6 +67,20 @@ const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "Fechadas", value: "closed" },
 ];
 
+/** Canal de WhatsApp da conta, para o filtro "qual número". */
+interface WhatsappChannelOption {
+  id: string;
+  label: string | null;
+  display_phone_number: string | null;
+  is_primary: boolean;
+}
+
+const ALL_CHANNELS = "all";
+
+function channelOptionLabel(ch: WhatsappChannelOption): string {
+  return ch.label || ch.display_phone_number || "WhatsApp";
+}
+
 export function ConversationList({
   activeConversationId,
   onSelect,
@@ -79,7 +93,45 @@ export function ConversationList({
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [loading, setLoading] = useState(true);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const [channels, setChannels] = useState<WhatsappChannelOption[]>([]);
+  const [channelFilter, setChannelFilter] = useState<string>(ALL_CHANNELS);
   const canSend = useCan("send-messages");
+
+  // Canais de WhatsApp da conta ATIVA. Filtra por account_id do perfil
+  // porque quem tem acesso multi-marca enxerga, via RLS, os canais de todas
+  // as marcas — o filtro só deve oferecer os números desta.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("account_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const accountId = profile?.account_id as string | undefined;
+      if (!accountId) return;
+
+      const { data } = await supabase
+        .from("whatsapp_config")
+        .select("id, label, display_phone_number, is_primary")
+        .eq("account_id", accountId)
+        .eq("channel_type", "whatsapp")
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true });
+
+      if (!cancelled) setChannels((data ?? []) as WhatsappChannelOption[]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -143,6 +195,14 @@ export function ConversationList({
       result = result.filter((c) => c.status === filter);
     }
 
+    if (channelFilter !== ALL_CHANNELS) {
+      // channel_id nulo = conversa do canal primário (ver Conversation.channel_id).
+      const primaryId = channels.find((ch) => ch.is_primary)?.id ?? null;
+      result = result.filter(
+        (c) => (c.channel_id ?? primaryId) === channelFilter
+      );
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) => {
@@ -154,7 +214,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search]);
+  }, [conversations, filter, channelFilter, channels, search]);
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,6 +231,7 @@ export function ConversationList({
   );
 
   const activeFilter = FILTER_OPTIONS.find((o) => o.value === filter);
+  const activeChannel = channels.find((ch) => ch.id === channelFilter);
 
   return (
     // w-full on mobile so the list occupies the whole viewport when it's
@@ -204,31 +265,91 @@ export function ConversationList({
           )}
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
-              {activeFilter?.label ?? "Todas"}
-              <ChevronDown className="h-3 w-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="border-border bg-popover"
-          >
-            {FILTER_OPTIONS.map((opt) => (
-              <DropdownMenuItem
-                key={opt.value}
-                onClick={() => setFilter(opt.value)}
+        <div className="flex items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
+                {activeFilter?.label ?? "Todas"}
+                <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-border bg-popover"
+            >
+              {FILTER_OPTIONS.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onClick={() => setFilter(opt.value)}
+                  className={cn(
+                    "text-sm",
+                    filter === opt.value
+                      ? "text-primary"
+                      : "text-popover-foreground"
+                  )}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Filtro por número de WhatsApp — só faz sentido com 2+ canais. */}
+          {channels.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 className={cn(
-                  "text-sm",
-                  filter === opt.value
+                  "inline-flex min-w-0 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  activeChannel
                     ? "text-primary"
-                    : "text-popover-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
+                title="Filtrar por canal de WhatsApp"
               >
-                {opt.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <Phone className="h-3 w-3 shrink-0" />
+                <span className="truncate max-w-[160px]">
+                  {activeChannel
+                    ? channelOptionLabel(activeChannel)
+                    : "Todos os canais"}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="border-border bg-popover"
+              >
+                <DropdownMenuItem
+                  onClick={() => setChannelFilter(ALL_CHANNELS)}
+                  className={cn(
+                    "text-sm",
+                    channelFilter === ALL_CHANNELS
+                      ? "text-primary"
+                      : "text-popover-foreground"
+                  )}
+                >
+                  Todos os canais
+                </DropdownMenuItem>
+                {channels.map((ch) => (
+                  <DropdownMenuItem
+                    key={ch.id}
+                    onClick={() => setChannelFilter(ch.id)}
+                    className={cn(
+                      "flex flex-col items-start gap-0 text-sm",
+                      channelFilter === ch.id
+                        ? "text-primary"
+                        : "text-popover-foreground"
+                    )}
+                  >
+                    <span>{channelOptionLabel(ch)}</span>
+                    {ch.label && ch.display_phone_number && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {ch.display_phone_number}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
 
       {/* Conversation Items.
