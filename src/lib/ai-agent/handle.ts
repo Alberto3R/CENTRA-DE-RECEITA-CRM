@@ -14,6 +14,7 @@ import { availableSlots, createMeetEvent, type SchedulingConfig } from '@/lib/go
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
 import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
+import { loadOutboundTurns, formatTemplateTurn } from './outbound-context'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -310,12 +311,12 @@ export async function maybeRunAgent(params: {
     return
   }
 
-  // 4. Histórico (últimas N mensagens com texto, em ordem cronológica)
+  // 4. Histórico (últimas N mensagens com texto ou modelo, em ordem cronológica)
   const { data: msgs } = await supabase
     .from('messages')
-    .select('sender_type, content_text, created_at')
+    .select('sender_type, content_text, template_name, created_at')
     .eq('conversation_id', conversationId)
-    .not('content_text', 'is', null)
+    .or('content_text.not.is.null,template_name.not.is.null')
     .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT)
   const ordered = (msgs ?? []).slice().reverse()
@@ -325,10 +326,53 @@ export async function maybeRunAgent(params: {
   if (last && last.sender_type === 'customer' && last.content_text === inboundText) {
     ordered.pop()
   }
-  const history: AgentTurn[] = ordered.map((m) => ({
-    fromCustomer: m.sender_type === 'customer',
-    text: m.content_text as string,
-  }))
+
+  // Modelo enviado pela caixa de entrada ou por fluxo costuma ficar sem
+  // content_text — sem o corpo, o agente não sabe o que dissemos.
+  const semTexto = [
+    ...new Set(
+      ordered
+        .filter((m) => !m.content_text && m.template_name)
+        .map((m) => m.template_name as string),
+    ),
+  ]
+  const corpoModelo = new Map<string, string>()
+  if (semTexto.length) {
+    const { data: tpls } = await supabaseAdmin()
+      .from('message_templates')
+      .select('name, body_text')
+      .eq('channel_id', channelId)
+      .in('name', semTexto)
+    for (const t of (tpls ?? []) as { name: string; body_text: string | null }[]) {
+      corpoModelo.set(t.name, t.body_text ?? '')
+    }
+  }
+
+  // Disparos (broadcast) não viram linha em `messages` — ver outbound-context.
+  const convContactForHistory = (conv as { contact_id?: string } | null)?.contact_id
+  const disparos = convContactForHistory
+    ? await loadOutboundTurns(supabaseAdmin(), {
+        accountId: params.accountId,
+        channelId,
+        contactId: convContactForHistory,
+      })
+    : []
+
+  const history: AgentTurn[] = [
+    ...ordered.map((m) => ({
+      at: m.created_at as string,
+      fromCustomer: m.sender_type === 'customer',
+      text:
+        (m.content_text as string | null) ??
+        formatTemplateTurn(
+          m.template_name as string,
+          corpoModelo.get(m.template_name as string) || '(texto do modelo indisponível)',
+        ),
+    })),
+    ...disparos.map((d) => ({ at: d.at, fromCustomer: false, text: d.text })),
+  ]
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map(({ fromCustomer, text }) => ({ fromCustomer, text }))
 
   // 4b. Contexto do lead (dados da calculadora) — se o contato tiver atribuição
   //     dessa origem, injeta na mensagem do agente. Silencioso se não houver.
@@ -418,6 +462,13 @@ export async function maybeRunAgent(params: {
     tools,
     toolExecutors,
   })
+  // Silêncio decidido pelo modelo: resposta automática de loja, menu de
+  // atendimento, "obrigado" que encerra — responder só gera ruído (em 29/09
+  // o agente respondeu 25 mensagens automáticas de lojas de shopping).
+  if (result?.silencio) {
+    console.log('[ai-agent] silêncio decidido pelo agente —', conversationId, result.resumo)
+    return
+  }
   if (!result || !result.reply.trim()) {
     // Falha da IA (erro de API, parse inválido ou resposta vazia): em vez
     // de deixar o lead no silêncio, escalamos pra humano — pausa a IA e
@@ -444,6 +495,34 @@ export async function maybeRunAgent(params: {
     .gt('created_at', runStartedAt)
   if ((newerInbound ?? 0) > 0) {
     console.log('[ai-agent] rajada detectada — abortando rodada defasada da conversa', conversationId)
+    return
+  }
+
+  // 5c. O guarda acima só pega mensagem que chegou DEPOIS desta rodada começar.
+  // Quando 2-3 balões chegam juntos (resposta automática de loja, pessoa que
+  // manda "obrigado" / "ta bom" / "poxa" de uma vez), todas as rodadas começam
+  // depois de todos os balões e todas respondem — em 29/09 um lead recebeu 9
+  // mensagens em 2 minutos. Só responde a rodada da ÚLTIMA mensagem do
+  // cliente, e só se nenhuma outra rodada já respondeu nesse meio-tempo.
+  const [{ data: ultimaDoCliente }, { count: botDepois }] = await Promise.all([
+    supabase
+      .from('messages')
+      .select('content_text')
+      .eq('conversation_id', conversationId)
+      .eq('sender_type', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId)
+      .eq('sender_type', 'bot')
+      .gt('created_at', runStartedAt),
+  ])
+  const ultimoTexto = (ultimaDoCliente as { content_text?: string | null } | null)?.content_text
+  if ((ultimoTexto != null && ultimoTexto !== inboundText) || (botDepois ?? 0) > 0) {
+    console.log('[ai-agent] outra rodada cobre esta conversa — abortando', conversationId)
     return
   }
 

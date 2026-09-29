@@ -28,6 +28,8 @@ export interface AgentReply {
   intencao: string
   resumo: string
   publico: string
+  /** Não responder nem escalar (ex.: resposta automática de outra empresa). */
+  silencio: boolean
 }
 
 // Ferramentas (tool use) — usadas quando o agente pode agir (ex.: agenda Google).
@@ -100,6 +102,7 @@ function parseReply(text: string): AgentReply {
       intencao: typeof o.intencao === 'string' ? o.intencao : '',
       resumo: typeof o.resumo === 'string' ? o.resumo : '',
       publico: typeof o.publico === 'string' ? o.publico : '',
+      silencio: o.silencio === true,
     }
   } catch {
     return {
@@ -109,6 +112,7 @@ function parseReply(text: string): AgentReply {
       intencao: '',
       resumo: '',
       publico: '',
+      silencio: false,
     }
   }
 }
@@ -193,7 +197,7 @@ export async function runAgent(params: {
         .join('\n')
         .trim()
       if (!text) return null
-      return { reply: text, handoff: false, handoff_motivo: '', intencao: '', resumo: '', publico: '' }
+      return { reply: text, handoff: false, handoff_motivo: '', intencao: '', resumo: '', publico: '', silencio: false }
     }
     console.error('[ai-agent] loop de ferramentas excedeu o limite')
     return null
