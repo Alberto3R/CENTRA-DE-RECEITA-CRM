@@ -85,6 +85,35 @@ function buildUserMessage(
   ].join('\n')
 }
 
+// O modelo às vezes quebra linha DENTRO de uma string do JSON (quebra real, não
+// o escape "\n"). JSON.parse recusa, e o fallback mandava o JSON cru pro WhatsApp da
+// pessoa — visto em teste em 29/09. Escapa quebras e tabs só dentro de strings.
+function escapeControlCharsInStrings(json: string): string {
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (const ch of json) {
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      else if (ch === '\n') { out += '\\n'; continue }
+      else if (ch === '\r') { out += '\\r'; continue }
+      else if (ch === '\t') { out += '\\t'; continue }
+    } else if (ch === '"') inString = true
+    out += ch
+  }
+  return out
+}
+
+function parseJsonLoose(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return JSON.parse(escapeControlCharsInStrings(text)) as Record<string, unknown>
+  }
+}
+
 function parseReply(text: string): AgentReply {
   // O system prompt manda responder SÓ com JSON. Limpa cercas de código e
   // parseia; se o modelo escapar do formato, usa o texto cru como a resposta.
@@ -94,7 +123,7 @@ function parseReply(text: string): AgentReply {
     .replace(/```$/, '')
     .trim()
   try {
-    const o = JSON.parse(cleaned) as Record<string, unknown>
+    const o = parseJsonLoose(cleaned)
     return {
       reply: typeof o.reply === 'string' ? o.reply : '',
       handoff: o.handoff === true,
@@ -105,6 +134,12 @@ function parseReply(text: string): AgentReply {
       silencio: o.silencio === true,
     }
   } catch {
+    // Parecia JSON e mesmo assim não parseou: não manda o texto cru (seria
+    // JSON na tela da pessoa). Resposta vazia escala a conversa pra humano.
+    if (cleaned.startsWith('{')) {
+      console.error('[ai-agent] JSON inválido do modelo — escalando pra humano')
+      return { reply: '', handoff: true, handoff_motivo: 'json-invalido', intencao: '', resumo: '', publico: '', silencio: false }
+    }
     return {
       reply: text.trim(),
       handoff: false,
