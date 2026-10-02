@@ -226,8 +226,11 @@ interface ToqueRegua {
   acao: string
 }
 
-/** Extrai os toques de cadência ATIVA (D+N) da régua, ignorando recorrentes
- * (reunião do gestor) e pós-fechamento (v1 = pré-venda). Ordena por dia. */
+/** Extrai os toques de cadência ATIVA da régua, ignorando recorrentes
+ * (reunião do gestor) e pós-fechamento (v1 = pré-venda). Ordena por dia.
+ * O agente gerador escreve o dia como "D+3" ou como "Dia 3 — …"; os dois
+ * valem. Sem aceitar "Dia N", uma régua aprovada nesse formato não cobrava
+ * toque nenhum, e calada. */
 export function extrairToquesAtivos(regua: unknown): ToqueRegua[] {
   if (!Array.isArray(regua)) return []
   const toques: ToqueRegua[] = []
@@ -238,8 +241,8 @@ export function extrairToquesAtivos(regua: unknown): ToqueRegua[] {
     const canal = String(t.canal ?? 'WhatsApp')
     const acao = String(t.acao ?? '')
     if (/segunda|semanal|semana|mensal/i.test(quando)) continue
-    if (/fechamento|p[óo]s-?venda|recompra|ganho/i.test(quando)) continue
-    const m = quando.match(/D\s*\+\s*(\d+)/i)
+    if (/fechamento|p[óo]s-?venda|recompra|ganho|ap[óo]s\s+a\s+entrega|fideliza/i.test(quando)) continue
+    const m = quando.match(/\bD\s*\+\s*(\d+)/i) ?? quando.match(/\bdia\s+(\d+)\b/i)
     if (!m) continue
     toques.push({ dia: parseInt(m[1], 10), quando, canal, acao })
   }
