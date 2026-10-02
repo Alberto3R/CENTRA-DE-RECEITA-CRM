@@ -199,16 +199,17 @@ export async function POST(request: Request) {
       );
     }
 
-    // Enforcement de assentos: cada plano inclui um número de usuários.
+    // Enforcement de assentos: cada plano inclui um número de usuários, mais
+    // os assentos extras vendidos à parte para a conta (migration 102).
     // Bloqueia novos convites quando (membros ativos + convites pendentes)
-    // já atingiu o teto do plano. Assento extra pago exige quantity no
-    // Stripe (Caminho B); por ora, o teto é rígido nos inclusos.
+    // já atingiu o teto.
     const { data: acct } = await ctx.supabase
       .from("accounts")
-      .select("plan")
+      .select("plan, assentos_extras")
       .eq("id", ctx.accountId)
-      .maybeSingle<{ plan: string | null }>();
+      .maybeSingle<{ plan: string | null; assentos_extras: number | null }>();
     const plano = getPlan(acct?.plan);
+    const teto = plano.usuariosInclusos + (acct?.assentos_extras ?? 0);
     const [membros, pendentes] = await Promise.all([
       ctx.supabase
         .from("profiles")
@@ -222,10 +223,10 @@ export async function POST(request: Request) {
         .gt("expires_at", new Date().toISOString()),
     ]);
     const assentosUsados = (membros.count ?? 0) + (pendentes.count ?? 0);
-    if (assentosUsados >= plano.usuariosInclusos) {
+    if (assentosUsados >= teto) {
       return NextResponse.json(
         {
-          error: `Seu plano (${plano.label}) inclui ${plano.usuariosInclusos} usuário(s). Faça upgrade para adicionar mais.`,
+          error: `Sua conta (${plano.label}) tem ${teto} usuário(s). Fale com a gente para adicionar mais.`,
         },
         { status: 403 },
       );
