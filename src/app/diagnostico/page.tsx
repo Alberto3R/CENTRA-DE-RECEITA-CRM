@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 // Formulário de Diagnóstico Comercial — Central de Comando Comercial.
 // Público (sem sessão). Posta as respostas em /api/diagnostico (service role).
@@ -80,6 +80,28 @@ export default function DiagnosticoPage() {
   const [enviando, setEnviando] = useState(false)
   const [ok, setOk] = useState(false)
   const [erro, setErro] = useState('')
+  // Convite pré-preenchido (/diagnostico?c=<token>). Lido do window em vez de
+  // useSearchParams pra página seguir estática, sem Suspense.
+  const [convite, setConvite] = useState('')
+  const [preenchido, setPreenchido] = useState(false)
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('c')?.trim()
+    if (!token) return
+    setConvite(token)
+    fetch(`/api/diagnostico/convite?c=${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Convite inválido.')
+        setContato({ nome: data.nome, empresa: data.empresa, whatsapp: data.whatsapp })
+        setRespostas(data.respostas ?? {})
+        setPreenchido(true)
+      })
+      .catch((err) => {
+        setConvite('')
+        setErro(err instanceof Error ? err.message : 'Convite inválido.')
+      })
+  }, [])
 
   function setResp(id: string, val: string) {
     setRespostas((r) => ({ ...r, [id]: val }))
@@ -104,7 +126,7 @@ export default function DiagnosticoPage() {
       const res = await fetch('/api/diagnostico', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...contato, respostas }),
+        body: JSON.stringify({ ...contato, respostas, ...(convite ? { convite } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erro ao enviar.')
@@ -153,6 +175,12 @@ export default function DiagnosticoPage() {
             5 minutos honestos sobre como você vende hoje. É a partir daqui que um
             agente 3R monta o raio-x do seu funil.
           </p>
+          {preenchido && (
+            <p className="mt-4 rounded-[10px] border border-[#10B981]/40 bg-[#04231A] px-4 py-3 text-sm text-[#34D399]">
+              Já deixamos preenchido o que conversamos. Confira, ajuste o que
+              precisar e complete o resto.
+            </p>
+          )}
         </header>
 
         <form onSubmit={submit} className="flex flex-col gap-8">

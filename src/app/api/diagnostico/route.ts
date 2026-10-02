@@ -36,8 +36,29 @@ export async function POST(req: Request) {
     const empresa = typeof body.empresa === 'string' ? body.empresa.trim() : null
     const respostas =
       body.respostas && typeof body.respostas === 'object' ? body.respostas : {}
-    const accountId =
+    let accountId =
       typeof body.account_id === 'string' && body.account_id ? body.account_id : null
+
+    // Convite (/diagnostico?c=<token>): a conta vem do convite, no servidor —
+    // nunca do que o navegador mandar.
+    const convite = typeof body.convite === 'string' ? body.convite.trim() : ''
+    if (convite) {
+      const { data: conv } = await admin()
+        .from('ccc_convites')
+        .select('account_id, usado_em')
+        .eq('token', convite)
+        .maybeSingle()
+      if (!conv) {
+        return NextResponse.json({ error: 'Convite inválido.' }, { status: 400 })
+      }
+      if (conv.usado_em) {
+        return NextResponse.json(
+          { error: 'Este diagnóstico já foi enviado.' },
+          { status: 410 },
+        )
+      }
+      accountId = conv.account_id
+    }
 
     if (!nome || !whatsapp) {
       return NextResponse.json(
@@ -54,13 +75,20 @@ export async function POST(req: Request) {
         whatsapp,
         respostas,
         account_id: accountId,
-        origem: 'formulario-web',
+        origem: convite ? 'convite' : 'formulario-web',
       })
       .select('id')
       .single()
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (convite) {
+      await admin()
+        .from('ccc_convites')
+        .update({ usado_em: new Date().toISOString(), diagnostico_id: data.id })
+        .eq('token', convite)
     }
 
     return NextResponse.json({ ok: true, id: data.id })
