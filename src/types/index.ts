@@ -218,6 +218,12 @@ export interface Message {
    * cue (renders with a "↩ button reply" affordance).
    */
   interactive_reply_id?: string;
+  /**
+   * Por onde a mensagem passou (migration 102): 'api' = CRM (padrão),
+   * 'app' = vendedor pelo app WhatsApp Business do celular (coexistência),
+   * 'history' = importada do histórico na conexão.
+   */
+  origin?: 'api' | 'app' | 'history';
 }
 
 export type ReactionActor = 'customer' | 'agent';
@@ -257,6 +263,15 @@ export interface WhatsAppConfig {
   is_primary?: boolean;
   account_id?: string;
   created_at?: string;
+  channel_type?: 'whatsapp' | 'instagram' | 'email';
+  display_phone_number?: string | null;
+  /** 'coexistence' = número do app WhatsApp Business do celular (migration 102). */
+  connection_mode?: 'cloud' | 'coexistence';
+  coex_onboarded_at?: string | null;
+  coex_history_sync_requested_at?: string | null;
+  coex_history_progress?: number | null;
+  coex_history_completed_at?: string | null;
+  coex_last_error?: string | null;
 }
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)
