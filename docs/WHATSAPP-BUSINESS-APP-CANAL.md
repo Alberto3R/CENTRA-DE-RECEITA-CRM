@@ -83,6 +83,18 @@ será descontinuada em **15/out/2026**.
 | Proxy de mídia tenta o token de cada canal (cada vendedor tem a sua WABA) | `src/app/api/whatsapp/media/[mediaId]/route.ts` |
 | Testes ponta a ponta do webhook (banco em memória, HMAC real) | `src/app/api/whatsapp/webhook/coexistence.test.ts` |
 
+### Estado na Meta (02/out/2026)
+- App "Sales 3R API" (1005742594569109), portfólio 1653435418279597: verificação da empresa ✅; termos de
+  Tech Provider (Independent) aceitos ✅; **Verificação do acesso enviada — em análise** (prazo Meta 01/12/2026).
+- Configuração do Embedded Signup criada: **config_id `962999766232045`** ("Central de Receita - Coexist").
+  Tipo de recurso confirmado no configurador: `whatsapp_business_app_onboarding`.
+- Login do Facebook para Empresas: "Entrar com o SDK do JavaScript" = Sim; domínios permitidos
+  `centraldereceita.com.br`, `vendas.sales3r.com.br`, `sales-3r-crm.vercel.app`.
+- Webhook do app (callback `/api/whatsapp/webhook`): assinados `messages`, `calls`, `history`,
+  `smb_app_state_sync`, `smb_message_echoes`.
+- Falta: os 2 vídeos + pedido de acesso avançado a `whatsapp_business_messaging`,
+  `whatsapp_business_management` e `public_profile` (o Login para Empresas exige).
+
 ### Falta para ir ao ar (passos humanos)
 1. **Meta — app como Tech Provider.** No app da Meta (ex.: "Sales 3R API", 1005742594569109): verificação do
    Business + acesso de Tech Provider. ⚠️ Sem isso o Embedded Signup não abre para terceiros.
