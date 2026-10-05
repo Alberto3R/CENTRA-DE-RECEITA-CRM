@@ -315,7 +315,13 @@ export default function PipelinesPage() {
     async (dealId: string, newStageId: string) => {
       // Optimistic update — board already animated; just persist.
       setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, stage_id: newStageId } : d)),
+        // O trigger zera o tempo na etapa no banco; espelha aqui para o card
+        // sair do vermelho na hora.
+        prev.map((d) =>
+          d.id === dealId && d.stage_id !== newStageId
+            ? { ...d, stage_id: newStageId, stage_entered_at: new Date().toISOString() }
+            : d,
+        ),
       );
       const { error } = await supabase
         .from("deals")

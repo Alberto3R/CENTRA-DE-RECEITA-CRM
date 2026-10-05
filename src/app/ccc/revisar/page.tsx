@@ -13,7 +13,14 @@ interface Funil {
   nome?: string
   etapas?: { name: string; is_connection: boolean }[]
   reused?: boolean
+  modelo?: { id: string; nome: string }
   error?: string
+}
+
+interface EscolhaModelo {
+  modeloId: string
+  motivo: string
+  fallback: boolean
 }
 
 type Status = 'rascunho' | 'aprovado'
@@ -26,6 +33,7 @@ export default function RevisarPage() {
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [funil, setFunil] = useState<Funil | null>(null)
+  const [escolha, setEscolha] = useState<EscolhaModelo | null>(null)
 
   // entregável carregado/gerado (editável)
   const [entregavelId, setEntregavelId] = useState<string | null>(null)
@@ -97,6 +105,7 @@ export default function RevisarPage() {
       setStatus('rascunho')
       setSalvo(true)
       setFunil(data.funil ?? null)
+      setEscolha(data.escolha_modelo ?? null)
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao processar.')
     } finally {
@@ -264,6 +273,16 @@ export default function RevisarPage() {
                     {funil.etapas?.map((e) => e.name).join(' → ')}
                   </span>
                 </p>
+                {funil.modelo && (
+                  <p className="mt-1 text-sm text-[#9FB4A8]">
+                    Modelo: <b className="text-[#EAF3EC]">{funil.modelo.nome}</b>
+                    {escolha?.fallback
+                      ? ' (padrão — não deu para consultar o agente)'
+                      : escolha?.motivo
+                        ? ` — ${escolha.motivo}`
+                        : ''}
+                  </p>
+                )}
                 <a
                   href="/pipelines"
                   className="mt-2 inline-block text-sm text-[#34D399] underline-offset-2 hover:underline"

@@ -368,6 +368,8 @@ export interface PipelineStage {
   funcao: FuncaoEtapa;
   /** Derivado de funcao === 'conexao' por trigger; mantido por compatibilidade. */
   is_connection?: boolean;
+  /** Dias na etapa antes do card ficar vermelho (migration 104). null = sem alerta. */
+  dias_max?: number | null;
 }
 
 export type DealStatus = 'open' | 'won' | 'lost';
@@ -392,6 +394,8 @@ export interface Deal {
   status?: DealStatus;
   created_at: string;
   updated_at?: string;
+  /** Quando entrou na etapa atual — mantido por trigger (migration 104). */
+  stage_entered_at?: string | null;
   contact?: Contact;
   stage?: PipelineStage;
   assignee?: Profile;

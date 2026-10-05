@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { isFuncaoEtapa } from './funcoes'
-import { CATEGORIAS, MODELO_PADRAO_ID, MODELOS, modeloPorId } from './modelos'
+import { CATEGORIAS, MODELO_PADRAO_ID, MODELOS, diasDaEtapa, modeloPorId } from './modelos'
 
 describe('biblioteca de modelos de funil', () => {
   it('tem o modelo padrão e ids únicos', () => {
@@ -35,6 +35,14 @@ describe('biblioteca de modelos de funil', () => {
         expect(m.etapas.length).toBeLessThanOrEqual(10)
         expect(new Set(m.etapas.map((e) => e.nome.toLowerCase())).size).toBe(m.etapas.length)
         for (const e of m.etapas) expect(e.criterio.trim().length).toBeGreaterThan(5)
+      })
+
+      it('etapa ativa tem prazo; ganho e perdido não', () => {
+        for (const e of m.etapas) {
+          const dias = diasDaEtapa(e)
+          if (e.funcao === 'ganho' || e.funcao === 'perdido') expect(dias).toBeNull()
+          else if (e.funcao !== 'reativacao') expect(dias).toBeGreaterThan(0)
+        }
       })
 
       it('tem motivos de perda sem repetição, incluindo "Outro"', () => {

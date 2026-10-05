@@ -2,8 +2,9 @@
 
 import type { Deal, PipelineStage } from "@/types";
 import Link from "next/link";
-import { Calendar, Check, MessageSquare, X } from "lucide-react";
+import { Calendar, Check, Clock, MessageSquare, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
+import { diasNaEtapa } from "@/lib/pipelines/funcoes";
 import { buttonVariants } from "@/components/ui/button";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
@@ -59,6 +60,11 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const assigneeLabel = deal.assignee?.full_name || null;
   const tags = contactTags(deal);
   const conversationId = latestConversationId(deal);
+  // Negócio aberto que passou do prazo da etapa fica vermelho (migration 104).
+  const dias = diasNaEtapa(deal.stage_entered_at);
+  const aberto = !deal.status || deal.status === "open";
+  const atrasado =
+    aberto && dias != null && stage?.dias_max != null && dias >= stage.dias_max;
 
   return (
     <div
@@ -78,7 +84,9 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           onEdit(deal);
         }
       }}
-      className={`group relative w-full cursor-pointer rounded-xl border border-border/50 bg-muted/70 pl-4 pr-3 py-3 text-left shadow-sm transition-all ${
+      className={`group relative w-full cursor-pointer rounded-xl border bg-muted/70 pl-4 pr-3 py-3 text-left shadow-sm transition-all ${
+        atrasado ? "border-red-500/60 ring-1 ring-red-500/30" : "border-border/50"
+      } ${
         isOverlay
           ? "shadow-xl"
           : "hover:-translate-y-0.5 hover:border-border hover:bg-muted hover:shadow-lg"
@@ -121,6 +129,21 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         <span className="text-sm font-bold text-primary">
           {formatCurrency(deal.value, deal.currency)}
         </span>
+        {aberto && dias != null && (
+          <span
+            className={`flex items-center gap-1 text-[11px] ${
+              atrasado ? "font-semibold text-red-400" : "text-muted-foreground"
+            }`}
+            title={
+              stage?.dias_max != null
+                ? `${dias} dia(s) nesta etapa · prazo ${stage.dias_max}`
+                : `${dias} dia(s) nesta etapa`
+            }
+          >
+            <Clock className="h-3 w-3" />
+            {dias}d{atrasado ? " · parado" : ""}
+          </span>
+        )}
         {deal.expected_close_date && (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Calendar className="h-3 w-3" />

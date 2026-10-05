@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { funcaoInfo } from './funcoes'
-import type { ModeloFunil } from './modelos'
+import { diasDaEtapa, type ModeloFunil } from './modelos'
 
 export interface ResultadoAplicacao {
   pipelineId: string
@@ -38,6 +38,7 @@ export async function aplicarModelo(args: {
       name: e.nome,
       funcao: e.funcao,
       color: funcaoInfo(e.funcao).cor,
+      dias_max: diasDaEtapa(e),
       position: i,
     })),
   )
@@ -53,7 +54,7 @@ export async function aplicarModelo(args: {
   return { pipelineId: pipeline.id, motivosNovos, camposNovos }
 }
 
-async function somarMotivos(
+export async function somarMotivos(
   supabase: SupabaseClient,
   accountId: string,
   motivos: string[],
@@ -73,7 +74,7 @@ async function somarMotivos(
   return error ? 0 : novos.length
 }
 
-async function somarCampos(
+export async function somarCampos(
   supabase: SupabaseClient,
   accountId: string,
   userId: string,

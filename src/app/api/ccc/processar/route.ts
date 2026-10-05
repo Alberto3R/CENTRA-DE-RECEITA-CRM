@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { gerarDiagnosticoComando } from '@/lib/ai/ccc-diagnostico'
 import { criarFunilPadrao } from '@/lib/ccc/setup-funil'
+import { escolherModelo, type EscolhaModelo } from '@/lib/pipelines/escolher-modelo'
 
 // ============================================================
 // POST /api/ccc/processar — a AMARRAÇÃO 2→3.
@@ -92,15 +93,23 @@ export async function POST(req: Request) {
 
     // 3. (opcional) Monta o funil na conta.
     const accountId = accountIdBody ?? diag.account_id
+    // O agente 3R escolhe o modelo da biblioteca pelo diagnóstico; sem
+    // consulta possível, cai no Funil geral 3R (nunca nas 6 etapas genéricas).
     let funil = null
+    let escolha: EscolhaModelo | null = null
     if (montarFunil) {
       if (!accountId) {
         funil = { ok: false, error: 'montar_funil pediu, mas não há account_id.' }
       } else {
+        escolha = await escolherModelo({
+          respostas: (diag.respostas ?? {}) as Record<string, unknown>,
+          transcricao,
+        })
         funil = await criarFunilPadrao({
           supabase: admin(),
           accountId,
           nomePipeline,
+          modeloId: escolha.modeloId,
         })
       }
     }
@@ -111,6 +120,7 @@ export async function POST(req: Request) {
       entregaveis: gerado.entregaveis,
       conteudo_md: gerado.conteudoMd,
       funil,
+      escolha_modelo: escolha,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro ao processar.'

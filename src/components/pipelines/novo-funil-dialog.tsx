@@ -10,6 +10,7 @@ import {
   CATEGORIAS,
   MODELOS,
   MODELO_PADRAO_ID,
+  diasDaEtapa,
   type CategoriaModelo,
 } from "@/lib/pipelines/modelos";
 import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
@@ -179,6 +180,11 @@ export function NovoFunilDialog({
                         >
                           {f.label}
                         </span>
+                        {diasDaEtapa(e) != null && (
+                          <span className="text-[10px] text-muted-foreground">
+                            até {diasDaEtapa(e)}d
+                          </span>
+                        )}
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">{e.criterio}</p>
                     </div>
