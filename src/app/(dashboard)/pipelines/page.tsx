@@ -7,14 +7,9 @@ import { PipelineBoard } from "@/components/pipelines/pipeline-board";
 import { PipelineSettings } from "@/components/pipelines/pipeline-settings";
 import { DealForm } from "@/components/pipelines/deal-form";
 import { PipelineAnalytics } from "@/components/pipelines/pipeline-analytics";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { NovoFunilDialog } from "@/components/pipelines/novo-funil-dialog";
+import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
+import { MODELO_PADRAO_ID, modeloPorId } from "@/lib/pipelines/modelos";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +18,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { GitBranch, Plus, ChevronDown, Settings, Search } from "lucide-react";
 import {
   DateRangePicker,
@@ -39,15 +33,6 @@ import { GatedButton } from "@/components/ui/gated-button";
 // the new RLS); deal creation is operational and only requires
 // agent+. The two CTAs gate on different `useCan` capabilities,
 // not on different copy.
-
-// Spec-defined seed — name and color per the product spec.
-const SPEC_DEFAULT_STAGES = [
-  { name: "Novo lead", color: "#3b82f6", position: 0 }, // blue
-  { name: "Qualificado", color: "#eab308", position: 1 }, // yellow
-  { name: "Proposta enviada", color: "#f97316", position: 2 }, // orange
-  { name: "Negociação", color: "#8b5cf6", position: 3 }, // purple
-  { name: "Ganho", color: "#22c55e", position: 4 }, // green
-];
 
 export default function PipelinesPage() {
   const supabase = createClient();
@@ -84,8 +69,6 @@ export default function PipelinesPage() {
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
-  const [newPipelineName, setNewPipelineName] = useState("");
-  const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Deal form state is lifted here so both the top-bar "Add Deal" and
@@ -144,26 +127,20 @@ export default function PipelinesPage() {
     // pipelines.account_id is NOT NULL post-017 with no DB default.
     if (!accountId) return null;
 
-    const { data: pipeline, error } = await supabase
-      .from("pipelines")
-      .insert({ user_id: user.id, account_id: accountId, name: "Funil de Vendas" })
-      .select()
-      .single();
-
-    if (error || !pipeline) {
-      console.error("Failed to seed pipeline:", error?.message);
+    // Conta nova nasce com o modelo padrão da biblioteca.
+    try {
+      const { pipelineId } = await aplicarModelo({
+        supabase,
+        accountId,
+        userId: user.id,
+        modelo: modeloPorId(MODELO_PADRAO_ID)!,
+        nomeFunil: "Funil de Vendas",
+      });
+      return { id: pipelineId } as Pipeline;
+    } catch (e) {
+      console.error("Failed to seed pipeline:", e);
       return null;
     }
-
-    const stagesPayload = SPEC_DEFAULT_STAGES.map((s) => ({
-      pipeline_id: pipeline.id,
-      name: s.name,
-      color: s.color,
-      position: s.position,
-    }));
-    await supabase.from("pipeline_stages").insert(stagesPayload);
-
-    return pipeline as Pipeline;
   }, [supabase, accountId]);
 
   // Initial load + seed-if-empty
@@ -367,52 +344,9 @@ export default function PipelinesPage() {
     setDealFormOpen(true);
   }, []);
 
-  async function handleCreatePipeline() {
-    const name = newPipelineName.trim();
-    if (!name) return;
-    setCreating(true);
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) {
-      setCreating(false);
-      return;
-    }
-    // pipelines.account_id is NOT NULL post-017 with no DB default.
-    if (!accountId) {
-      toast.error("Seu perfil não está vinculado a uma conta.");
-      setCreating(false);
-      return;
-    }
-
-    const { data: pipeline, error } = await supabase
-      .from("pipelines")
-      .insert({ user_id: user.id, account_id: accountId, name })
-      .select()
-      .single();
-
-    if (error || !pipeline) {
-      toast.error("Falha ao criar funil");
-      setCreating(false);
-      return;
-    }
-
-    const stagesPayload = SPEC_DEFAULT_STAGES.map((s) => ({
-      pipeline_id: pipeline.id,
-      name: s.name,
-      color: s.color,
-      position: s.position,
-    }));
-    await supabase.from("pipeline_stages").insert(stagesPayload);
-
-    setNewPipelineName("");
-    setNewPipelineOpen(false);
-    setSelectedPipelineId(pipeline.id);
+  async function handlePipelineCreated(pipelineId: string) {
+    setSelectedPipelineId(pipelineId);
     await refreshPipelines();
-    setCreating(false);
-    toast.success("Funil criado");
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
@@ -638,45 +572,13 @@ export default function PipelinesPage() {
         </>
       )}
 
-      {/* New Pipeline Dialog */}
-      <Dialog open={newPipelineOpen} onOpenChange={setNewPipelineOpen}>
-        <DialogContent className="sm:max-w-sm bg-popover border-border">
-          <DialogHeader>
-            <DialogTitle className="text-popover-foreground">Novo funil</DialogTitle>
-          </DialogHeader>
-          <div className="py-2">
-            <Label className="text-muted-foreground">Nome do funil</Label>
-            <Input
-              value={newPipelineName}
-              onChange={(e) => setNewPipelineName(e.target.value)}
-              placeholder="ex.: Vendas Enterprise"
-              className="mt-2 bg-muted border-border text-foreground"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreatePipeline();
-              }}
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              As etapas padrão (Novo lead → Ganho) serão criadas automaticamente.
-            </p>
-          </div>
-          <DialogFooter className="bg-popover/50 border-border">
-            <Button
-              variant="outline"
-              onClick={() => setNewPipelineOpen(false)}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleCreatePipeline}
-              disabled={creating || !newPipelineName.trim()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {creating ? "Criando..." : "Criar funil"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Novo funil a partir da biblioteca de modelos */}
+      <NovoFunilDialog
+        open={newPipelineOpen}
+        onOpenChange={setNewPipelineOpen}
+        accountId={accountId}
+        onCreated={handlePipelineCreated}
+      />
 
       {/* Pipeline Settings */}
       {selectedPipeline && (

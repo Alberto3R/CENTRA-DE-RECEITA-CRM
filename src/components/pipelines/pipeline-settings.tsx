@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
+import { FUNCOES, funcaoInfo, type FuncaoEtapa } from "@/lib/pipelines/funcoes";
 import type { Pipeline, PipelineStage } from "@/types";
 import {
   Dialog,
@@ -74,6 +75,9 @@ export function PipelineSettings({
   const [localStages, setLocalStages] = useState<PipelineStage[]>(stages);
   const [newStageName, setNewStageName] = useState("");
   const [newStageColor, setNewStageColor] = useState(STAGE_COLORS[0]);
+  // Função é obrigatória: sem ela a etapa não entra no painel. Começa vazia
+  // de propósito, para quem cria a etapa escolher em vez de herdar um padrão.
+  const [newStageFuncao, setNewStageFuncao] = useState<FuncaoEtapa | "">("");
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -113,6 +117,7 @@ export function PipelineSettings({
       pipeline_id: s.pipeline_id,
       name: s.name,
       color: s.color,
+      funcao: s.funcao,
       position: i,
     }));
 
@@ -139,13 +144,14 @@ export function PipelineSettings({
 
   async function handleAddStage() {
     const trimmed = newStageName.trim();
-    if (!trimmed) return;
+    if (!trimmed || !newStageFuncao) return;
     const { data, error } = await supabase
       .from("pipeline_stages")
       .insert({
         pipeline_id: pipeline.id,
         name: trimmed,
         color: newStageColor,
+        funcao: newStageFuncao,
         position: localStages.length,
       })
       .select()
@@ -156,6 +162,7 @@ export function PipelineSettings({
     }
     setLocalStages([...localStages, data as PipelineStage]);
     setNewStageName("");
+    setNewStageFuncao("");
     setNewStageColor(STAGE_COLORS[(localStages.length + 1) % STAGE_COLORS.length]);
   }
 
@@ -199,7 +206,7 @@ export function PipelineSettings({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-popover border-border max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg bg-popover border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">Gerenciar funil</DialogTitle>
         </DialogHeader>
@@ -273,6 +280,11 @@ export function PipelineSettings({
                             updated[index] = { ...updated[index], color: v };
                             setLocalStages(updated);
                           }}
+                          onFuncaoChange={(v) => {
+                            const updated = [...localStages];
+                            updated[index] = { ...updated[index], funcao: v };
+                            setLocalStages(updated);
+                          }}
                           onRemove={() => handleRemoveStage(stage.id)}
                           colors={STAGE_COLORS}
                         />
@@ -300,21 +312,26 @@ export function PipelineSettings({
                     />
                   ))}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={newStageName}
                     onChange={(e) => setNewStageName(e.target.value)}
                     placeholder="Nome da nova etapa"
-                    className="border-border bg-muted text-sm text-foreground"
+                    className="min-w-0 flex-1 border-border bg-muted text-sm text-foreground"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleAddStage();
                     }}
+                  />
+                  <FuncaoSelect
+                    value={newStageFuncao}
+                    onChange={setNewStageFuncao}
+                    placeholder="Função…"
                   />
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleAddStage}
-                    disabled={!newStageName.trim()}
+                    disabled={!newStageName.trim() || !newStageFuncao}
                     className="shrink-0 border-border bg-transparent text-muted-foreground hover:bg-muted"
                   >
                     <Plus className="mr-1 h-3 w-3" />
@@ -363,16 +380,50 @@ export function PipelineSettings({
   );
 }
 
+// Seletor da função da etapa. A descrição da função escolhida aparece no
+// title, para quem está em dúvida entre "qualificado" e "compromisso".
+function FuncaoSelect({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: FuncaoEtapa | "";
+  onChange: (v: FuncaoEtapa) => void;
+  placeholder?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as FuncaoEtapa)}
+      title={value ? funcaoInfo(value).descricao : "O que precisa ter acontecido para o negócio estar nesta etapa"}
+      className="h-7 shrink-0 rounded-md border border-border bg-card px-1.5 text-xs text-foreground outline-none focus:border-primary"
+    >
+      {!value && (
+        <option value="" disabled>
+          {placeholder ?? "Função…"}
+        </option>
+      )}
+      {FUNCOES.map((f) => (
+        <option key={f.id} value={f.id}>
+          {f.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function SortableStageRow({
   stage,
   onNameChange,
   onColorChange,
+  onFuncaoChange,
   onRemove,
   colors,
 }: {
   stage: PipelineStage;
   onNameChange: (v: string) => void;
   onColorChange: (v: string) => void;
+  onFuncaoChange: (v: FuncaoEtapa) => void;
   onRemove: () => void;
   colors: string[];
 }) {
@@ -404,8 +455,9 @@ function SortableStageRow({
       <Input
         value={stage.name}
         onChange={(e) => onNameChange(e.target.value)}
-        className="h-7 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
+        className="h-7 min-w-0 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
       />
+      <FuncaoSelect value={stage.funcao} onChange={onFuncaoChange} />
       <Button
         variant="ghost"
         size="icon-xs"

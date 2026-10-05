@@ -1,4 +1,5 @@
 import type { AccountRole } from "@/lib/auth/roles";
+import type { FuncaoEtapa } from "@/lib/pipelines/funcoes";
 
 export interface Profile {
   id: string;
@@ -363,6 +364,10 @@ export interface PipelineStage {
   position: number;
   color: string;
   created_at: string;
+  /** Função da etapa (migration 103) — o que o painel mede. */
+  funcao: FuncaoEtapa;
+  /** Derivado de funcao === 'conexao' por trigger; mantido por compatibilidade. */
+  is_connection?: boolean;
 }
 
 export type DealStatus = 'open' | 'won' | 'lost';

@@ -35,6 +35,10 @@ export interface FunnelMetrics {
   reached_conn: number
   won: number
   won_from_conn: number
+  /** Conectados em funis que têm etapa de compromisso (migration 103). */
+  conn_with_comp_stage: number
+  reached_comp: number
+  won_from_comp: number
   lost: number
   avg_cycle_seconds: number | null
   loss_reasons: { reason: string; count: number }[]
@@ -47,6 +51,9 @@ const EMPTY_FUNNEL: FunnelMetrics = {
   reached_conn: 0,
   won: 0,
   won_from_conn: 0,
+  conn_with_comp_stage: 0,
+  reached_comp: 0,
+  won_from_comp: 0,
   lost: 0,
   avg_cycle_seconds: null,
   loss_reasons: [],
