@@ -17,6 +17,18 @@ import {
   handleCallsWebhook,
   type CallsWebhookValue,
 } from '@/lib/whatsapp/call-webhook'
+import {
+  historyErrorText,
+  isCoexistenceWebhookField,
+  isFromBusiness,
+  isHistoryComplete,
+  latestMessage,
+  mapHistoryStatus,
+  timestampToIso,
+  toContentType,
+  type CoexistenceValue,
+  type CoexMessage,
+} from '@/lib/whatsapp/coexistence'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -313,6 +325,17 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         continue
       }
 
+      // Coexistência (app WhatsApp Business do celular + Cloud API no mesmo
+      // número): echo do que o vendedor mandou pelo celular, histórico e
+      // agenda. Shape próprio — handler dedicado, nunca dispara bot.
+      if (isCoexistenceWebhookField(change.field)) {
+        await handleCoexistenceChange(
+          change.field,
+          change.value as unknown as CoexistenceValue,
+        )
+        continue
+      }
+
       const value = change.value
 
       // Handle status updates
@@ -383,7 +406,11 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           decryptedAccessToken,
           phoneNumberId,
           // Canal: a própria linha de config casada pelo phone_number_id.
-          config.id
+          config.id,
+          // Número em coexistência é o WhatsApp do vendedor no celular:
+          // flows e automações da conta NÃO respondem por ele (o agente de
+          // IA já é por canal e só responde se tiver um configurado).
+          { runBots: config.connection_mode !== 'coexistence' }
         )
       }
     }
@@ -655,7 +682,8 @@ async function processMessage(
   phoneNumberId: string,
   // Canal (whatsapp_config.id) em que a mensagem chegou — amarra a conversa
   // ao número certo (multi-canal).
-  channelId: string
+  channelId: string,
+  opts: { runBots: boolean } = { runBots: true }
 ) {
   // Fase 4 (BSUID): com WhatsApp usernames, o remetente pode chegar
   // identificado por um BSUID ("BR.13491208…") em vez do telefone. Olhamos
@@ -704,6 +732,11 @@ async function processMessage(
     await handleReaction(message, conversation.id, contactRecord.id)
     return
   }
+
+  // Retentativa da Meta (ou mensagem que já veio pelo histórico da
+  // coexistência): já gravada → para aqui, sem contar não-lida de novo e,
+  // principalmente, sem disparar flow/automação/agente uma segunda vez.
+  if (await messageAlreadyStored(conversation.id, message.id)) return
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
@@ -777,6 +810,9 @@ async function processMessage(
   })
 
   if (msgError) {
+    // Duas entregas simultâneas da mesma mensagem: a outra ganhou a corrida
+    // no índice único (migration 102). Não é erro — é o dedupe funcionando.
+    if (isUniqueViolation(msgError)) return
     console.error('Error inserting message:', msgError)
     return
   }
@@ -851,7 +887,7 @@ async function processMessage(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
-  const flowResult = await dispatchInboundToFlows({
+  const flowResult = !opts.runBots ? { consumed: false } : await dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
@@ -905,7 +941,7 @@ async function processMessage(
   // already went out before `after()` ran, so awaiting costs no webhook
   // latency.
   await Promise.all(
-    automationTriggers.map((triggerType) =>
+    (opts.runBots ? automationTriggers : []).map((triggerType) =>
       runAutomationsForTrigger({
         accountId,
         triggerType,
@@ -938,7 +974,11 @@ async function processMessage(
 
 async function parseMessageContent(
   message: WhatsAppMessage,
-  accessToken: string
+  accessToken: string,
+  // Histórico da coexistência chega em lotes grandes: conferir cada mídia na
+  // Meta seria uma chamada HTTP por anexo. Ali montamos o link do proxy
+  // direto — mídia com mais de 14 dias pode não abrir (limite da Meta).
+  { verifyMedia = true }: { verifyMedia?: boolean } = {}
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -959,6 +999,7 @@ async function parseMessageContent(
   const verifyAndBuildUrl = async (
     mediaId: string
   ): Promise<string | null> => {
+    if (!verifyMedia) return `/api/whatsapp/media/${mediaId}`
     try {
       await getMediaUrl({ mediaId, accessToken })
       return `/api/whatsapp/media/${mediaId}`
@@ -1284,4 +1325,363 @@ async function findOrCreateConversation(
   }
 
   return newConv
+}
+
+/** A mensagem (id da Meta) já está gravada nesta conversa? */
+async function messageAlreadyStored(
+  conversationId: string,
+  metaId: string | undefined,
+): Promise<boolean> {
+  if (!metaId) return false
+  const { data, error } = await supabaseAdmin()
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('message_id', metaId)
+    .limit(1)
+  if (error) {
+    // Na dúvida, deixa gravar — o índice único (migration 102) segura.
+    console.error('[webhook] checagem de duplicata falhou:', error.message)
+    return false
+  }
+  return (data?.length ?? 0) > 0
+}
+
+// ============================================================
+// Coexistência — app WhatsApp Business do celular + Cloud API
+// no mesmo número. Ver src/lib/whatsapp/coexistence.ts.
+//
+// Nada aqui dispara flow, automação ou agente: echo é o vendedor
+// falando, histórico é passado, agenda é cadastro.
+// ============================================================
+
+interface CoexChannel {
+  id: string
+  accountId: string
+  ownerUserId: string
+  accessToken: string
+}
+
+async function loadCoexChannel(phoneNumberId: string): Promise<CoexChannel | null> {
+  const { data, error } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('id, account_id, user_id, access_token')
+    .eq('phone_number_id', phoneNumberId)
+    .limit(2)
+  if (error) {
+    console.error('[coex] falha ao carregar canal:', phoneNumberId, error.message)
+    return null
+  }
+  if (!data || data.length !== 1) {
+    console.error(`[coex] ${data?.length ?? 0} canais para phone_number_id ${phoneNumberId} — evento ignorado`)
+    return null
+  }
+  const row = data[0] as { id: string; account_id: string; user_id: string; access_token: string }
+  try {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      ownerUserId: row.user_id,
+      accessToken: decrypt(row.access_token),
+    }
+  } catch {
+    console.error('[coex] token ilegível no canal', row.id)
+    return null
+  }
+}
+
+async function handleCoexistenceChange(
+  field: string,
+  value: CoexistenceValue,
+): Promise<void> {
+  const phoneNumberId = value?.metadata?.phone_number_id
+  if (!phoneNumberId) return
+  const channel = await loadCoexChannel(phoneNumberId)
+  if (!channel) return
+
+  if (field === 'smb_message_echoes') {
+    for (const echo of value.message_echoes ?? []) {
+      await handleMessageEcho(channel, echo)
+    }
+  } else if (field === 'history') {
+    await handleHistory(channel, value)
+  } else if (field === 'smb_app_state_sync') {
+    await handleAppStateSync(channel, value)
+  }
+}
+
+/** Nome do contato na agenda do app do vendedor ('' se não houver). */
+async function appContactName(channelId: string, phone: string): Promise<string> {
+  const { data } = await supabaseAdmin()
+    .from('whatsapp_app_contacts')
+    .select('full_name, first_name')
+    .eq('channel_id', channelId)
+    .eq('phone', normalizePhone(phone))
+    .is('removed_at', null)
+    .maybeSingle()
+  const row = data as { full_name?: string | null; first_name?: string | null } | null
+  return row?.full_name || row?.first_name || ''
+}
+
+/** Contato + conversa do cliente neste canal (cria se preciso). */
+async function resolveCoexConversation(channel: CoexChannel, rawCustomerId: string) {
+  const bsuid = isBsuid(rawCustomerId) ? rawCustomerId : null
+  const phone = bsuid ?? normalizePhone(rawCustomerId)
+  if (!phone) return null
+  const name = bsuid ? '' : await appContactName(channel.id, phone)
+  const outcome = await findOrCreateContact(
+    channel.accountId,
+    channel.ownerUserId,
+    phone,
+    name,
+    bsuid,
+  )
+  if (!outcome) return null
+  const conversation = await findOrCreateConversation(
+    channel.accountId,
+    channel.ownerUserId,
+    outcome.contact.id,
+    channel.id,
+  )
+  if (!conversation) return null
+  return { contact: outcome.contact, conversation }
+}
+
+/**
+ * smb_message_echoes — o vendedor respondeu PELO CELULAR. Entra na conversa
+ * como mensagem de atendente (origin='app') e vale como "humano assumiu":
+ * pausa a IA e o flow ativo, igual a uma resposta manual pelo inbox.
+ */
+async function handleMessageEcho(channel: CoexChannel, echo: CoexMessage) {
+  if (!echo?.id || !echo.to) return
+  // Reação dada pelo celular: fora do escopo da v1 (não é mensagem).
+  if (echo.type === 'reaction') return
+
+  const resolved = await resolveCoexConversation(channel, echo.to)
+  if (!resolved) return
+  const { contact, conversation } = resolved
+
+  if (await messageAlreadyStored(conversation.id, echo.id)) return
+
+  const message = echo as unknown as WhatsAppMessage
+  const { contentText, mediaUrl, interactiveReplyId } = await parseMessageContent(
+    message,
+    channel.accessToken,
+  )
+  const replyTo = message.context?.id
+    ? await lookupInternalIdByMetaId(message.context.id, conversation.id)
+    : null
+  const createdAt = timestampToIso(echo.timestamp)
+
+  const { error } = await supabaseAdmin().from('messages').insert({
+    conversation_id: conversation.id,
+    sender_type: 'agent',
+    content_type: toContentType(echo.type),
+    content_text: contentText,
+    media_url: mediaUrl,
+    message_id: echo.id,
+    status: 'sent',
+    origin: 'app',
+    created_at: createdAt,
+    reply_to_message_id: replyTo,
+    interactive_reply_id: interactiveReplyId,
+  })
+  if (error) {
+    if (!isUniqueViolation(error)) console.error('[coex] echo não gravado:', error.message)
+    return
+  }
+
+  await supabaseAdmin()
+    .from('conversations')
+    .update({
+      last_message_text: contentText || `[${echo.type}]`,
+      last_message_at: createdAt,
+      updated_at: new Date().toISOString(),
+      ai_handoff: true,
+    })
+    .eq('id', conversation.id)
+
+  const { error: pauseErr } = await supabaseAdmin()
+    .from('flow_runs')
+    .update({
+      status: 'paused_by_agent',
+      ended_at: new Date().toISOString(),
+      end_reason: 'agent_replied',
+    })
+    .eq('account_id', channel.accountId)
+    .eq('contact_id', contact.id)
+    .eq('status', 'active')
+  if (pauseErr) console.warn('[coex] pausa de flow falhou:', pauseErr.message)
+}
+
+/**
+ * history — lotes do histórico (até 180 dias) que a Meta manda depois do
+ * POST /smb_app_data {sync_type:'history'}. Importa calado: não conta
+ * não-lida, não dispara nada; só preenche as conversas.
+ */
+async function handleHistory(channel: CoexChannel, value: CoexistenceValue) {
+  const businessPhone = value.metadata.display_phone_number
+  for (const item of value.history ?? []) {
+    const errText = historyErrorText(item)
+    if (errText) {
+      console.warn('[coex] histórico com erro:', channel.id, errText)
+      await supabaseAdmin()
+        .from('whatsapp_config')
+        .update({ coex_last_error: errText })
+        .eq('id', channel.id)
+      continue
+    }
+
+    for (const thread of item.threads ?? []) {
+      try {
+        await importHistoryThread(channel, businessPhone, thread)
+      } catch (err) {
+        console.error('[coex] falha ao importar conversa do histórico:', thread.id, err)
+      }
+    }
+
+    const progress = item.metadata?.progress
+    await supabaseAdmin()
+      .from('whatsapp_config')
+      .update({
+        ...(typeof progress === 'number' ? { coex_history_progress: progress } : {}),
+        ...(isHistoryComplete(item) ? { coex_history_completed_at: new Date().toISOString() } : {}),
+      })
+      .eq('id', channel.id)
+  }
+}
+
+const HISTORY_BATCH = 100
+
+async function importHistoryThread(
+  channel: CoexChannel,
+  businessPhone: string,
+  thread: NonNullable<NonNullable<CoexistenceValue['history']>[number]['threads']>[number],
+) {
+  const msgs = (thread.messages ?? []).filter((m) => m?.id && m.type !== 'reaction')
+  if (msgs.length === 0 || !thread.id) return
+
+  const resolved = await resolveCoexConversation(channel, thread.id)
+  if (!resolved) return
+  const { conversation } = resolved
+
+  // O que já está no banco (echo/inbound que chegou antes do lote).
+  const seen = new Set<string>()
+  for (let i = 0; i < msgs.length; i += HISTORY_BATCH) {
+    const ids = msgs.slice(i, i + HISTORY_BATCH).map((m) => m.id)
+    const { data } = await supabaseAdmin()
+      .from('messages')
+      .select('message_id')
+      .eq('conversation_id', conversation.id)
+      .in('message_id', ids)
+    for (const r of (data ?? []) as { message_id: string }[]) seen.add(r.message_id)
+  }
+
+  const rows: Record<string, unknown>[] = []
+  for (const m of msgs) {
+    if (seen.has(m.id)) continue
+    seen.add(m.id)
+    const fromBusiness = isFromBusiness(m.from, businessPhone)
+    const { contentText, mediaUrl, interactiveReplyId } = await parseMessageContent(
+      m as unknown as WhatsAppMessage,
+      channel.accessToken,
+      { verifyMedia: false },
+    )
+    rows.push({
+      conversation_id: conversation.id,
+      sender_type: fromBusiness ? 'agent' : 'customer',
+      content_type: toContentType(m.type),
+      content_text: contentText,
+      media_url: mediaUrl,
+      message_id: m.id,
+      status: fromBusiness ? mapHistoryStatus(m.history_context?.status) : 'delivered',
+      origin: 'history',
+      created_at: timestampToIso(m.timestamp),
+      interactive_reply_id: interactiveReplyId,
+    })
+  }
+
+  for (let i = 0; i < rows.length; i += HISTORY_BATCH) {
+    const batch = rows.slice(i, i + HISTORY_BATCH)
+    const { error } = await supabaseAdmin().from('messages').insert(batch)
+    if (!error) continue
+    if (!isUniqueViolation(error)) {
+      console.error('[coex] lote do histórico não gravado:', error.message)
+      continue
+    }
+    // Corrida com um echo/inbound no meio do lote: grava um a um e pula
+    // só o que já existe.
+    for (const row of batch) {
+      const { error: one } = await supabaseAdmin().from('messages').insert(row)
+      if (one && !isUniqueViolation(one)) {
+        console.error('[coex] mensagem do histórico não gravada:', one.message)
+      }
+    }
+  }
+
+  // "Última mensagem" da conversa só avança — o histórico é passado e não
+  // pode passar por cima de uma conversa que já andou depois dele.
+  const latest = latestMessage(msgs)
+  if (!latest) return
+  const latestIso = timestampToIso(latest.timestamp)
+  const current = conversation.last_message_at as string | null
+  if (current && new Date(current) >= new Date(latestIso)) return
+  const { contentText } = await parseMessageContent(
+    latest as unknown as WhatsAppMessage,
+    channel.accessToken,
+    { verifyMedia: false },
+  )
+  await supabaseAdmin()
+    .from('conversations')
+    .update({
+      last_message_text: contentText || `[${latest.type}]`,
+      last_message_at: latestIso,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversation.id)
+}
+
+/**
+ * smb_app_state_sync — agenda do app. Guarda em whatsapp_app_contacts (NÃO
+ * cria contato no CRM: a agenda do celular tem contato pessoal) e só dá
+ * nome a contato do CRM que ainda está sem nome (nome = telefone).
+ */
+async function handleAppStateSync(channel: CoexChannel, value: CoexistenceValue) {
+  for (const item of value.state_sync ?? []) {
+    if (item.type !== 'contact' || !item.contact?.phone_number) continue
+    const phone = normalizePhone(item.contact.phone_number)
+    if (!phone) continue
+    const removed = item.action === 'remove'
+    const fullName = item.contact.full_name?.trim() || null
+
+    const { error } = await supabaseAdmin()
+      .from('whatsapp_app_contacts')
+      .upsert(
+        {
+          account_id: channel.accountId,
+          channel_id: channel.id,
+          phone,
+          full_name: fullName,
+          first_name: item.contact.first_name?.trim() || null,
+          removed_at: removed ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'channel_id,phone' },
+      )
+    if (error) {
+      console.error('[coex] contato da agenda não gravado:', error.message)
+      continue
+    }
+
+    if (removed || !fullName) continue
+    const existing = await findExistingContact(supabaseAdmin(), channel.accountId, phone)
+    if (!existing) continue
+    const semNome =
+      !existing.name || normalizePhone(existing.name) === normalizePhone(existing.phone)
+    if (!semNome) continue
+    await supabaseAdmin()
+      .from('contacts')
+      .update({ name: fullName, updated_at: new Date().toISOString() })
+      .eq('id', existing.id)
+  }
 }
