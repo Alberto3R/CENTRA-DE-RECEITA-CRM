@@ -1,6 +1,6 @@
 "use client";
 
-import { Link2, Trophy, Clock, Timer, UserX, TrendingDown } from "lucide-react";
+import { Link2, Trophy, Clock, Timer, UserX, TrendingDown, CalendarCheck } from "lucide-react";
 
 import type { FunnelMetrics } from "@/lib/dashboard/queries";
 import type { ResponseTimeSummary } from "@/lib/dashboard/types";
@@ -79,19 +79,27 @@ export function FunnelPerformance({
       </div>
 
       {loading || !funnel ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
             <SkeletonCard key={i} />
           ))}
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
             <Tile
               icon={Link2}
               title="Taxa de conexão"
               value={pct(funnel.reached_conn, funnel.with_conn_stage)}
               subtitle={`${funnel.reached_conn} de ${funnel.with_conn_stage} leads conectados`}
+            />
+            {/* Compromisso = visita, reunião, avaliação, test drive — o nome
+                muda por segmento, a função é a mesma (migration 103). */}
+            <Tile
+              icon={CalendarCheck}
+              title="Conexão → compromisso"
+              value={pct(funnel.reached_comp ?? 0, funnel.conn_with_comp_stage ?? 0)}
+              subtitle={`${funnel.reached_comp ?? 0} de ${funnel.conn_with_comp_stage ?? 0} conectados marcaram o próximo passo`}
             />
             <Tile
               icon={Trophy}
