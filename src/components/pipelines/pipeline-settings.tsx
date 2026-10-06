@@ -20,7 +20,6 @@ import { createClient } from "@/lib/supabase/client";
 import { FUNCOES, funcaoInfo, type FuncaoEtapa } from "@/lib/pipelines/funcoes";
 import { lerToques, type Toque } from "@/lib/pipelines/toques";
 import { ReguaEditor } from "./regua-editor";
-import { SaudeFunil } from "./saude-funil";
 import { criarLinkCompartilhamento } from "@/lib/pipelines/compartilhar";
 import type { Pipeline, PipelineStage } from "@/types";
 import {
@@ -284,8 +283,6 @@ export function PipelineSettings({
         ) : (
           <>
             <div className="grid gap-4 py-2">
-              <SaudeFunil pipelineId={pipeline.id} stages={stages} />
-
               <div className="grid gap-2">
                 <Label className="text-muted-foreground">Nome do funil</Label>
                 <Input
