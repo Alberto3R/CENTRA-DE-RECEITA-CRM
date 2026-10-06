@@ -9,6 +9,7 @@
 // (Pós Engenharia, ILARF, Elas que Vendem) e é o padrão de conta nova.
 
 import { funcaoInfo, type FuncaoEtapa } from './funcoes'
+import { TOQUES_POR_FUNCAO, type Toque } from './toques'
 
 export interface EtapaModelo {
   nome: string
@@ -255,7 +256,7 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Conexão', funcao: 'conexao', criterio: 'Respondeu e conversou.' },
       { nome: 'Engajado', funcao: 'qualificado', criterio: 'Assistiu à aula ou mostrou interesse claro no produto.' },
       { nome: 'Checkout iniciado', funcao: 'compromisso', criterio: 'Pediu o link ou iniciou a compra.' },
-      { nome: 'Aguardando pagamento', funcao: 'decisao', criterio: 'Pix/boleto gerado ou cartão em nova tentativa.', diasMax: 2 },
+      { nome: 'Aguardando pagamento', funcao: 'decisao', criterio: 'Pix/boleto gerado ou cartão em nova tentativa.', diasMax: 3 },
       { nome: 'Comprou', funcao: 'ganho', criterio: 'Pagamento aprovado.' },
       PERDIDO,
     ],
@@ -287,7 +288,7 @@ export const MODELOS: ModeloFunil[] = [
     paraQuem: 'Quem vende online e quer recuperar carrinho abandonado, pix e boleto não pagos e cartão recusado.',
     etapas: [
       { nome: 'Pagamento pendente', funcao: 'entrada', criterio: 'Abandonou o carrinho, gerou pix/boleto sem pagar ou teve o cartão recusado.' },
-      { nome: 'Prospecção', funcao: 'tentativa', criterio: 'Mensagem de recuperação enviada; sem resposta.', diasMax: 1 },
+      { nome: 'Prospecção', funcao: 'tentativa', criterio: 'Mensagem de recuperação enviada; sem resposta.', diasMax: 2 },
       { nome: 'Conexão', funcao: 'conexao', criterio: 'Respondeu.' },
       { nome: 'Motivo entendido', funcao: 'qualificado', criterio: 'Sabemos por que não pagou (limite, dúvida, preço).' },
       { nome: 'Novo link enviado', funcao: 'decisao', criterio: 'Recebeu link ou condição nova e vai pagar.', diasMax: 2 },
@@ -298,6 +299,72 @@ export const MODELOS: ModeloFunil[] = [
     campos: ['Produto', 'Forma de pagamento'],
   },
 ]
+
+// Réguas de segmento: onde a conversa da etapa é outra que a padrão da função.
+// Chave = `${modeloId}|${nome da etapa}`.
+export const REGUA_DO_SEGMENTO: Record<string, Toque[]> = {
+  'recuperacao|Pagamento pendente': [
+    {
+      dia: 0,
+      canal: 'WhatsApp',
+      acao: 'Chamar na hora, oferecendo ajuda para concluir',
+      mensagem: 'Oi [nome]! Vi que o pagamento de [produto] não foi concluído. Aconteceu algum problema? Posso te ajudar a finalizar por aqui.',
+    },
+  ],
+  'recuperacao|Prospecção': [
+    { dia: 1, canal: 'Ligação', acao: 'Ligar: entender se foi limite, dúvida ou preço' },
+    {
+      dia: 2,
+      canal: 'WhatsApp',
+      acao: 'Oferecer outra forma de pagamento',
+      mensagem: '[nome], se o cartão não passou, dá para fazer no pix ou dividir em [condição]. Quer que eu gere um link novo?',
+    },
+  ],
+  'recuperacao|Novo link enviado': [
+    {
+      dia: 1,
+      canal: 'WhatsApp',
+      acao: 'Lembrar antes do link expirar',
+      mensagem: '[nome], o link de [produto] vence hoje. Consegue finalizar agora? Se der qualquer erro, me avisa que resolvo na hora.',
+    },
+    { dia: 2, canal: 'Ligação', acao: 'Ligar e finalizar o pagamento junto' },
+  ],
+  'varejo-loja|Visita ao salão': [
+    {
+      dia: 0,
+      canal: 'WhatsApp',
+      acao: 'Combinar dia e hora da visita',
+      mensagem: '[nome], o [produto] fica ainda melhor ao vivo. Consegue passar aqui [dia 1] ou [dia 2]? Se preferir, te mando um vídeo dele no ambiente.',
+    },
+    {
+      dia: 1,
+      canal: 'WhatsApp',
+      acao: 'Depois da visita, mandar o orçamento do que ele gostou',
+      mensagem: '[nome], foi ótimo te receber! Segue o orçamento de [produto], com prazo de entrega e condição de pagamento.',
+    },
+  ],
+  'clinica|Avaliação agendada': [
+    {
+      dia: 0,
+      canal: 'WhatsApp',
+      acao: 'Confirmar a avaliação na véspera, com endereço',
+      mensagem: 'Oi [nome], confirmando sua avaliação [dia] às [hora], na [endereço]. Qualquer imprevisto me avisa que a gente remarca.',
+    },
+  ],
+  'clinica|Compareceu': [
+    {
+      dia: 0,
+      canal: 'WhatsApp',
+      acao: 'Mandar o plano de tratamento no mesmo dia',
+      mensagem: '[nome], obrigado por vir! Segue o plano que o(a) Dr(a). [nome do profissional] montou, com as formas de pagamento.',
+    },
+  ],
+}
+
+/** Régua efetiva da etapa: a do segmento, senão a padrão da função. */
+export function toquesDaEtapa(modeloId: string, e: EtapaModelo): Toque[] {
+  return REGUA_DO_SEGMENTO[`${modeloId}|${e.nome}`] ?? TOQUES_POR_FUNCAO[e.funcao]
+}
 
 /** Prazo efetivo da etapa: o do modelo, senão o padrão da função. */
 export function diasDaEtapa(e: EtapaModelo): number | null {

@@ -4,6 +4,9 @@
 //   1. detectarGatilhos  — deals parados + fechamentos vencidos (gestão por exceção).
 //   2. detectarCadencia  — os toques D+N da régua APROVADA que já venceram por
 //      negócio (o motor de cadência), usando o marco de entrada em etapa.
+//      Etapa com régua própria (migration 105) usa a dela.
+
+import { lerToques } from '@/lib/pipelines/toques'
 
 export type TipoAlerta = 'deal_parado' | 'fechamento_vencido'
 
@@ -269,13 +272,30 @@ export async function detectarCadencia(args: {
 
   const regua = (entregavel?.entregaveis as { regua_cadencia?: unknown } | null)
     ?.regua_cadencia
-  const toques = extrairToquesAtivos(regua)
-  if (toques.length === 0) return []
+  const toquesDoPacote = extrairToquesAtivos(regua)
+
+  // 1b. Régua própria de cada etapa (migration 105). Quando a etapa tem a
+  // dela, vale a dela; a régua do pacote fica para as etapas sem régua.
+  const { data: etapasConta } = await supabase
+    .from('pipeline_stages')
+    .select('id, toques, pipelines!inner(account_id)')
+    .eq('pipelines.account_id', accountId)
+  const reguaDaEtapa = new Map<string, ToqueRegua[]>()
+  for (const e of (etapasConta ?? []) as { id: string; toques: unknown }[]) {
+    const ts = lerToques(e.toques)
+    if (ts.length > 0) {
+      reguaDaEtapa.set(
+        e.id,
+        ts.map((t) => ({ dia: t.dia, quando: `D+${t.dia}`, canal: t.canal, acao: t.acao })),
+      )
+    }
+  }
+  if (toquesDoPacote.length === 0 && reguaDaEtapa.size === 0) return []
 
   // 2. Deals abertos.
   const { data: deals } = await supabase
     .from('deals')
-    .select('id, title, assigned_to, stage_id, updated_at')
+    .select('id, title, assigned_to, stage_id, updated_at, stage_entered_at')
     .eq('account_id', accountId)
     .is('closed_at', null)
   const listaDeals = (deals ?? []) as {
@@ -284,6 +304,7 @@ export async function detectarCadencia(args: {
     assigned_to: string | null
     stage_id: string | null
     updated_at: string | null
+    stage_entered_at: string | null
   }[]
   if (listaDeals.length === 0) return []
 
@@ -326,9 +347,13 @@ export async function detectarCadencia(args: {
 
   for (const d of listaDeals) {
     const ev = ultimoEvento.get(d.id)
-    const marcoISO = ev?.entered_at ?? d.updated_at
-    const stageId = ev?.stage_id ?? d.stage_id ?? null
+    // stage_entered_at (migration 104) é o marco exato; o evento e o
+    // updated_at ficam como reserva para negócio anterior ao trigger.
+    const marcoISO = d.stage_entered_at ?? ev?.entered_at ?? d.updated_at
+    const stageId = d.stage_id ?? ev?.stage_id ?? null
     const diasNaEtapa = diasDesde(marcoISO, agoraMs)
+    const toques = (stageId && reguaDaEtapa.get(stageId)) || toquesDoPacote
+    if (toques.length === 0) continue
 
     // toques cujo dia já venceu e que ainda não foram cobrados nesta etapa
     const pendentes = toques.filter(

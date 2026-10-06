@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Webhook, Loader2, Plus, Copy, Trash2, Check } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { ALIASES_GATEWAY, sugerirMapaGateway } from "@/lib/pipelines/gateway-mapa";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,7 @@ interface Stage {
   name: string;
   position: number;
   pipeline_id: string;
+  funcao: string | null;
 }
 interface Cfg {
   id: string;
@@ -74,7 +76,7 @@ export function WebhooksSettings() {
     setLoading(true);
     const [{ data: ps }, { data: ss }, { data: cs }, { data: tg }] = await Promise.all([
       supabase.from("pipelines").select("id, name").eq("account_id", accountId).order("name"),
-      supabase.from("pipeline_stages").select("id, name, position, pipeline_id").order("position"),
+      supabase.from("pipeline_stages").select("id, name, position, pipeline_id, funcao").order("position"),
       supabase.from("gateway_webhook_config").select("*").eq("account_id", accountId).order("created_at"),
       supabase.from("tags").select("id, name").eq("account_id", accountId).order("name"),
     ]);
@@ -134,34 +136,34 @@ export function WebhooksSettings() {
       // Hotmart) — o endpoint casa a que o provedor enviar. Assim a mesma
       // config funciona pra Voomp e Hotmart sem o admin escolher aliases.
       if (kind === "compra") {
-        for (const k of ["salePaid", "saleApproved", "paid", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"])
+        for (const k of ALIASES_GATEWAY.compra)
           delete m[k];
         if (value) {
           const v = value as string;
-          for (const k of ["salePaid", "saleApproved", "paid", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"])
+          for (const k of ALIASES_GATEWAY.compra)
             m[k] = v;
         }
       } else if (kind === "abandono") {
-        for (const k of ["checkoutAbandoned", "abandonedCart", "abandonedCheckout", "saleAbandonedCart", "PURCHASE_OUT_OF_SHOPPING_CART"])
+        for (const k of ALIASES_GATEWAY.abandono)
           delete m[k];
         if (value) {
           const v = value as string;
-          for (const k of ["checkoutAbandoned", "abandonedCart", "abandonedCheckout", "saleAbandonedCart", "PURCHASE_OUT_OF_SHOPPING_CART"])
+          for (const k of ALIASES_GATEWAY.abandono)
             m[k] = v;
         }
       } else if (kind === "recuperacao") {
-        for (const k of ["waiting_payment", "pixGenerated", "pixCreated", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"])
+        for (const k of ALIASES_GATEWAY.recuperacao)
           delete m[k];
         if (value) {
           const v = value as string;
-          for (const k of ["waiting_payment", "pixGenerated", "pixCreated", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"])
+          for (const k of ALIASES_GATEWAY.recuperacao)
             m[k] = v;
         }
       } else {
-        for (const k of ["saleRefunded", "saleChargeback", "refunded", "chargedback", "PURCHASE_REFUNDED", "PURCHASE_CHARGEBACK", "PURCHASE_PROTEST"])
+        for (const k of ALIASES_GATEWAY.refund)
           delete m[k];
         if (value) {
-          for (const k of ["saleRefunded", "saleChargeback", "refunded", "chargedback", "PURCHASE_REFUNDED", "PURCHASE_CHARGEBACK", "PURCHASE_PROTEST"])
+          for (const k of ALIASES_GATEWAY.refund)
             m[k] = "refund";
         }
       }
@@ -318,7 +320,15 @@ export function WebhooksSettings() {
                     className={selectCls}
                     value={editing.pipeline_id ?? ""}
                     onChange={(e) =>
-                      setEditing({ ...editing, pipeline_id: e.target.value, stage_map: {} })
+                      // Já sugere as etapas pela função (compra → ganho;
+                      // abandono e pix/boleto → entrada). O admin ajusta abaixo.
+                      setEditing({
+                        ...editing,
+                        pipeline_id: e.target.value,
+                        stage_map: sugerirMapaGateway(
+                          stages.filter((st) => st.pipeline_id === e.target.value),
+                        ),
+                      })
                     }
                   >
                     <option value="">Selecione…</option>

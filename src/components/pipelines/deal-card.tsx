@@ -2,9 +2,11 @@
 
 import type { Deal, PipelineStage } from "@/types";
 import Link from "next/link";
-import { Calendar, Check, Clock, MessageSquare, X } from "lucide-react";
+import { Calendar, Check, Clock, Copy, MessageSquare, Phone, X } from "lucide-react";
+import { toast } from "sonner";
 import { formatCurrency } from "@/lib/currency";
 import { diasNaEtapa } from "@/lib/pipelines/funcoes";
+import { lerToques, toqueDoDia } from "@/lib/pipelines/toques";
 import { buttonVariants } from "@/components/ui/button";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
@@ -65,6 +67,8 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const aberto = !deal.status || deal.status === "open";
   const atrasado =
     aberto && dias != null && stage?.dias_max != null && dias >= stage.dias_max;
+  // O que o vendedor faz hoje por este negócio, pela régua da etapa (migration 105).
+  const toque = aberto ? toqueDoDia(lerToques(stage?.toques), dias) : null;
 
   return (
     <div
@@ -151,6 +155,39 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           </span>
         )}
       </div>
+
+      {/* Contato do dia pela régua da etapa. Copiar a mensagem não deve abrir
+          o negócio, por isso o stopPropagation. */}
+      {toque && !isOverlay && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-background/60 px-2 py-1.5 text-[11px]">
+          {toque.canal === "Ligação" ? (
+            <Phone className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+          ) : (
+            <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+          )}
+          <span className="min-w-0 flex-1 text-foreground" title={toque.mensagem}>
+            <span className="text-muted-foreground">Hoje: </span>
+            {toque.acao}
+          </span>
+          {toque.mensagem && (
+            <button
+              type="button"
+              aria-label="Copiar mensagem sugerida"
+              title="Copiar mensagem sugerida"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard
+                  ?.writeText(toque.mensagem ?? "")
+                  .then(() => toast.success("Mensagem copiada — complete o que está entre colchetes"))
+                  .catch(() => toast.error("Não foi possível copiar"));
+              }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Tags do contato — só exibição no funil (inserir fica no negócio) */}
       {tags.length > 0 && (
