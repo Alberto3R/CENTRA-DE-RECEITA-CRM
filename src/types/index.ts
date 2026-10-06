@@ -1,5 +1,6 @@
 import type { AccountRole } from "@/lib/auth/roles";
 import type { FuncaoEtapa } from "@/lib/pipelines/funcoes";
+import type { Toque } from "@/lib/pipelines/toques";
 
 export interface Profile {
   id: string;
@@ -370,6 +371,8 @@ export interface PipelineStage {
   is_connection?: boolean;
   /** Dias na etapa antes do card ficar vermelho (migration 104). null = sem alerta. */
   dias_max?: number | null;
+  /** Régua de contato da etapa (migration 105). */
+  toques?: Toque[];
 }
 
 export type DealStatus = 'open' | 'won' | 'lost';

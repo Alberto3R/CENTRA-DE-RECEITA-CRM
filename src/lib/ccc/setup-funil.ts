@@ -9,7 +9,8 @@
 import type { FuncaoEtapa } from '@/lib/pipelines/funcoes'
 import { funcaoInfo } from '@/lib/pipelines/funcoes'
 import { somarCampos, somarMotivos } from '@/lib/pipelines/aplicar-modelo'
-import { diasDaEtapa, modeloPorId } from '@/lib/pipelines/modelos'
+import { diasDaEtapa, modeloPorId, toquesDaEtapa } from '@/lib/pipelines/modelos'
+import type { Toque } from '@/lib/pipelines/toques'
 
 export interface EtapaFunil {
   name: string
@@ -17,6 +18,7 @@ export interface EtapaFunil {
   funcao?: FuncaoEtapa
   dias_max?: number | null
   color?: string
+  toques?: Toque[]
 }
 
 // Template padrão (ver 02-Operacao/template-funil-padrao.md).
@@ -61,6 +63,7 @@ export async function criarFunilPadrao(args: {
         funcao: e.funcao,
         dias_max: diasDaEtapa(e),
         color: funcaoInfo(e.funcao).cor,
+        toques: toquesDaEtapa(modelo.id, e),
       }))
     : args.etapas && args.etapas.length > 0
       ? args.etapas
@@ -133,6 +136,7 @@ export async function criarFunilPadrao(args: {
     ...(e.funcao ? { funcao: e.funcao } : {}),
     ...(e.dias_max !== undefined ? { dias_max: e.dias_max } : {}),
     ...(e.color ? { color: e.color } : {}),
+    ...(e.toques ? { toques: e.toques } : {}),
   }))
 
   const { error: erroStages } = await supabase

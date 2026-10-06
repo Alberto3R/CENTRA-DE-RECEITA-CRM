@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import { isFuncaoEtapa } from './funcoes'
-import { CATEGORIAS, MODELO_PADRAO_ID, MODELOS, diasDaEtapa, modeloPorId } from './modelos'
+import {
+  CATEGORIAS,
+  MODELO_PADRAO_ID,
+  MODELOS,
+  REGUA_DO_SEGMENTO,
+  diasDaEtapa,
+  modeloPorId,
+  toquesDaEtapa,
+} from './modelos'
+import { toqueDoDia } from './toques'
 
 describe('biblioteca de modelos de funil', () => {
   it('tem o modelo padrão e ids únicos', () => {
@@ -51,4 +60,40 @@ describe('biblioteca de modelos de funil', () => {
       })
     })
   }
+})
+
+describe('régua de contato dos modelos', () => {
+  it('toda régua de segmento aponta para uma etapa que existe', () => {
+    for (const chave of Object.keys(REGUA_DO_SEGMENTO)) {
+      const [id, nome] = chave.split('|')
+      expect(modeloPorId(id)?.etapas.some((e) => e.nome === nome), chave).toBe(true)
+    }
+  })
+
+  it('etapa ativa tem régua e nenhum toque passa do prazo da etapa', () => {
+    for (const m of MODELOS) {
+      for (const e of m.etapas) {
+        const toques = toquesDaEtapa(m.id, e)
+        if (e.funcao === 'ganho' || e.funcao === 'perdido') {
+          expect(toques).toEqual([])
+          continue
+        }
+        expect(toques.length, `${m.id}/${e.nome}`).toBeGreaterThan(0)
+        const prazo = diasDaEtapa(e)
+        if (prazo != null) {
+          for (const t of toques) expect(t.dia, `${m.id}/${e.nome}`).toBeLessThanOrEqual(prazo)
+        }
+      }
+    }
+  })
+
+  it('toqueDoDia pega o mais avançado que já chegou', () => {
+    const r = [
+      { dia: 1, canal: 'WhatsApp' as const, acao: 'a' },
+      { dia: 3, canal: 'Ligação' as const, acao: 'b' },
+    ]
+    expect(toqueDoDia(r, 0)).toBeNull()
+    expect(toqueDoDia(r, 2)?.acao).toBe('a')
+    expect(toqueDoDia(r, 9)?.acao).toBe('b')
+  })
 })

@@ -11,6 +11,7 @@ import {
   MODELOS,
   MODELO_PADRAO_ID,
   diasDaEtapa,
+  toquesDaEtapa,
   type CategoriaModelo,
 } from "@/lib/pipelines/modelos";
 import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
@@ -187,6 +188,20 @@ export function NovoFunilDialog({
                         )}
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">{e.criterio}</p>
+                      {toquesDaEtapa(modelo.id, e).length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5">
+                          {toquesDaEtapa(modelo.id, e).map((t) => (
+                            <li
+                              key={`${t.dia}-${t.acao}`}
+                              className="text-[11px] text-foreground/80"
+                              title={t.mensagem}
+                            >
+                              <span className="font-mono text-muted-foreground">D{t.dia}</span>{" "}
+                              {t.canal} · {t.acao}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   </li>
                 );
@@ -221,6 +236,12 @@ export function NovoFunilDialog({
             <p className="mt-3 text-xs text-muted-foreground">
               Motivos e campos valem para a conta toda; só entram os que ainda não existem.
             </p>
+            {modelo.id === "recuperacao" && (
+              <p className="mt-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-xs text-foreground">
+                Depois de criar, ligue a Voomp ou a Hotmart em Configurações → Webhooks e
+                escolha este funil: os eventos já se encaixam nas etapas sozinhos.
+              </p>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { funcaoInfo } from './funcoes'
-import { diasDaEtapa, type ModeloFunil } from './modelos'
+import { diasDaEtapa, toquesDaEtapa, type ModeloFunil } from './modelos'
 
 export interface ResultadoAplicacao {
   pipelineId: string
@@ -39,6 +39,7 @@ export async function aplicarModelo(args: {
       funcao: e.funcao,
       color: funcaoInfo(e.funcao).cor,
       dias_max: diasDaEtapa(e),
+      toques: toquesDaEtapa(modelo.id, e),
       position: i,
     })),
   )
