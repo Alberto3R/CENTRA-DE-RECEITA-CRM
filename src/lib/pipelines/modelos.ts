@@ -8,13 +8,15 @@
 // O "Funil geral 3R" é o esqueleto dos funis que mais movimentam nas contas
 // (Pós Engenharia, ILARF, Elas que Vendem) e é o padrão de conta nova.
 
-import type { FuncaoEtapa } from './funcoes'
+import { funcaoInfo, type FuncaoEtapa } from './funcoes'
 
 export interface EtapaModelo {
   nome: string
   funcao: FuncaoEtapa
   /** O que precisa ter acontecido para o negócio estar aqui. */
   criterio: string
+  /** Prazo na etapa; se omitido, vale o padrão da função (funcoes.ts). */
+  diasMax?: number
 }
 
 export type CategoriaModelo =
@@ -101,7 +103,7 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Qualificado', funcao: 'qualificado', criterio: 'Sabemos modelo, forma de pagamento e se tem usado na troca.' },
       { nome: 'Test drive / visita', funcao: 'compromisso', criterio: 'Cliente foi à loja ou fez o test drive.' },
       { nome: 'Proposta enviada', funcao: 'proposta', criterio: 'Recebeu valor, avaliação do usado e condição.' },
-      { nome: 'Financiamento / fechamento', funcao: 'decisao', criterio: 'Crédito em análise ou documentação em andamento.' },
+      { nome: 'Financiamento / fechamento', funcao: 'decisao', criterio: 'Crédito em análise ou documentação em andamento.', diasMax: 7 },
       { nome: 'Venda fechada', funcao: 'ganho', criterio: 'Contrato assinado ou pagamento feito.' },
       PERDIDO,
     ],
@@ -118,9 +120,9 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Primeiro contato', funcao: 'tentativa', criterio: 'Chamamos; sem resposta ainda.' },
       { nome: 'Em conversa', funcao: 'conexao', criterio: 'Cliente respondeu.' },
       { nome: 'Conta de luz recebida', funcao: 'qualificado', criterio: 'Mandou a conta; consumo e cidade conhecidos.' },
-      { nome: 'Visita técnica', funcao: 'compromisso', criterio: 'Visita técnica feita ou telhado avaliado.' },
-      { nome: 'Proposta apresentada', funcao: 'proposta', criterio: 'Recebeu projeto, valor e economia estimada.' },
-      { nome: 'Financiamento / assinatura', funcao: 'decisao', criterio: 'Crédito em análise ou contrato em assinatura.' },
+      { nome: 'Visita técnica', funcao: 'compromisso', criterio: 'Visita técnica feita ou telhado avaliado.', diasMax: 7 },
+      { nome: 'Proposta apresentada', funcao: 'proposta', criterio: 'Recebeu projeto, valor e economia estimada.', diasMax: 7 },
+      { nome: 'Financiamento / assinatura', funcao: 'decisao', criterio: 'Crédito em análise ou contrato em assinatura.', diasMax: 10 },
       { nome: 'Contrato fechado', funcao: 'ganho', criterio: 'Assinou ou pagou a entrada.' },
       PERDIDO,
     ],
@@ -137,9 +139,9 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Primeiro contato', funcao: 'tentativa', criterio: 'Corretor chamou; sem resposta ainda.' },
       { nome: 'Em conversa', funcao: 'conexao', criterio: 'Cliente respondeu.' },
       { nome: 'Perfil qualificado', funcao: 'qualificado', criterio: 'Sabemos região, faixa de valor e se vai financiar.' },
-      { nome: 'Visita agendada', funcao: 'compromisso', criterio: 'Visita marcada com data e hora.' },
-      { nome: 'Proposta', funcao: 'proposta', criterio: 'Fez ou recebeu proposta sobre um imóvel.' },
-      { nome: 'Documentação / crédito', funcao: 'decisao', criterio: 'Proposta aceita; documentos e financiamento em andamento.' },
+      { nome: 'Visita agendada', funcao: 'compromisso', criterio: 'Visita marcada com data e hora.', diasMax: 7 },
+      { nome: 'Proposta', funcao: 'proposta', criterio: 'Fez ou recebeu proposta sobre um imóvel.', diasMax: 7 },
+      { nome: 'Documentação / crédito', funcao: 'decisao', criterio: 'Proposta aceita; documentos e financiamento em andamento.', diasMax: 20 },
       { nome: 'Fechado', funcao: 'ganho', criterio: 'Contrato assinado.' },
       PERDIDO,
     ],
@@ -156,9 +158,9 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Em contato', funcao: 'tentativa', criterio: 'Abordagem feita; sem resposta ainda.' },
       { nome: 'Conectado', funcao: 'conexao', criterio: 'Falamos com alguém da empresa.' },
       { nome: 'Qualificado', funcao: 'qualificado', criterio: 'Tem a dor, o orçamento e sabemos quem decide.' },
-      { nome: 'Reunião realizada', funcao: 'compromisso', criterio: 'Reunião de diagnóstico aconteceu com quem decide.' },
-      { nome: 'Proposta apresentada', funcao: 'proposta', criterio: 'Proposta discutida com quem decide — não só enviada.' },
-      { nome: 'Negociação', funcao: 'decisao', criterio: 'Ajustando escopo, preço ou contrato.' },
+      { nome: 'Reunião realizada', funcao: 'compromisso', criterio: 'Reunião de diagnóstico aconteceu com quem decide.', diasMax: 5 },
+      { nome: 'Proposta apresentada', funcao: 'proposta', criterio: 'Proposta discutida com quem decide — não só enviada.', diasMax: 7 },
+      { nome: 'Negociação', funcao: 'decisao', criterio: 'Ajustando escopo, preço ou contrato.', diasMax: 10 },
       { nome: 'Ganho', funcao: 'ganho', criterio: 'Contrato assinado ou primeira parcela paga.' },
       PERDIDO,
     ],
@@ -172,12 +174,12 @@ export const MODELOS: ModeloFunil[] = [
     paraQuem: 'Times que abordam listas frias e passam reuniões para o vendedor.',
     etapas: [
       { nome: 'Base fria', funcao: 'entrada', criterio: 'Contato está na lista; ainda não abordado.' },
-      { nome: 'Em cadência', funcao: 'tentativa', criterio: 'Recebendo os toques da cadência; sem resposta.' },
+      { nome: 'Em cadência', funcao: 'tentativa', criterio: 'Recebendo os toques da cadência; sem resposta.', diasMax: 10 },
       { nome: 'Conectado', funcao: 'conexao', criterio: 'Respondeu ou atendeu.' },
       { nome: 'Qualificado', funcao: 'qualificado', criterio: 'É o decisor (ou chegamos nele) e tem a dor.' },
-      { nome: 'Reunião agendada', funcao: 'compromisso', criterio: 'Reunião marcada com data, hora e link.' },
+      { nome: 'Reunião agendada', funcao: 'compromisso', criterio: 'Reunião marcada com data, hora e link.', diasMax: 7 },
       { nome: 'Reunião realizada', funcao: 'compromisso', criterio: 'A reunião aconteceu.' },
-      { nome: 'Proposta', funcao: 'proposta', criterio: 'Recebeu proposta.' },
+      { nome: 'Proposta', funcao: 'proposta', criterio: 'Recebeu proposta.', diasMax: 7 },
       { nome: 'Ganho', funcao: 'ganho', criterio: 'Fechou.' },
       { nome: 'No-show / reagendar', funcao: 'reativacao', criterio: 'Faltou à reunião; volta para a cadência.' },
       PERDIDO,
@@ -212,8 +214,8 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Novo contato', funcao: 'entrada', criterio: 'Chegou mensagem ou pedido de agendamento.' },
       { nome: 'Em atendimento', funcao: 'tentativa', criterio: 'Respondemos; paciente ainda não engajou.' },
       { nome: 'Em conversa', funcao: 'conexao', criterio: 'Paciente contou o que precisa.' },
-      { nome: 'Avaliação agendada', funcao: 'compromisso', criterio: 'Avaliação marcada com data e hora.' },
-      { nome: 'Compareceu', funcao: 'compromisso', criterio: 'Paciente veio à avaliação.' },
+      { nome: 'Avaliação agendada', funcao: 'compromisso', criterio: 'Avaliação marcada com data e hora.', diasMax: 7 },
+      { nome: 'Compareceu', funcao: 'compromisso', criterio: 'Paciente veio à avaliação.', diasMax: 2 },
       { nome: 'Plano apresentado', funcao: 'proposta', criterio: 'Recebeu plano de tratamento e orçamento.' },
       { nome: 'Fechando', funcao: 'decisao', criterio: 'Aceitou; definindo pagamento e início.' },
       { nome: 'Tratamento fechado', funcao: 'ganho', criterio: 'Pagou ou iniciou o tratamento.' },
@@ -253,7 +255,7 @@ export const MODELOS: ModeloFunil[] = [
       { nome: 'Conexão', funcao: 'conexao', criterio: 'Respondeu e conversou.' },
       { nome: 'Engajado', funcao: 'qualificado', criterio: 'Assistiu à aula ou mostrou interesse claro no produto.' },
       { nome: 'Checkout iniciado', funcao: 'compromisso', criterio: 'Pediu o link ou iniciou a compra.' },
-      { nome: 'Aguardando pagamento', funcao: 'decisao', criterio: 'Pix/boleto gerado ou cartão em nova tentativa.' },
+      { nome: 'Aguardando pagamento', funcao: 'decisao', criterio: 'Pix/boleto gerado ou cartão em nova tentativa.', diasMax: 2 },
       { nome: 'Comprou', funcao: 'ganho', criterio: 'Pagamento aprovado.' },
       PERDIDO,
     ],
@@ -285,10 +287,10 @@ export const MODELOS: ModeloFunil[] = [
     paraQuem: 'Quem vende online e quer recuperar carrinho abandonado, pix e boleto não pagos e cartão recusado.',
     etapas: [
       { nome: 'Pagamento pendente', funcao: 'entrada', criterio: 'Abandonou o carrinho, gerou pix/boleto sem pagar ou teve o cartão recusado.' },
-      { nome: 'Prospecção', funcao: 'tentativa', criterio: 'Mensagem de recuperação enviada; sem resposta.' },
+      { nome: 'Prospecção', funcao: 'tentativa', criterio: 'Mensagem de recuperação enviada; sem resposta.', diasMax: 1 },
       { nome: 'Conexão', funcao: 'conexao', criterio: 'Respondeu.' },
       { nome: 'Motivo entendido', funcao: 'qualificado', criterio: 'Sabemos por que não pagou (limite, dúvida, preço).' },
-      { nome: 'Novo link enviado', funcao: 'decisao', criterio: 'Recebeu link ou condição nova e vai pagar.' },
+      { nome: 'Novo link enviado', funcao: 'decisao', criterio: 'Recebeu link ou condição nova e vai pagar.', diasMax: 2 },
       { nome: 'Recuperado', funcao: 'ganho', criterio: 'Pagamento aprovado.' },
       PERDIDO,
     ],
@@ -296,6 +298,11 @@ export const MODELOS: ModeloFunil[] = [
     campos: ['Produto', 'Forma de pagamento'],
   },
 ]
+
+/** Prazo efetivo da etapa: o do modelo, senão o padrão da função. */
+export function diasDaEtapa(e: EtapaModelo): number | null {
+  return e.diasMax ?? funcaoInfo(e.funcao).diasPadrao
+}
 
 export function modeloPorId(id: string): ModeloFunil | undefined {
   return MODELOS.find((m) => m.id === id)

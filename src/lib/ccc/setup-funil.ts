@@ -2,10 +2,21 @@
 // Usada tanto pela rota /api/ccc/setup-funil quanto pela amarração
 // /api/ccc/processar. Cria o pipeline + as etapas numa conta, marcando a
 // etapa de "conversa qualificada" (is_connection=true).
+//
+// Com `modeloId`, as etapas (função, prazo, cor), os motivos de perda e os
+// campos vêm da biblioteca de modelos (src/lib/pipelines/modelos.ts).
+
+import type { FuncaoEtapa } from '@/lib/pipelines/funcoes'
+import { funcaoInfo } from '@/lib/pipelines/funcoes'
+import { somarCampos, somarMotivos } from '@/lib/pipelines/aplicar-modelo'
+import { diasDaEtapa, modeloPorId } from '@/lib/pipelines/modelos'
 
 export interface EtapaFunil {
   name: string
   is_connection: boolean
+  funcao?: FuncaoEtapa
+  dias_max?: number | null
+  color?: string
 }
 
 // Template padrão (ver 02-Operacao/template-funil-padrao.md).
@@ -24,6 +35,8 @@ export interface ResultadoFunil {
   nome?: string
   etapas?: EtapaFunil[]
   reused?: boolean
+  /** Modelo da biblioteca usado, quando houver. */
+  modelo?: { id: string; nome: string }
   error?: string
 }
 
@@ -33,14 +46,25 @@ export async function criarFunilPadrao(args: {
   accountId: string
   nomePipeline?: string
   etapas?: EtapaFunil[]
+  modeloId?: string
 }): Promise<ResultadoFunil> {
   const { supabase, accountId } = args
+  const modelo = args.modeloId ? modeloPorId(args.modeloId) : undefined
   const nome =
     args.nomePipeline && args.nomePipeline.trim()
       ? args.nomePipeline.trim()
-      : 'Comercial 3R'
-  const etapas =
-    args.etapas && args.etapas.length > 0 ? args.etapas : ETAPAS_PADRAO
+      : modelo?.nome ?? 'Comercial 3R'
+  const etapas: EtapaFunil[] = modelo
+    ? modelo.etapas.map((e) => ({
+        name: e.nome,
+        is_connection: e.funcao === 'conexao',
+        funcao: e.funcao,
+        dias_max: diasDaEtapa(e),
+        color: funcaoInfo(e.funcao).cor,
+      }))
+    : args.etapas && args.etapas.length > 0
+      ? args.etapas
+      : ETAPAS_PADRAO
 
   if (!accountId) return { ok: false, error: 'account_id é obrigatório.' }
   if (etapas.some((e) => !e.name)) {
@@ -75,6 +99,7 @@ export async function criarFunilPadrao(args: {
         }),
       ),
       reused: true,
+      ...(modelo ? { modelo: { id: modelo.id, nome: modelo.nome } } : {}),
     }
   }
 
@@ -99,11 +124,15 @@ export async function criarFunilPadrao(args: {
 
   if (erroPipeline) return { ok: false, error: erroPipeline.message }
 
+  // Sem `funcao`, o trigger da migration 103 sugere pelo nome.
   const stages = etapas.map((e, i) => ({
     pipeline_id: pipeline.id,
     name: e.name,
     position: i,
     is_connection: e.is_connection,
+    ...(e.funcao ? { funcao: e.funcao } : {}),
+    ...(e.dias_max !== undefined ? { dias_max: e.dias_max } : {}),
+    ...(e.color ? { color: e.color } : {}),
   }))
 
   const { error: erroStages } = await supabase
@@ -112,10 +141,16 @@ export async function criarFunilPadrao(args: {
 
   if (erroStages) return { ok: false, error: erroStages.message }
 
+  if (modelo) {
+    await somarMotivos(supabase, accountId, modelo.motivosPerda)
+    await somarCampos(supabase, accountId, owner.user_id, modelo.campos)
+  }
+
   return {
     ok: true,
     pipeline_id: pipeline.id,
     nome,
     etapas: stages.map((s) => ({ name: s.name, is_connection: s.is_connection })),
+    ...(modelo ? { modelo: { id: modelo.id, nome: modelo.nome } } : {}),
   }
 }

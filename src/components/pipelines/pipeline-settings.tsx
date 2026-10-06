@@ -118,6 +118,7 @@ export function PipelineSettings({
       name: s.name,
       color: s.color,
       funcao: s.funcao,
+      dias_max: s.dias_max ?? null,
       position: i,
     }));
 
@@ -152,6 +153,7 @@ export function PipelineSettings({
         name: trimmed,
         color: newStageColor,
         funcao: newStageFuncao,
+        dias_max: funcaoInfo(newStageFuncao).diasPadrao,
         position: localStages.length,
       })
       .select()
@@ -283,6 +285,11 @@ export function PipelineSettings({
                           onFuncaoChange={(v) => {
                             const updated = [...localStages];
                             updated[index] = { ...updated[index], funcao: v };
+                            setLocalStages(updated);
+                          }}
+                          onDiasChange={(v) => {
+                            const updated = [...localStages];
+                            updated[index] = { ...updated[index], dias_max: v };
                             setLocalStages(updated);
                           }}
                           onRemove={() => handleRemoveStage(stage.id)}
@@ -417,6 +424,7 @@ function SortableStageRow({
   onNameChange,
   onColorChange,
   onFuncaoChange,
+  onDiasChange,
   onRemove,
   colors,
 }: {
@@ -424,6 +432,7 @@ function SortableStageRow({
   onNameChange: (v: string) => void;
   onColorChange: (v: string) => void;
   onFuncaoChange: (v: FuncaoEtapa) => void;
+  onDiasChange: (v: number | null) => void;
   onRemove: () => void;
   colors: string[];
 }) {
@@ -458,6 +467,25 @@ function SortableStageRow({
         className="h-7 min-w-0 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
       />
       <FuncaoSelect value={stage.funcao} onChange={onFuncaoChange} />
+      {/* Prazo na etapa: vazio = sem alerta de negócio parado. */}
+      <label
+        className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
+        title="Dias na etapa antes do card ficar vermelho. Vazio = sem alerta."
+      >
+        <input
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={stage.dias_max ?? ""}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            onDiasChange(Number.isFinite(n) && n > 0 ? n : null);
+          }}
+          placeholder="—"
+          className="h-7 w-11 rounded-md border border-border bg-card px-1 text-center text-xs text-foreground outline-none focus:border-primary"
+        />
+        d
+      </label>
       <Button
         variant="ghost"
         size="icon-xs"
