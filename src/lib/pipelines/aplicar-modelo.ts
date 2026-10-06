@@ -27,7 +27,8 @@ export async function aplicarModelo(args: {
 
   const { data: pipeline, error } = await supabase
     .from('pipelines')
-    .insert({ user_id: userId, account_id: accountId, name: nome })
+    // modelo_id (migration 106) guarda a origem — base da comparação por segmento.
+    .insert({ user_id: userId, account_id: accountId, name: nome, modelo_id: modelo.id })
     .select('id')
     .single()
   if (error || !pipeline) throw new Error('Não foi possível criar o funil.')

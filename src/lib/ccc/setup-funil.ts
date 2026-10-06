@@ -121,7 +121,12 @@ export async function criarFunilPadrao(args: {
 
   const { data: pipeline, error: erroPipeline } = await supabase
     .from('pipelines')
-    .insert({ account_id: accountId, user_id: owner.user_id, name: nome })
+    .insert({
+      account_id: accountId,
+      user_id: owner.user_id,
+      name: nome,
+      ...(modelo ? { modelo_id: modelo.id } : {}),
+    })
     .select('id')
     .single()
 

@@ -8,6 +8,7 @@ import { PipelineSettings } from "@/components/pipelines/pipeline-settings";
 import { DealForm } from "@/components/pipelines/deal-form";
 import { PipelineAnalytics } from "@/components/pipelines/pipeline-analytics";
 import { NovoFunilDialog } from "@/components/pipelines/novo-funil-dialog";
+import { ImportarFunilDialog } from "@/components/pipelines/importar-funil-dialog";
 import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
 import { MODELO_PADRAO_ID, modeloPorId } from "@/lib/pipelines/modelos";
 import {
@@ -69,6 +70,15 @@ export default function PipelinesPage() {
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
+  // /pipelines?importar=<token> — link de funil compartilhado (migration 107).
+  const [importarToken, setImportarToken] = useState<string | null>(null);
+  // Lido no cliente (não no estado inicial) para não divergir da renderização
+  // do servidor, que não vê a URL.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("importar");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (t) setImportarToken(t);
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Deal form state is lifted here so both the top-bar "Add Deal" and
@@ -576,6 +586,22 @@ export default function PipelinesPage() {
             onEditDeal={handleEditDeal}
           />
         </>
+      )}
+
+      {importarToken && (
+        <ImportarFunilDialog
+          token={importarToken}
+          accountId={accountId}
+          onClose={() => {
+            setImportarToken(null);
+            window.history.replaceState(null, "", "/pipelines");
+          }}
+          onImported={async (id) => {
+            setImportarToken(null);
+            window.history.replaceState(null, "", "/pipelines");
+            await handlePipelineCreated(id);
+          }}
+        />
       )}
 
       {/* Novo funil a partir da biblioteca de modelos */}

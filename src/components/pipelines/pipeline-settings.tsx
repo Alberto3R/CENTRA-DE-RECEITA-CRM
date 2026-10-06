@@ -18,6 +18,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
 import { FUNCOES, funcaoInfo, type FuncaoEtapa } from "@/lib/pipelines/funcoes";
+import { lerToques, type Toque } from "@/lib/pipelines/toques";
+import { ReguaEditor } from "./regua-editor";
+import { SaudeFunil } from "./saude-funil";
+import { criarLinkCompartilhamento } from "@/lib/pipelines/compartilhar";
 import type { Pipeline, PipelineStage } from "@/types";
 import {
   Dialog,
@@ -34,6 +38,8 @@ import {
   Plus,
   GripVertical,
   AlertTriangle,
+  Link2,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -81,6 +87,8 @@ export function PipelineSettings({
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [linkCompartilhado, setLinkCompartilhado] = useState("");
+  const [gerandoLink, setGerandoLink] = useState(false);
 
   // Reset form state when the dialog opens or its prop inputs change
   // — legitimate prop-driven sync.
@@ -90,6 +98,7 @@ export function PipelineSettings({
     setName(pipeline.name);
     setLocalStages([...stages].sort((a, b) => a.position - b.position));
     setShowDeleteConfirm(false);
+    setLinkCompartilhado("");
   }, [open, pipeline, stages]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -119,6 +128,7 @@ export function PipelineSettings({
       color: s.color,
       funcao: s.funcao,
       dias_max: s.dias_max ?? null,
+      toques: lerToques(s.toques),
       position: i,
     }));
 
@@ -189,6 +199,33 @@ export function PipelineSettings({
     setLocalStages(localStages.filter((s) => s.id !== stageId));
   }
 
+  // Link com a ESTRUTURA do funil salvo (etapas, funções, prazos, régua).
+  // Negócios e contatos nunca vão junto. Usa o que está salvo — alteração
+  // ainda não salva não entra no link.
+  async function handleCompartilhar() {
+    setGerandoLink(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("Sessão expirada. Entre de novo.");
+      if (!pipeline.account_id) throw new Error("Funil sem conta vinculada.");
+      const token = await criarLinkCompartilhamento({
+        supabase,
+        accountId: pipeline.account_id,
+        userId: session.user.id,
+        pipelineId: pipeline.id,
+        nome: pipeline.name,
+        stages,
+      });
+      setLinkCompartilhado(`${window.location.origin}/pipelines?importar=${token}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao gerar o link");
+    } finally {
+      setGerandoLink(false);
+    }
+  }
+
   async function handleDeletePipeline() {
     setDeleting(true);
     // ON DELETE CASCADE handles deals + stages.
@@ -208,7 +245,7 @@ export function PipelineSettings({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg bg-popover border-border max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl bg-popover border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">Gerenciar funil</DialogTitle>
         </DialogHeader>
@@ -247,6 +284,8 @@ export function PipelineSettings({
         ) : (
           <>
             <div className="grid gap-4 py-2">
+              <SaudeFunil pipelineId={pipeline.id} stages={stages} />
+
               <div className="grid gap-2">
                 <Label className="text-muted-foreground">Nome do funil</Label>
                 <Input
@@ -290,6 +329,11 @@ export function PipelineSettings({
                           onDiasChange={(v) => {
                             const updated = [...localStages];
                             updated[index] = { ...updated[index], dias_max: v };
+                            setLocalStages(updated);
+                          }}
+                          onToquesChange={(v) => {
+                            const updated = [...localStages];
+                            updated[index] = { ...updated[index], toques: v };
                             setLocalStages(updated);
                           }}
                           onRemove={() => handleRemoveStage(stage.id)}
@@ -355,6 +399,46 @@ export function PipelineSettings({
                 <Plus className="mr-1 h-3 w-3" />
                 Criar um novo funil
               </Button>
+
+              {linkCompartilhado ? (
+                <div className="grid gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={linkCompartilhado}
+                      onFocus={(e) => e.target.select()}
+                      className="h-8 border-border bg-muted text-xs text-foreground"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        navigator.clipboard
+                          ?.writeText(linkCompartilhado)
+                          .then(() => toast.success("Link copiado"))
+                      }
+                      className="shrink-0 border-border"
+                    >
+                      <Copy className="mr-1 h-3 w-3" />
+                      Copiar
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Quem abrir o link, logado no CRM, importa uma cópia das etapas na própria conta.
+                    Negócios e contatos não vão junto.
+                  </p>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={handleCompartilhar}
+                  disabled={gerandoLink}
+                  className="w-full border-border bg-transparent text-muted-foreground hover:bg-muted"
+                >
+                  <Link2 className="mr-1 h-3 w-3" />
+                  {gerandoLink ? "Gerando link..." : "Compartilhar este funil por link"}
+                </Button>
+              )}
             </div>
 
             <DialogFooter className="border-border bg-popover/50">
@@ -425,6 +509,7 @@ function SortableStageRow({
   onColorChange,
   onFuncaoChange,
   onDiasChange,
+  onToquesChange,
   onRemove,
   colors,
 }: {
@@ -433,9 +518,12 @@ function SortableStageRow({
   onColorChange: (v: string) => void;
   onFuncaoChange: (v: FuncaoEtapa) => void;
   onDiasChange: (v: number | null) => void;
+  onToquesChange: (v: Toque[]) => void;
   onRemove: () => void;
   colors: string[];
 }) {
+  const [reguaAberta, setReguaAberta] = useState(false);
+  const toques = lerToques(stage.toques);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: stage.id });
 
@@ -449,51 +537,71 @@ function SortableStageRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 rounded-lg border border-border bg-muted p-2"
+      className="rounded-lg border border-border bg-muted p-2"
     >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        className="cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
-        aria-label="Arraste para reordenar"
-      >
-        <GripVertical className="h-4 w-4" />
-      </button>
-      <ColorSwatch value={stage.color} onChange={onColorChange} colors={colors} />
-      <Input
-        value={stage.name}
-        onChange={(e) => onNameChange(e.target.value)}
-        className="h-7 min-w-0 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
-      />
-      <FuncaoSelect value={stage.funcao} onChange={onFuncaoChange} />
-      {/* Prazo na etapa: vazio = sem alerta de negócio parado. */}
-      <label
-        className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
-        title="Dias na etapa antes do card ficar vermelho. Vazio = sem alerta."
-      >
-        <input
-          type="number"
-          min={1}
-          inputMode="numeric"
-          value={stage.dias_max ?? ""}
-          onChange={(e) => {
-            const n = parseInt(e.target.value, 10);
-            onDiasChange(Number.isFinite(n) && n > 0 ? n : null);
-          }}
-          placeholder="—"
-          className="h-7 w-11 rounded-md border border-border bg-card px-1 text-center text-xs text-foreground outline-none focus:border-primary"
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          aria-label="Arraste para reordenar"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <ColorSwatch value={stage.color} onChange={onColorChange} colors={colors} />
+        <Input
+          value={stage.name}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="h-7 min-w-0 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
         />
-        d
-      </label>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onRemove}
-        className="text-muted-foreground hover:text-red-400"
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
+        <FuncaoSelect value={stage.funcao} onChange={onFuncaoChange} />
+        {/* Prazo na etapa: vazio = sem alerta de negócio parado. */}
+        <label
+          className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
+          title="Dias na etapa antes do card ficar vermelho. Vazio = sem alerta."
+        >
+          <input
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={stage.dias_max ?? ""}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              onDiasChange(Number.isFinite(n) && n > 0 ? n : null);
+            }}
+            placeholder="—"
+            className="h-7 w-11 rounded-md border border-border bg-card px-1 text-center text-xs text-foreground outline-none focus:border-primary"
+          />
+          d
+        </label>
+        <button
+          type="button"
+          onClick={() => setReguaAberta((v) => !v)}
+          title="Régua de contato desta etapa"
+          className={`h-7 shrink-0 rounded-md border px-1.5 text-[11px] ${
+            reguaAberta ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Régua {toques.length}
+        </button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onRemove}
+          className="text-muted-foreground hover:text-red-400"
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+      {reguaAberta && (
+        <ReguaEditor
+          toques={toques}
+          funcao={stage.funcao}
+          diasMax={stage.dias_max}
+          onChange={onToquesChange}
+        />
+      )}
     </div>
   );
 }
