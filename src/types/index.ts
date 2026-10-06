@@ -356,6 +356,9 @@ export interface Pipeline {
   user_id: string;
   name: string;
   created_at: string;
+  account_id?: string;
+  /** Modelo da biblioteca que criou o funil (migration 106); nulo = montado à mão. */
+  modelo_id?: string | null;
 }
 
 export interface PipelineStage {
