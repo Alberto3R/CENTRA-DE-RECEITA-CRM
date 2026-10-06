@@ -9,6 +9,7 @@ import { DealForm } from "@/components/pipelines/deal-form";
 import { PipelineAnalytics } from "@/components/pipelines/pipeline-analytics";
 import { NovoFunilDialog } from "@/components/pipelines/novo-funil-dialog";
 import { ImportarFunilDialog } from "@/components/pipelines/importar-funil-dialog";
+import { SaudeFunil } from "@/components/pipelines/saude-funil";
 import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
 import { MODELO_PADRAO_ID, modeloPorId } from "@/lib/pipelines/modelos";
 import {
@@ -577,6 +578,9 @@ export default function PipelinesPage() {
         </div>
       ) : (
         <>
+          {selectedPipelineId && stages.length > 0 && (
+            <SaudeFunil pipelineId={selectedPipelineId} stages={stages} atualizarEm={deals} />
+          )}
           <PipelineAnalytics stages={stages} deals={filteredDeals} />
           <PipelineBoard
             stages={stages}
