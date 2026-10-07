@@ -23,7 +23,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle, Plus, X } from 'lucide-react';
+import { TagPicker } from './tag-picker';
 
 interface ContactFormProps {
   open: boolean;
@@ -108,9 +109,14 @@ export function ContactForm({
 
   async function fetchTags() {
     setLoadingTags(true);
+    if (!accountId) {
+      setLoadingTags(false);
+      return;
+    }
     const { data } = await supabase
       .from('tags')
       .select('*')
+      .eq('account_id', accountId)
       .order('name');
     if (data) setTags(data);
     setLoadingTags(false);
@@ -331,39 +337,53 @@ export function ContactForm({
 
           <div className="space-y-2">
             <Label className="text-muted-foreground">Tags</Label>
+            {/* Só as tags escolhidas aparecem; a lista completa fica no
+                seletor com busca. A parede com todas as tags da conta
+                virava dezenas de etiquetas em conta com muita tag. */}
             {loadingTags ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
                 <Loader2 className="size-3 animate-spin" />
                 Carregando tags...
               </div>
-            ) : tags.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Nenhuma tag disponível. Crie tags em Configurações.
-              </p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {tags.map((tag) => {
-                  const selected = selectedTagIds.includes(tag.id);
-                  return (
-                    <button
+              <div className="flex flex-wrap items-center gap-1.5">
+                {tags
+                  .filter((tag) => selectedTagIds.includes(tag.id))
+                  .map((tag) => (
+                    <span
                       key={tag.id}
-                      type="button"
-                      onClick={() => toggleTag(tag.id)}
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                        selected
-                          ? 'ring-2 ring-primary ring-offset-1 ring-offset-border'
-                          : 'opacity-60 hover:opacity-100'
-                      }`}
-                      style={{
-                        backgroundColor: tag.color + '20',
-                        color: tag.color,
-                        borderColor: tag.color,
-                      }}
+                      className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                      style={{ backgroundColor: tag.color + '20', color: tag.color }}
                     >
                       {tag.name}
-                    </button>
-                  );
-                })}
+                      <button
+                        type="button"
+                        onClick={() => toggleTag(tag.id)}
+                        aria-label={`Remover a tag ${tag.name}`}
+                        className="rounded-full opacity-70 hover:opacity-100"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                <TagPicker
+                  selectedTagIds={selectedTagIds}
+                  onChange={(ids, resolved) => {
+                    setSelectedTagIds(ids);
+                    // Tag criada pelo seletor ainda não está na lista local.
+                    setTags((prev) => {
+                      const conhecidas = new Set(prev.map((t) => t.id));
+                      const novas = resolved.filter((t) => !conhecidas.has(t.id));
+                      return novas.length ? [...prev, ...novas] : prev;
+                    });
+                  }}
+                  trigger={
+                    <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-0.5 text-xs text-muted-foreground hover:text-foreground">
+                      <Plus className="size-3" />
+                      {selectedTagIds.length ? 'Adicionar' : 'Adicionar tag'}
+                    </span>
+                  }
+                />
               </div>
             )}
           </div>
