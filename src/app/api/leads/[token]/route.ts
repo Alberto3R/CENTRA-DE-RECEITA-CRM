@@ -4,6 +4,7 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
+import { marcarContatoComTag } from '@/lib/contacts/marcar-tag'
 
 // ============================================================
 // POST /api/leads/[token] — captação de lead por formulário, self-service
@@ -123,6 +124,14 @@ export async function POST(
     } else {
       contactId = created.id
     }
+  }
+
+  // Tag de identificação da config (migration 109) — vale também para quem
+  // já era contato. Best-effort: nunca derruba a captação.
+  try {
+    await marcarContatoComTag(db, cfg.account_id, contactId, cfg.default_tag_id)
+  } catch (e) {
+    console.error('[leads/token] tag falhou', e)
   }
 
   // Negócio na etapa fixa da config.
