@@ -33,6 +33,7 @@ interface Cfg {
   stage_id: string | null;
   welcome_template: string | null;
   enabled: boolean;
+  default_tag_id: string | null;
 }
 
 function newToken() {
@@ -49,6 +50,7 @@ export function LeadCaptureSettings() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [configs, setConfigs] = useState<Cfg[]>([]);
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Cfg | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,14 +59,16 @@ export function LeadCaptureSettings() {
   const load = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
-    const [{ data: ps }, { data: ss }, { data: cs }] = await Promise.all([
+    const [{ data: ps }, { data: ss }, { data: cs }, { data: tg }] = await Promise.all([
       supabase.from("pipelines").select("id, name").eq("account_id", accountId).order("name"),
       supabase.from("pipeline_stages").select("id, name, position, pipeline_id").order("position"),
       supabase.from("lead_capture_config").select("*").eq("account_id", accountId).order("created_at"),
+      supabase.from("tags").select("id, name").eq("account_id", accountId).order("name"),
     ]);
     setPipelines((ps as Pipeline[]) ?? []);
     setStages((ss as Stage[]) ?? []);
     setConfigs((cs as Cfg[]) ?? []);
+    setTags((tg as { id: string; name: string }[]) ?? []);
     setLoading(false);
   }, [accountId, supabase]);
 
@@ -86,6 +90,7 @@ export function LeadCaptureSettings() {
       stage_id: null,
       welcome_template: "",
       enabled: true,
+      default_tag_id: null,
     });
   }
 
@@ -102,6 +107,7 @@ export function LeadCaptureSettings() {
       stage_id: editing.stage_id,
       welcome_template: editing.welcome_template?.trim() || null,
       enabled: editing.enabled,
+      default_tag_id: editing.default_tag_id,
     };
     const { error } = editing.id
       ? await supabase.from("lead_capture_config").update(row).eq("id", editing.id)
@@ -250,6 +256,28 @@ export function LeadCaptureSettings() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label className="text-muted-foreground">Marcar o lead com a tag</Label>
+                  <select
+                    className={selectCls}
+                    value={editing.default_tag_id ?? ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, default_tag_id: e.target.value || null })
+                    }
+                  >
+                    <option value="">Nenhuma</option>
+                    {tags.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Aplicada a todo lead que entrar por este formulário, inclusive quem já era
+                    contato — é o que permite filtrar e disparar só para essa origem.
+                  </p>
                 </div>
 
                 <div className="grid gap-2">
