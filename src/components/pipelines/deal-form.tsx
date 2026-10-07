@@ -16,6 +16,7 @@ import type {
   Tag,
 } from "@/types";
 import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
+import { ContactCombobox } from "@/components/contacts/contact-combobox";
 import { DealNotes } from "@/components/pipelines/deal-notes";
 import { PipelineStagePicker } from "@/components/pipelines/pipeline-stage-picker";
 import {
@@ -193,12 +194,13 @@ export function DealForm({
     if (!open) return;
     let cancelled = false;
     (async () => {
-      // With the contact locked we only need the single selected row —
-      // loading the whole address book would be wasted work.
-      const contactsQuery =
-        lockContact && lockedContactId
-          ? supabase.from("contacts").select("*").eq("id", lockedContactId)
-          : supabase.from("contacts").select("*").order("name");
+      // Só o contato já escolhido (negócio existente ou vindo do inbox). A
+      // agenda inteira não é mais carregada: a escolha é pela busca do
+      // ContactCombobox — o <select> com todos os contatos virava rolagem
+      // infinita e ainda parava em 1.000 linhas.
+      const contactsQuery = lockedContactId
+        ? supabase.from("contacts").select("*").eq("id", lockedContactId)
+        : Promise.resolve({ data: [] as Contact[] });
 
       const [c, p] = await Promise.all([
         contactsQuery,
@@ -413,19 +415,16 @@ export function DealForm({
 
             <div className="grid gap-2">
               <Label className="text-muted-foreground">Contato</Label>
-              <select
-                value={contactId}
-                onChange={(e) => setContactId(e.target.value)}
+              <ContactCombobox
+                value={contacts.find((c) => c.id === contactId) ?? null}
                 disabled={lockContact}
-                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <option value="">Selecione um contato</option>
-                {contacts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name || c.phone}
-                  </option>
-                ))}
-              </select>
+                onSelect={(c) => {
+                  setContacts((prev) =>
+                    prev.some((x) => x.id === c.id) ? prev : [...prev, c],
+                  );
+                  setContactId(c.id);
+                }}
+              />
 
               {(() => {
                 const c = contacts.find((x) => x.id === contactId);
