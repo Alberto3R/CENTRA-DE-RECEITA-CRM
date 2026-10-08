@@ -9,6 +9,7 @@ import { useUnreadCounts } from "@/hooks/use-total-unread";
 import { useUnreadAlerts } from "@/hooks/use-unread-alerts";
 import { AccountSwitcher } from "./account-switcher";
 import {
+  Bot,
   Brain,
   ChevronDown,
   Sparkles,
@@ -117,6 +118,7 @@ const navItems: NavItem[] = [
 const gestorItems: NavItem[] = [
   { href: "/ia/analise", label: "Analisar conversa", icon: MessageSquare },
   { href: "/ia/funil", label: "Analisar funil", icon: BarChart3 },
+  { href: "/ia/agente", label: "Resultado do agente", icon: Bot },
   { href: "/ia/time", label: "Avaliar time", icon: UsersRound },
   { href: "/ia/criar", label: "Criar materiais", icon: Sparkles },
 ];

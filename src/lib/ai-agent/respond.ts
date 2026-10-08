@@ -30,6 +30,8 @@ export interface AgentReply {
   publico: string
   /** Não responder nem escalar (ex.: resposta automática de outra empresa). */
   silencio: boolean
+  /** Tokens somados de todas as chamadas da rodada (telemetria de custo). */
+  uso?: { modelo: string; tokens_in: number; tokens_out: number }
 }
 
 // Ferramentas (tool use) — usadas quando o agente pode agir (ex.: agenda Google).
@@ -39,6 +41,12 @@ export interface AgentTool {
   input_schema: Record<string, unknown>
 }
 export type ToolExecutor = (input: Record<string, unknown>) => Promise<string>
+
+interface AnthropicResposta {
+  content?: AnthropicBlock[]
+  stop_reason?: string
+  usage?: { input_tokens?: number; output_tokens?: number }
+}
 
 interface AnthropicBlock {
   type: string
@@ -153,6 +161,20 @@ function parseReply(text: string): AgentReply {
 }
 
 /**
+ * Turno final do loop de ferramentas: o modelo às vezes escreve uma frase
+ * antes do JSON. Pega do primeiro "{" ao último "}" quando há um objeto com
+ * "reply"; sem JSON, o texto inteiro é a resposta.
+ */
+export function parseFinalComFerramentas(text: string): AgentReply {
+  const ini = text.indexOf('{')
+  const fim = text.lastIndexOf('}')
+  if (ini >= 0 && fim > ini && text.includes('"reply"')) {
+    return parseReply(text.slice(ini, fim + 1))
+  }
+  return parseReply(text)
+}
+
+/**
  * Roda um turno do agente. Retorna a resposta + sinais, ou null se o
  * agente não puder responder (sem API key, erro de rede, resposta vazia) —
  * o chamador deve, nesse caso, deixar a conversa pro atendimento humano.
@@ -174,6 +196,11 @@ export async function runAgent(params: {
   }
   const { config, history, incomingText, leadContext, tools, toolExecutors } = params
   const hasTools = !!(tools && tools.length && toolExecutors)
+  const uso = { modelo: config.model, tokens_in: 0, tokens_out: 0 }
+  const somarUso = (r: AnthropicResposta) => {
+    uso.tokens_in += r.usage?.input_tokens ?? 0
+    uso.tokens_out += r.usage?.output_tokens ?? 0
+  }
 
   try {
     // Sem ferramentas: 1 chamada, saída JSON (comportamento clássico).
@@ -182,19 +209,25 @@ export async function runAgent(params: {
         { role: 'user', content: buildUserMessage(history, incomingText, leadContext) },
       ])
       if (!res) return null
+      somarUso(res)
       const text = (res.content ?? []).find((b) => b.type === 'text')?.text ?? ''
       if (!text) return null
-      return parseReply(text)
+      return { ...parseReply(text), uso }
     }
 
-    // Com ferramentas: loop de tool use. Saída = texto puro dos blocos de texto.
+    // Com ferramentas: loop de tool use. Se as instruções do agente pedem o
+    // JSON (reply/handoff/resumo), o turno final também vem em JSON — antes
+    // vinha texto puro e o handoff, a intenção e o resumo se perdiam: com a
+    // agenda ligada, o agente nunca passava a conversa pro consultor.
+    const jsonMode = config.system_prompt.includes('"reply"')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const messages: any[] = [
-      { role: 'user', content: buildUserMessage(history, incomingText, leadContext, false) },
+      { role: 'user', content: buildUserMessage(history, incomingText, leadContext, jsonMode) },
     ]
     for (let step = 0; step < 6; step++) {
       const data = await callAnthropic(apiKey, config, messages, tools)
       if (!data) return null
+      somarUso(data)
       const blocks = data.content ?? []
       if (data.stop_reason === 'tool_use') {
         const toolUses = blocks.filter((b) => b.type === 'tool_use')
@@ -232,7 +265,8 @@ export async function runAgent(params: {
         .join('\n')
         .trim()
       if (!text) return null
-      return { reply: text, handoff: false, handoff_motivo: '', intencao: '', resumo: '', publico: '', silencio: false }
+      if (jsonMode) return { ...parseFinalComFerramentas(text), uso }
+      return { reply: text, handoff: false, handoff_motivo: '', intencao: '', resumo: '', publico: '', silencio: false, uso }
     }
     console.error('[ai-agent] loop de ferramentas excedeu o limite')
     return null
@@ -249,7 +283,7 @@ async function callAnthropic(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages: any[],
   tools?: AgentTool[],
-): Promise<{ content?: AnthropicBlock[]; stop_reason?: string } | null> {
+): Promise<AnthropicResposta | null> {
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -269,5 +303,5 @@ async function callAnthropic(
     console.error('[ai-agent] Anthropic API erro', res.status, await res.text())
     return null
   }
-  return (await res.json()) as { content?: AnthropicBlock[]; stop_reason?: string }
+  return (await res.json()) as AnthropicResposta
 }
