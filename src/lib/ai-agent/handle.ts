@@ -15,6 +15,7 @@ import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
 import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
 import { loadOutboundTurns, formatTemplateTurn } from './outbound-context'
+import { registrarTurno } from './turnos'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -249,11 +250,16 @@ export async function maybeRunAgent(params: {
   const { data: cfg } = await supabase
     .from('ai_agent_config')
     .select(
-      'enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message, scheduling_enabled',
+      'id, enabled, system_prompt, model, max_tokens, handoff_keyword, handoff_message, scheduling_enabled',
     )
     .eq('channel_id', channelId)
     .maybeSingle()
   if (!cfg || !cfg.enabled || !cfg.system_prompt?.trim()) return
+  const turno = {
+    accountId: params.accountId,
+    conversationId,
+    agentId: (cfg as { id?: string }).id ?? null,
+  }
 
   // 2. Conversa já em handoff → humano no comando, bot não responde
   const { data: conv } = await supabase
@@ -308,6 +314,12 @@ export async function maybeRunAgent(params: {
       .from('conversations')
       .update({ ai_handoff: true, status: 'pending', updated_at: new Date().toISOString() })
       .eq('id', conversationId)
+    await registrarTurno(supabaseAdmin(), {
+      ...turno,
+      intencao: 'quer_humano',
+      handoffMotivo: 'palavra-chave',
+      reply: { reply: '', handoff: true, handoff_motivo: '', intencao: '', resumo: '', publico: '', silencio: false },
+    })
     return
   }
 
@@ -466,6 +478,7 @@ export async function maybeRunAgent(params: {
   // atendimento, "obrigado" que encerra — responder só gera ruído (em 29/09
   // o agente respondeu 25 mensagens automáticas de lojas de shopping).
   if (result?.silencio) {
+    await registrarTurno(supabaseAdmin(), { ...turno, reply: result })
     console.log('[ai-agent] silêncio decidido pelo agente —', conversationId, result.resumo)
     return
   }
@@ -478,6 +491,7 @@ export async function maybeRunAgent(params: {
       .from('conversations')
       .update({ ai_handoff: true, status: 'pending', updated_at: new Date().toISOString() })
       .eq('id', conversationId)
+    await registrarTurno(supabaseAdmin(), { ...turno, reply: result, falhou: true })
     console.error('[ai-agent] sem resposta da IA — conversa', conversationId, 'escalada pra humano')
     return
   }
@@ -494,6 +508,7 @@ export async function maybeRunAgent(params: {
     .eq('sender_type', 'customer')
     .gt('created_at', runStartedAt)
   if ((newerInbound ?? 0) > 0) {
+    await registrarTurno(supabaseAdmin(), { ...turno, reply: result, intencao: 'descartada' })
     console.log('[ai-agent] rajada detectada — abortando rodada defasada da conversa', conversationId)
     return
   }
@@ -522,6 +537,7 @@ export async function maybeRunAgent(params: {
   ])
   const ultimoTexto = (ultimaDoCliente as { content_text?: string | null } | null)?.content_text
   if ((ultimoTexto != null && ultimoTexto !== inboundText) || (botDepois ?? 0) > 0) {
+    await registrarTurno(supabaseAdmin(), { ...turno, reply: result, intencao: 'descartada' })
     console.log('[ai-agent] outra rodada cobre esta conversa — abortando', conversationId)
     return
   }
@@ -543,4 +559,5 @@ export async function maybeRunAgent(params: {
       ...(result.handoff ? { ai_handoff: true, status: 'pending' } : {}),
     })
     .eq('id', conversationId)
+  await registrarTurno(supabaseAdmin(), { ...turno, reply: result })
 }
