@@ -143,7 +143,12 @@ export function lerAvaliacao(texto: string, campos: CampoQualificacao[]): Avalia
   }
 }
 
-function promptAvaliacao(instrucoes: string, campos: CampoQualificacao[]): string {
+function promptAvaliacao(
+  instrucoes: string,
+  campos: CampoQualificacao[],
+  /** A conversa começou antes da versão atual das instruções. */
+  anteriorAVersao: string | null,
+): string {
   const lista = campos
     .map((c) => `- "${c.chave}" (${c.rotulo})${c.opcoes?.length ? `: escolha entre ${c.opcoes.join(' | ')}` : ''}`)
     .join('\n')
@@ -167,7 +172,7 @@ Na conversa, AGENTE é o agente, LEAD é o cliente e EQUIPE são pessoas do time
 6. "agente_encaminhou": o agente passou ou anunciou que passaria a conversa para o consultor.
 7. "dor": o que trava o lead na prática, nas palavras dele. Vazio se ele não disse.
 8. Nunca invente dado que o lead não deu: use null.
-
+${anteriorAVersao ? `9. ATENÇÃO: esta conversa é ANTERIOR à versão atual das instruções, que vale desde ${anteriorAVersao}. Na época o agente seguia outras instruções, com outro nome, outro roteiro e outras proibições. NÃO aponte como erro descumprir regra, nome, roteiro ou proibição que só existe nas instruções de hoje. O nome com que o agente se apresenta NUNCA é erro nessas conversas, nem perguntar o motivo do contato, nem a ordem das perguntas. Aponte só as falhas universais da regra 3 e dê a nota por elas.\n` : ''}
 Dados de qualificação a extrair:
 ${lista || '- (nenhum definido)'}
 
@@ -219,7 +224,7 @@ export async function avaliarConversa(
     p.agentId
       ? db
           .from('ai_agent_config')
-          .select('system_prompt, qualificacao_campos')
+          .select('system_prompt, qualificacao_campos, updated_at')
           .eq('id', p.agentId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -233,16 +238,35 @@ export async function avaliarConversa(
   let custo = 0
   if (!campos && instrucoes && p.agentId) {
     const d = await deduzirCampos(instrucoes)
-    campos = d.campos
     custo += calcularCustoUsd(MODELO_ANALISE, d.tokensIn, d.tokensOut)
-    await db.from('ai_agent_config').update({ qualificacao_campos: campos }).eq('id', p.agentId)
+    // Várias revisões em paralelo podem deduzir ao mesmo tempo, cada uma com
+    // chaves diferentes ("segmento" × "segmento_atuacao"): só grava quem chegar
+    // primeiro e todo mundo usa o que ficou gravado.
+    await db
+      .from('ai_agent_config')
+      .update({ qualificacao_campos: d.campos })
+      .eq('id', p.agentId)
+      .is('qualificacao_campos', null)
+    const { data: gravado } = await db
+      .from('ai_agent_config')
+      .select('qualificacao_campos')
+      .eq('id', p.agentId)
+      .maybeSingle()
+    campos =
+      (gravado as { qualificacao_campos?: CampoQualificacao[] | null } | null)?.qualificacao_campos ??
+      d.campos
   }
   campos = campos ?? []
+  const versaoDesde = (cfg as { updated_at?: string } | null)?.updated_at ?? null
+  const anteriorAVersao =
+    versaoDesde && trecho.inicioAt < versaoDesde
+      ? new Date(versaoDesde).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+      : null
 
   const r = await getAnthropic().messages.create({
     model: MODELO_ANALISE,
     max_tokens: 700,
-    system: promptAvaliacao(instrucoes, campos),
+    system: promptAvaliacao(instrucoes, campos, anteriorAVersao),
     messages: [
       {
         role: 'user',
