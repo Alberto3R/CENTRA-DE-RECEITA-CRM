@@ -16,6 +16,7 @@ import {
   Crown,
   Gauge,
   GitBranch,
+  LifeBuoy,
   BarChart3,
   LayoutDashboard,
   LogOut,
@@ -367,6 +368,19 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           </ul>
             </>
           ) : null}
+
+          {/* Central de Ajuda: aberta a todos os papéis. É o site estático
+              (site-central-de-receita) servido em /ajuda via rewrite; abre
+              em outra aba para o usuário seguir com o CRM aberto. */}
+          <a
+            href="/ajuda"
+            target="_blank"
+            rel="noopener"
+            className="mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
+          >
+            <LifeBuoy className="h-4 w-4" />
+            Ajuda
+          </a>
         </nav>
 
         {/* User section */}

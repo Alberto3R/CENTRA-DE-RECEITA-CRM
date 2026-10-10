@@ -152,6 +152,9 @@ const nextConfig: NextConfig = {
       afterFiles: [
         // Landing da Central de Comando Comercial (em qualquer host).
         { source: "/oferta", destination: SITE + "/oferta" },
+        // Central de Ajuda (site estático; artigos, prints e dados em /ajuda/*).
+        { source: "/ajuda", destination: SITE + "/ajuda" },
+        { source: "/ajuda/:path*", destination: SITE + "/ajuda/:path*" },
       ],
     };
   },
