@@ -9,7 +9,7 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      allow: ["/$", "/oferta$"],
+      allow: ["/$", "/oferta$", "/ajuda"],
       disallow: ["/"],
     },
     sitemap: "https://www.centraldereceita.com.br/sitemap.xml",
