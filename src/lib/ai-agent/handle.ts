@@ -16,6 +16,7 @@ import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
 import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
 import { loadOutboundTurns, formatTemplateTurn } from './outbound-context'
 import { registrarTurno } from './turnos'
+import { leadContextFrom } from './lead-context'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -127,28 +128,6 @@ function buildSchedulingTools(opts: {
     },
   }
   return { tools, executors }
-}
-
-// Monta o bloco de contexto do lead da calculadora (se houver) pra injetar na
-// mensagem do agente — assim a IA já chega sabendo a dor, sem perguntar de novo.
-function leadContextFrom(raw: Record<string, unknown> | null | undefined): string | undefined {
-  if (!raw || raw.origem !== 'calculadora-vaga-aberta') return undefined
-  const money = (v: unknown) => {
-    const n = Number(v)
-    return Number.isFinite(n) ? 'R$ ' + Math.round(n).toLocaleString('pt-BR') : '—'
-  }
-  const lines = [
-    'CONTEXTO DO LEAD (veio da Calculadora de Vaga Aberta da Augra — já temos estes dados, NÃO pergunte de novo):',
-    `- Vaga: ${raw.cargo_vaga ?? '—'}${raw.qtd_vagas_abertas ? ` (×${raw.qtd_vagas_abertas})` : ''}`,
-    raw.dias_vaga_aberta != null ? `- Aberta há: ${raw.dias_vaga_aberta} dias` : '',
-    raw.salario_anunciado != null ? `- Salário anunciado: ${money(raw.salario_anunciado)}` : '',
-    raw.custo_estimado_mensal != null
-      ? `- Perda estimada (estimativa de mercado): ${money(raw.custo_estimado_mensal)}/mês`
-      : '',
-    raw.empresa ? `- Empresa: ${raw.empresa}` : '',
-    'Use isso pra personalizar a conversa e conduzir pro diagnóstico/recrutamento.',
-  ]
-  return lines.filter(Boolean).join('\n')
 }
 
 async function sendText(
