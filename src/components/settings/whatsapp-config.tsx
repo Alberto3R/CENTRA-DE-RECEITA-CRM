@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
+import { CoexistenceConnect, CoexistenceStatus } from './coexistence-connect';
 import {
   Accordion,
   AccordionItem,
@@ -698,6 +699,13 @@ export function WhatsAppConfig() {
           ) : null}
         </div>
       )}
+
+      <CoexistenceConnect
+        onConnected={() => {
+          if (accountId) fetchConfig(accountId);
+        }}
+      />
+      {mode === 'edit' && <CoexistenceStatus config={config} />}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}

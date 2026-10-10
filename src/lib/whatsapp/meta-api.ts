@@ -1372,3 +1372,68 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+// ============================================================
+// Embedded Signup + Coexistência (app WhatsApp Business do celular)
+// ============================================================
+
+export interface ExchangeSignupCodeArgs {
+  code: string
+  appId: string
+  appSecret: string
+}
+
+/**
+ * Troca o `code` devolvido pelo Embedded Signup (FB.login com
+ * response_type='code') por um business token. O code vale ~30 segundos —
+ * quem chama tem que trocar assim que o popup fecha.
+ */
+export async function exchangeEmbeddedSignupCode(
+  args: ExchangeSignupCodeArgs,
+): Promise<string> {
+  const { code, appId, appSecret } = args
+  const params = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    code,
+  })
+  const response = await fetch(`${META_API_BASE}/oauth/access_token?${params}`)
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { access_token?: string }
+  if (!data.access_token) {
+    throw new MetaApiError('A Meta não devolveu o token de acesso.', {
+      httpStatus: response.status,
+    })
+  }
+  return data.access_token
+}
+
+export type SmbAppDataSyncType = 'smb_app_state_sync' | 'history'
+
+/**
+ * Pede à Meta a sincronização do app WhatsApp Business de um número em
+ * coexistência: 'smb_app_state_sync' (agenda) ou 'history' (até 180 dias).
+ * Cada uma roda UMA vez e precisa ser chamada até 24h depois da conexão —
+ * depois disso o número tem que ser desconectado e conectado de novo.
+ * O conteúdo chega pelo webhook (campos smb_app_state_sync / history).
+ */
+export async function requestSmbAppDataSync(args: {
+  phoneNumberId: string
+  accessToken: string
+  syncType: SmbAppDataSyncType
+}): Promise<void> {
+  const { phoneNumberId, accessToken, syncType } = args
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/smb_app_data`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: syncType }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+}

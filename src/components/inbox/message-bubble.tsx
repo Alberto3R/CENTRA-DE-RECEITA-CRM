@@ -294,6 +294,17 @@ export function MessageBubble({
             isAgent ? "justify-end" : "justify-start",
           )}
         >
+          {/* Coexistência: enviada pelo app do celular / vinda do histórico. */}
+          {message.origin === "app" || message.origin === "history" ? (
+            <span
+              className={cn(
+                "text-[10px] italic",
+                isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
+              )}
+            >
+              {message.origin === "app" ? "pelo celular ·" : "histórico ·"}
+            </span>
+          ) : null}
           <span
             className={cn(
               "text-[10px]",
