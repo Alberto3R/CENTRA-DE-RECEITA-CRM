@@ -6,9 +6,9 @@ const base: AcquisitionReport = {
   currency: 'BRL',
   settings: { attribution_model: 'first_touch', attribution_window_days: 90, margin_pct: null, commission_pct: null },
   channels: [
-    { channel_id: 'meta', name: 'Meta Ads', kind: 'paid', position: 0, leads: 100, sales: 4, revenue: 20000, won_no_value: 1, spend: 5000, meta_leads: 180 },
-    { channel_id: 'out', name: 'Prospecção', kind: 'outbound', position: 1, leads: 20, sales: 2, revenue: 8000, won_no_value: 0, spend: 0, meta_leads: 0 },
-    { channel_id: null, name: 'Não identificado', kind: null, position: 999999, leads: 30, sales: 1, revenue: 2000, won_no_value: 0, spend: 0, meta_leads: 0 },
+    { channel_id: 'meta', name: 'Meta Ads', kind: 'paid', position: 0, leads: 100, sales: 4, revenue: 20000, won_no_value: 1, spend: 5000, media_spend: 5000, other_cost: 0, meta_leads: 180 },
+    { channel_id: 'out', name: 'Prospecção', kind: 'outbound', position: 1, leads: 20, sales: 2, revenue: 8000, won_no_value: 0, spend: 0, media_spend: 0, other_cost: 0, meta_leads: 0 },
+    { channel_id: null, name: 'Não identificado', kind: null, position: 999999, leads: 30, sales: 1, revenue: 2000, won_no_value: 0, spend: 0, media_spend: 0, other_cost: 0, meta_leads: 0 },
   ],
   campaigns: [],
   weekly: [],
@@ -68,5 +68,19 @@ describe('presetRange', () => {
   })
   it('30 dias inclui hoje', () => {
     expect(presetRange('30', now)).toEqual({ from: '2026-09-13', to: '2026-10-12' })
+  })
+})
+
+describe('totals com custos fora da mídia', () => {
+  it('investimento = mídia + outros; prospecção ganha CAC', () => {
+    const r: AcquisitionReport = {
+      ...base,
+      channels: base.channels.map((c) =>
+        c.channel_id === 'out' ? { ...c, spend: 4000, media_spend: 0, other_cost: 4000 } : c,
+      ),
+    }
+    const t = totals(r)
+    expect(t).toMatchObject({ spend: 9000, mediaSpend: 5000, otherCost: 4000 })
+    expect(rowMetrics(r.channels[1]).cac).toBe(2000)
   })
 })
