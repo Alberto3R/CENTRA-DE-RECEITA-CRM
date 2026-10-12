@@ -19,6 +19,7 @@ import { QuickRepliesSettings } from '@/components/settings/quick-replies-settin
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { AcquisitionSettings } from '@/components/settings/acquisition-settings';
+import { GroupAgentSettings } from '@/components/settings/group-agent-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { AgendaPanel } from '@/components/settings/agenda-panel';
 import { MembersTab } from '@/components/settings/members-tab';
@@ -91,6 +92,7 @@ export default function SettingsPage() {
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
     acquisition: <AcquisitionSettings />,
+    'group-agent': <GroupAgentSettings />,
     'ai-agent': <AiAgentSettings />,
     agenda: <AgendaPanel />,
     webhooks: <WebhooksSettings />,
