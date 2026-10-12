@@ -91,7 +91,15 @@ function ChannelTable({ rows, currency, settings }: { rows: ChannelRow[]; curren
                 <td className={td}>{int(r.sales)}</td>
                 <td className={td}>{pct(m.conversion)}</td>
                 <td className={td}>{money(r.revenue, currency)}</td>
-                <td className={td}>{r.spend > 0 ? money(r.spend, currency) : "—"}</td>
+                <td className={td}>
+                  {r.spend > 0 ? money(r.spend, currency) : "—"}
+                  {r.other_cost > 0 && (
+                    <div className="text-[11px] font-normal text-muted-foreground">
+                      {r.media_spend > 0 ? `mídia ${money(r.media_spend, currency)} + ` : ""}outros{" "}
+                      {money(r.other_cost, currency)}
+                    </div>
+                  )}
+                </td>
                 <td className={td}>{money(m.cpl, currency, 2)}</td>
                 <td className={td}>{money(m.cac, currency)}</td>
                 <td className={td}>{ratio(m.roas)}</td>
@@ -152,17 +160,18 @@ function CampaignTable({ rows, currency }: { rows: CampaignRow[]; currency: stri
   );
 }
 
-/** Investimento × receita por semana — mesma unidade, um eixo só. */
+/** Mídia × receita por semana — mesma unidade, um eixo só. Custos mensais
+ *  lançados não entram aqui (são por mês, não por semana). */
 function WeeklyBars({ weekly, currency }: { weekly: AcquisitionReport["weekly"]; currency: string }) {
   const max = Math.max(1, ...weekly.map((w) => Math.max(Number(w.spend) || 0, Number(w.revenue) || 0)));
   if (weekly.length === 0) return null;
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Investimento × receita por semana</h3>
+        <h3 className="text-sm font-semibold text-foreground">Mídia × receita por semana</h3>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="inline-block size-2.5 rounded-sm bg-muted-foreground/50" /> Investimento
+            <span className="inline-block size-2.5 rounded-sm bg-muted-foreground/50" /> Mídia
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block size-2.5 rounded-sm bg-primary" /> Receita
@@ -175,7 +184,7 @@ function WeeklyBars({ weekly, currency }: { weekly: AcquisitionReport["weekly"];
           const revenue = Number(w.revenue) || 0;
           const d = new Date(`${w.week}T12:00:00`);
           const label = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-          const tip = `Semana de ${label}\nInvestimento: ${money(spend, currency)}\nReceita: ${money(revenue, currency)}\nLeads: ${w.leads} · Vendas: ${w.sales}`;
+          const tip = `Semana de ${label}\nMídia: ${money(spend, currency)}\nReceita: ${money(revenue, currency)}\nLeads: ${w.leads} · Vendas: ${w.sales}`;
           return (
             <div key={w.week} className="flex h-full min-w-[22px] flex-1 flex-col justify-end" title={tip}>
               <div className="flex h-full items-end justify-center gap-0.5">
@@ -266,23 +275,34 @@ export function AcquisitionReportView({
 
           {/* Números principais */}
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <Tile label="Investimento" value={t.spend > 0 ? money(t.spend, cur) : "—"} hint="mídia paga" />
+            <Tile
+              label="Investimento"
+              value={t.spend > 0 ? money(t.spend, cur) : "—"}
+              hint={
+                t.otherCost > 0
+                  ? `mídia ${money(t.mediaSpend, cur)} + outros ${money(t.otherCost, cur)}`
+                  : "só mídia (sem custos lançados)"
+              }
+            />
             <Tile label="Receita" value={money(t.revenue, cur)} hint={`${int(t.sales)} vendas`} />
             <Tile
               label="Resultado"
               value={money(t.result, cur)}
-              hint={t.marginKnown ? "receita × margem − comissão − investimento" : "margem não informada (100%)"}
+              hint={
+                (t.marginKnown ? "receita × margem − comissão − investimento" : "margem não informada (100%)") +
+                (t.sales > 0 ? ` · ${money(t.result / t.sales, cur)} por venda` : "")
+              }
               tone={t.result < 0 ? "bad" : undefined}
             />
             <Tile label="ROAS" value={ratio(t.roas)} hint="receita ÷ investimento" />
-            <Tile label="CAC geral" value={money(t.cac, cur)} hint="mídia ÷ todas as vendas" />
+            <Tile label="CAC geral" value={money(t.cac, cur)} hint="investimento ÷ todas as vendas" />
             <Tile label="CPL" value={money(t.cpl, cur, 2)} hint={`${int(t.leads)} leads · conv. ${pct(t.conversion)}`} />
           </div>
 
           <h2 className="mb-2 mt-6 text-sm font-semibold text-foreground">Por canal</h2>
           <ChannelTable rows={report.channels} currency={cur} settings={report.settings} />
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Canal sem investimento registrado aparece com custo &quot;—&quot;: o custo é desconhecido, não zero.
+            Canal sem investimento registrado aparece com custo &quot;—&quot;: o custo é desconhecido, não zero. Custos de time, evento e agência são lançados por mês em Configurações → Aquisição.
             Crédito da venda: {report.settings.attribution_model === "first_touch" ? "primeiro" : "último"} contato,
             janela de {report.settings.attribution_window_days} dias.
           </p>
@@ -293,10 +313,12 @@ export function AcquisitionReportView({
 
           <h2 className="mb-2 mt-6 text-sm font-semibold text-foreground">Por campanha</h2>
           <CampaignTable rows={report.campaigns} currency={cur} />
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Em destaque: campanha em que o CRM recebeu bem menos leads do que a Meta contou (formulário sem
-            integração, ou lead que não virou negócio).
-          </p>
+          {report.campaigns.length > 0 && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Em destaque: campanha em que o CRM recebeu bem menos leads do que a Meta contou (formulário sem
+              integração, ou lead que não virou negócio).
+            </p>
+          )}
 
     </>
   );

@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { AcquisitionCostsCard } from "./acquisition-costs-card";
 
 /**
  * Aquisição — a régua da CONTA para o relatório de aquisição (migration 112).
@@ -70,7 +71,7 @@ function pctOrNull(v: string): number | null {
 
 export function AcquisitionSettings() {
   const supabase = useMemo(() => createClient(), []);
-  const { accountId, canEditSettings } = useAuth();
+  const { accountId, canEditSettings, defaultCurrency } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -204,7 +205,12 @@ export function AcquisitionSettings() {
   async function removeChannel(id: string) {
     const { error } = await supabase.from("acquisition_channels").delete().eq("id", id);
     if (error) {
-      toast.error("Falha ao remover o canal");
+      // 23503 = há custos lançados neste canal (FK restrict, mig 115).
+      toast.error(
+        error.code === "23503"
+          ? "Este canal tem custos lançados. Remova ou mova os custos antes."
+          : "Falha ao remover o canal",
+      );
       return;
     }
     setChannels((cs) => cs.filter((c) => c.id !== id));
@@ -583,6 +589,16 @@ export function AcquisitionSettings() {
           )}
         </CardContent>
       </Card>
+
+      {/* ---------------- Custos fora da mídia ---------------- */}
+      {accountId && (
+        <AcquisitionCostsCard
+          accountId={accountId}
+          channels={ordered}
+          currency={defaultCurrency || "BRL"}
+          readOnly={ro}
+        />
+      )}
 
       {/* ---------------- Contas de anúncio ---------------- */}
       <Card className="mt-6">

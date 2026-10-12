@@ -11,7 +11,10 @@ export interface ChannelRow {
   sales: number
   revenue: number
   won_no_value: number
+  /** Investimento total do canal: mídia + custos lançados (F4). */
   spend: number
+  media_spend: number
+  other_cost: number
   meta_leads: number
 }
 
@@ -61,6 +64,8 @@ export interface Totals {
   sales: number
   revenue: number
   spend: number
+  mediaSpend: number
+  otherCost: number
   metaLeads: number
   wonNoValue: number
   cpl: number | null
@@ -76,7 +81,8 @@ export interface Totals {
 
 export function rowMetrics(r: { leads: number; sales: number; revenue: number; spend: number }) {
   // Sem investimento registrado o custo é DESCONHECIDO, não zero: prospecção
-  // e evento custam (time, estande) — só entram quando a F4 trouxer os custos.
+  // e evento custam (time, estande) — entram quando a conta lança os custos
+  // em Configurações → Aquisição (acquisition_costs, mig 115).
   const custo = r.spend > 0
   return {
     cpl: custo ? div(r.spend, r.leads) : null,
@@ -104,6 +110,8 @@ export function totals(r: AcquisitionReport): Totals {
     sales: sum('sales'),
     revenue: sum('revenue'),
     spend: sum('spend'),
+    mediaSpend: sum('media_spend'),
+    otherCost: sum('other_cost'),
     metaLeads: sum('meta_leads'),
     wonNoValue: sum('won_no_value'),
   }
