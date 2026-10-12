@@ -5,6 +5,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { marcarContatoComTag } from '@/lib/contacts/marcar-tag'
+import { extractAttribution } from '@/lib/attribution/extract'
 
 // ============================================================
 // POST /api/leads/[token] — captação de lead por formulário, self-service
@@ -153,18 +154,16 @@ export async function POST(
   const dealId = deal?.id ?? null
 
   // Atribuição (UTMs + payload bruto) — best-effort, nunca derruba a resposta.
+  // UTM/fbclid vêm do corpo ou, se a landing não mandar, da query string da
+  // URL da página (landing_url / event_source_url / Referer).
+  const attr = extractAttribution(a, request.headers.get('referer'))
   try {
     await db.from('lead_attribution').insert({
       account_id: cfg.account_id,
       contact_id: contactId,
       deal_id: dealId,
       source: str(a.origem) ?? 'form',
-      utm_source: str(a.utm_source),
-      utm_medium: str(a.utm_medium),
-      utm_campaign: str(a.utm_campaign),
-      utm_content: str(a.utm_content),
-      utm_term: str(a.utm_term),
-      landing_url: str(a.event_source_url) ?? str(a.landing_url),
+      ...attr,
       raw: a,
     })
   } catch (e) {
@@ -183,12 +182,12 @@ export async function POST(
           metadata: {
             integration: cfg.name ?? 'Captação de lead',
             origem: str(a.origem) ?? 'form',
-            utm_source: str(a.utm_source),
-            utm_medium: str(a.utm_medium),
-            utm_campaign: str(a.utm_campaign),
-            utm_content: str(a.utm_content),
-            utm_term: str(a.utm_term),
-            landing_url: str(a.event_source_url) ?? str(a.landing_url),
+            utm_source: attr.utm_source,
+            utm_medium: attr.utm_medium,
+            utm_campaign: attr.utm_campaign,
+            utm_content: attr.utm_content,
+            utm_term: attr.utm_term,
+            landing_url: attr.landing_url,
             payload: a,
           },
         })

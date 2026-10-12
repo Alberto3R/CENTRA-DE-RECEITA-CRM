@@ -844,24 +844,32 @@ async function processMessage(
   }
 
   // CTWA (Fase 2): lead que chegou por um anúncio Click-to-WhatsApp.
-  // A Meta injeta `referral.ctwa_clid` na primeira mensagem — gravamos
-  // na atribuição pra ligar o lead ao anúncio (e, na Fase 3, devolver a
-  // conversão à Meta). Idempotente por (contato, ctwa_clid).
+  // A Meta injeta `referral` na primeira mensagem — gravamos na atribuição
+  // pra ligar o lead ao anúncio (e, na Fase 3, devolver a conversão à Meta).
+  // `source_type='ad'` é anúncio (com ou sem ctwa_clid); `'post'` é um post
+  // orgânico com botão de WhatsApp. Idempotente por (contato, ctwa_clid) ou,
+  // sem clid, por (contato, source_id).
   const ref = message.referral
-  if (ref?.ctwa_clid) {
-    const { data: dup } = await supabaseAdmin()
+  if (ref && (ref.ctwa_clid || ref.source_id)) {
+    const dupQuery = supabaseAdmin()
       .from('lead_attribution')
       .select('id')
       .eq('contact_id', contactRecord.id)
-      .eq('ctwa_clid', ref.ctwa_clid)
-      .maybeSingle()
+    const { data: dup } = await (ref.ctwa_clid
+      ? dupQuery.eq('ctwa_clid', ref.ctwa_clid)
+      : dupQuery.is('ctwa_clid', null).filter('raw->>source_id', 'eq', ref.source_id!)
+    ).limit(1).maybeSingle()
     if (!dup) {
+      const organico = ref.source_type === 'post'
       await supabaseAdmin().from('lead_attribution').insert({
         account_id: accountId,
         contact_id: contactRecord.id,
-        source: 'ctwa',
-        ctwa_clid: ref.ctwa_clid,
-        ad_id: ref.source_id ?? null,
+        source: organico ? 'whatsapp-post' : 'ctwa',
+        utm_source: organico ? null : 'facebook',
+        utm_medium: organico ? 'organic' : 'ctwa',
+        ctwa_clid: ref.ctwa_clid ?? null,
+        // em post orgânico o source_id é o id do post, não de anúncio (fica no raw)
+        ad_id: organico ? null : ref.source_id ?? null,
         landing_url: ref.source_url ?? null,
         raw: ref,
       })

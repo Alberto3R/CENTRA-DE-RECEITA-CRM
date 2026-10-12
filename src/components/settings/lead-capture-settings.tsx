@@ -55,6 +55,7 @@ export function LeadCaptureSettings() {
   const [editing, setEditing] = useState<Cfg | null>(null);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
 
   const load = useCallback(async () => {
     if (!accountId) return;
@@ -80,6 +81,7 @@ export function LeadCaptureSettings() {
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
     (typeof window !== "undefined" ? window.location.origin : "");
   const urlFor = (token: string) => `${origin}/api/leads/${token}`;
+  const scriptTag = `<script src="${origin}/captura.js" defer></script>`;
 
   function startNew() {
     setEditing({
@@ -132,6 +134,13 @@ export function LeadCaptureSettings() {
     setCopied(true);
     toast.success("URL copiada");
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function copyScript() {
+    await navigator.clipboard.writeText(scriptTag);
+    setCopiedScript(true);
+    toast.success("Script copiado");
+    setTimeout(() => setCopiedScript(false), 1500);
   }
 
   const editStages = stages.filter((s) => s.pipeline_id === editing?.pipeline_id);
@@ -314,6 +323,22 @@ export function LeadCaptureSettings() {
                       {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                     </Button>
                   </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label className="text-muted-foreground">Script de origem (cole na landing, uma vez)</Label>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-muted px-2.5 py-2 text-xs text-foreground">
+                      {scriptTag}
+                    </code>
+                    <Button variant="outline" size="sm" onClick={copyScript}>
+                      {copiedScript ? <Check className="size-4" /> : <Copy className="size-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Guarda de qual anúncio ou campanha o visitante chegou e envia junto com o formulário,
+                    sem mexer no código dele. Sem isso, o lead entra no relatório como &quot;Não identificado&quot;.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">
