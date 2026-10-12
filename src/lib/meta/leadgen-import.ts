@@ -492,7 +492,12 @@ export async function importLead(db: Db, pageId: string, lead: MetaLead): Promis
     account_id: route.accountId,
     contact_id: contactId,
     deal_id: dealId,
-    source: route.origem,
+    // `origem` é a do formulário (VSC/CCC); a da página é só fallback.
+    source: origem,
+    utm_source: 'facebook',
+    utm_medium: 'leadform',
+    utm_campaign: lead.campaign_id ? String(lead.campaign_id) : null,
+    ad_id: lead.ad_id ? String(lead.ad_id) : null,
     classificacao: fit,
     raw: { leadgen_id: lead.id, ...answers },
   })
