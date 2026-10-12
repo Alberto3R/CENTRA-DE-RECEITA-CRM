@@ -84,17 +84,19 @@ export function suggestedChannels(): Omit<AcquisitionChannel, 'id' | 'account_id
   return [
     {
       ...base,
-      name: 'Meta Ads (formulário/landing)',
+      // Formulário, landing, formulário nativo e Click-to-WhatsApp juntos: a
+      // Meta não separa o gasto entre eles dentro da mesma conta de anúncio.
+      name: 'Meta Ads',
       kind: 'paid',
       position: 0,
+      match_sources: ['ctwa'],
       match_utm_sources: ['fb', 'ig', 'facebook', 'instagram', 'meta', 'an', 'msg'],
-      match_utm_mediums: ['paid', 'cpc', 'leadform'],
+      match_utm_mediums: ['paid', 'cpc', 'leadform', 'ctwa'],
     },
-    { ...base, name: 'Meta Ads (WhatsApp)', kind: 'paid', position: 1, match_sources: ['ctwa'], match_utm_mediums: ['ctwa'] },
-    { ...base, name: 'Orgânico', kind: 'organic', position: 2, match_sources: ['whatsapp-post', 'instagram', 'bio'], match_utm_mediums: ['organic', 'social', 'bio'] },
-    { ...base, name: 'Prospecção ativa', kind: 'outbound', position: 3 },
-    { ...base, name: 'Indicação', kind: 'referral', position: 4, match_sources: ['indicacao', 'indicação'] },
-    { ...base, name: 'Eventos', kind: 'event', position: 5 },
+    { ...base, name: 'Orgânico', kind: 'organic', position: 1, match_sources: ['whatsapp-post', 'instagram', 'bio'], match_utm_mediums: ['organic', 'social', 'bio'] },
+    { ...base, name: 'Prospecção ativa', kind: 'outbound', position: 2 },
+    { ...base, name: 'Indicação', kind: 'referral', position: 3, match_sources: ['indicacao', 'indicação'] },
+    { ...base, name: 'Eventos', kind: 'event', position: 4 },
   ]
 }
 
