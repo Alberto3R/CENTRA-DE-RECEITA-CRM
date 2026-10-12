@@ -47,6 +47,7 @@ interface AdAccount {
   active: boolean;
   last_synced_at: string | null;
   last_sync_error: string | null;
+  channel_id: string | null;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -266,6 +267,12 @@ export function AcquisitionSettings() {
       setBusy(null);
       load();
     }
+  }
+
+  async function setAdChannel(id: string, channel_id: string | null) {
+    setAdAccounts((as) => as.map((a) => (a.id === id ? { ...a, channel_id } : a)));
+    const { error } = await supabase.from("ad_accounts").update({ channel_id }).eq("id", id);
+    if (error) toast.error("Falha ao salvar o canal da conta");
   }
 
   async function removeAdAccount(id: string) {
@@ -584,8 +591,9 @@ export function AcquisitionSettings() {
             <Megaphone className="size-4 text-primary" /> Contas de anúncio (Meta)
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            O gasto destas contas entra no relatório e é atualizado a cada 6 horas. A conta precisa
-            estar compartilhada com o Gerenciador de Negócios da Sales 3R.
+            O gasto destas contas entra no relatório e é atualizado a cada 6 horas, no canal escolhido
+            ao lado (padrão: o primeiro canal pago). A conta precisa estar compartilhada com o
+            Gerenciador de Negócios da Sales 3R.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -615,6 +623,22 @@ export function AcquisitionSettings() {
                       : "ainda não sincronizada"}
                 </div>
               </div>
+              {ordered.length > 0 && (
+                <select
+                  value={a.channel_id ?? ""}
+                  disabled={ro}
+                  onChange={(e) => setAdChannel(a.id, e.target.value || null)}
+                  className={selectCls + " h-8 w-40"}
+                  aria-label="Canal que recebe o gasto"
+                >
+                  <option value="">1º canal pago</option>
+                  {ordered.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {!ro && (
                 <Button variant="ghost" size="sm" onClick={() => removeAdAccount(a.id)} aria-label="Desvincular">
                   <Trash2 className="size-4" />
