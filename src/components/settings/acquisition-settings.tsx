@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, Loader2, Megaphone, Plus, Ruler, Trash2, Waypoints } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, Megaphone, Plus, RefreshCw, Ruler, Trash2, Waypoints } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -113,7 +113,6 @@ export function AcquisitionSettings() {
   }, [accountId, supabase]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial
     load();
   }, [load]);
 
@@ -244,6 +243,29 @@ export function AcquisitionSettings() {
     }
     setNewAd({ external_id: "", name: "" });
     load();
+  }
+
+  async function syncNow() {
+    setBusy("sync");
+    try {
+      const res = await fetch("/api/acquisition/spend-sync", { method: "POST" });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        results?: { ok: boolean; rows?: number }[];
+      };
+      if (!res.ok || !j.ok) {
+        toast.error(j.error ? `Falha ao sincronizar: ${j.error}` : "Falha ao sincronizar");
+      } else {
+        const falhas = (j.results ?? []).filter((r) => !r.ok).length;
+        const linhas = (j.results ?? []).reduce((s, r) => s + (r.rows ?? 0), 0);
+        if (falhas) toast.error(`${falhas} conta(s) com erro. Veja abaixo.`);
+        else toast.success(`Gasto sincronizado (${linhas} linhas)`);
+      }
+    } finally {
+      setBusy(null);
+      load();
+    }
   }
 
   async function removeAdAccount(id: string) {
@@ -562,13 +584,23 @@ export function AcquisitionSettings() {
             <Megaphone className="size-4 text-primary" /> Contas de anúncio (Meta)
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            O gasto destas contas entra no relatório. A conta precisa estar compartilhada com o
-            Gerenciador de Negócios da Sales 3R.
+            O gasto destas contas entra no relatório e é atualizado a cada 6 horas. A conta precisa
+            estar compartilhada com o Gerenciador de Negócios da Sales 3R.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {adAccounts.length === 0 && (
             <p className="text-sm text-muted-foreground">Nenhuma conta vinculada.</p>
+          )}
+          {!ro && adAccounts.length > 0 && (
+            <Button variant="outline" size="sm" onClick={syncNow} disabled={busy === "sync"}>
+              {busy === "sync" ? (
+                <Loader2 className="mr-1 size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1 size-4" />
+              )}
+              Sincronizar agora
+            </Button>
           )}
           {adAccounts.map((a) => (
             <div key={a.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
