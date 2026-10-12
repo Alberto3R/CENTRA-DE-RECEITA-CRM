@@ -15,6 +15,7 @@ import {
   User,
   UsersRound,
   Webhook,
+  Waypoints,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -40,6 +41,7 @@ export const SETTINGS_SECTIONS = [
   'quick-replies',
   'fields',
   'deals',
+  'acquisition',
   'ai-agent',
   'agenda',
   'webhooks',
@@ -78,6 +80,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   'quick-replies': { id: 'quick-replies', label: 'Respostas rápidas', icon: Zap, group: 'workspace', adminOnly: true },
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace', adminOnly: true },
   deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace', adminOnly: true },
+  acquisition: { id: 'acquisition', label: 'Aquisição', icon: Waypoints, group: 'workspace', adminOnly: true },
   'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace', adminOnly: true },
   agenda: { id: 'agenda', label: 'Agenda (Google)', icon: CalendarClock, group: 'workspace', adminOnly: true },
   webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', adminOnly: true },

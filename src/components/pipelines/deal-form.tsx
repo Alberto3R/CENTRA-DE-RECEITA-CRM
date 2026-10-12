@@ -352,7 +352,12 @@ export function DealForm({
       .eq("id", deal.id);
     setStatusAction(null);
     if (error) {
-      toast.error("Falha ao atualizar o status do negócio");
+      // Trava da régua de aquisição (migration 112): conta exige valor no ganho.
+      toast.error(
+        error.message?.includes("ganho_sem_valor")
+          ? "Informe o valor da venda e salve antes de marcar como ganho."
+          : "Falha ao atualizar o status do negócio",
+      );
       return;
     }
     toast.success(
