@@ -60,6 +60,16 @@ describe('classify', () => {
     ).toBe('A');
   });
 
+  it('o funil vence a origem do lead', () => {
+    expect(
+      classify(
+        canais,
+        { source: 'form', utm_source: 'ig', utm_medium: null },
+        'funil-prospeccao'
+      )?.name
+    ).toBe('Prospecção');
+  });
+
   it('nada bate → null (Não identificado)', () => {
     expect(
       classify(canais, { source: 'form', utm_source: null, utm_medium: null })
