@@ -2,28 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import {
-  ArrowDown,
-  ArrowUp,
-  Loader2,
-  Megaphone,
-  Plus,
-  RefreshCw,
-  Ruler,
-  Trash2,
-  Waypoints,
-} from 'lucide-react';
+import { Loader2, Megaphone, RefreshCw, Ruler, Trash2 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import {
-  CHANNEL_KINDS,
-  classify,
-  parseList,
   suggestedChannels,
   touchLabel,
   type AcquisitionChannel,
-  type ChannelKind,
   type Touch,
 } from '@/lib/acquisition/channels';
 import { Button } from '@/components/ui/button';
@@ -37,6 +23,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { SettingsPanelHead } from './settings-panel-head';
+import { AcquisitionChannelsEditor } from './acquisition-channels-editor';
+import { changedChannels } from '@/lib/acquisition/assign';
 import { AcquisitionCostsCard } from './acquisition-costs-card';
 
 /**
@@ -97,6 +85,9 @@ export function AcquisitionSettings() {
   );
   const [channels, setChannels] = useState<AcquisitionChannel[]>([]);
   const [touches, setTouches] = useState<(Touch & { n: number })[]>([]);
+  const [pipelineDeals, setPipelineDeals] = useState<Record<string, number>>(
+    {}
+  );
   const [adAccounts, setAdAccounts] = useState<AdAccount[]>([]);
   const [newAd, setNewAd] = useState({ external_id: '', name: '' });
   const [busy, setBusy] = useState<string | null>(null);
@@ -104,7 +95,7 @@ export function AcquisitionSettings() {
   const load = useCallback(async () => {
     if (!accountId) return;
     const since = new Date(Date.now() - 90 * 864e5).toISOString();
-    const [s, p, c, t, ad] = await Promise.all([
+    const [s, p, c, t, ad, dl] = await Promise.all([
       supabase
         .from('acquisition_settings')
         .select('*')
@@ -131,6 +122,12 @@ export function AcquisitionSettings() {
         .select('*')
         .eq('account_id', accountId)
         .order('created_at'),
+      supabase
+        .from('deals')
+        .select('pipeline_id')
+        .eq('account_id', accountId)
+        .gte('created_at', since)
+        .limit(10000),
     ]);
     if (s.data)
       setSettings({ ...DEFAULT_SETTINGS, ...(s.data as Partial<Settings>) });
@@ -146,6 +143,12 @@ export function AcquisitionSettings() {
       else m.set(k, { ...r, n: 1 });
     }
     setTouches([...m.values()].sort((a, b) => b.n - a.n));
+    const porFunil: Record<string, number> = {};
+    for (const d of (dl.data as { pipeline_id: string | null }[]) ?? []) {
+      if (d.pipeline_id)
+        porFunil[d.pipeline_id] = (porFunil[d.pipeline_id] ?? 0) + 1;
+    }
+    setPipelineDeals(porFunil);
     setLoading(false);
   }, [accountId, supabase]);
 
@@ -153,24 +156,15 @@ export function AcquisitionSettings() {
     load();
   }, [load]);
 
-  const unmatched = useMemo(
-    () => touches.filter((t) => !classify(channels, t)),
-    [touches, channels]
-  );
-  const unmatchedCount = unmatched.reduce((s, t) => s + t.n, 0);
-  const totalTouches = touches.reduce((s, t) => s + t.n, 0);
-
   // ---------------- régua ----------------
   async function saveSettings() {
     if (!accountId) return;
     setSavingSettings(true);
-    const { error } = await supabase
-      .from('acquisition_settings')
-      .upsert({
-        account_id: accountId,
-        ...settings,
-        updated_at: new Date().toISOString(),
-      });
+    const { error } = await supabase.from('acquisition_settings').upsert({
+      account_id: accountId,
+      ...settings,
+      updated_at: new Date().toISOString(),
+    });
     setSavingSettings(false);
     if (error) {
       toast.error('Falha ao salvar a régua');
@@ -202,23 +196,41 @@ export function AcquisitionSettings() {
       toast.error('Falha ao criar os canais');
       return;
     }
-    toast.success('Canais criados. Aponte os funis de Prospecção e Eventos.');
     load();
   }
 
-  async function addChannel() {
+  /** Mudança vinda da tela (origem/funil → canal): salva só o que mudou. */
+  async function applyChannels(next: AcquisitionChannel[]) {
+    const prev = channels;
+    setChannels(next);
+    const mudou = changedChannels(prev, next);
+    const res = await Promise.all(
+      mudou.map((c) =>
+        supabase
+          .from('acquisition_channels')
+          .update({
+            match_sources: c.match_sources,
+            match_utm_sources: c.match_utm_sources,
+            match_utm_mediums: c.match_utm_mediums,
+            match_pipeline_ids: c.match_pipeline_ids,
+          })
+          .eq('id', c.id)
+      )
+    );
+    if (res.some((r) => r.error)) {
+      toast.error('Não consegui salvar. Recarreguei a configuração.');
+      load();
+    }
+  }
+
+  async function addChannel(name: string) {
     if (!accountId) return;
     const position = channels.length
       ? Math.max(...channels.map((c) => c.position)) + 1
       : 0;
     const { data, error } = await supabase
       .from('acquisition_channels')
-      .insert({
-        account_id: accountId,
-        name: 'Novo canal',
-        kind: 'other',
-        position,
-      })
+      .insert({ account_id: accountId, name, kind: 'other', position })
       .select('*')
       .single();
     if (error || !data) {
@@ -228,29 +240,27 @@ export function AcquisitionSettings() {
     setChannels((cs) => [...cs, data as AcquisitionChannel]);
   }
 
-  function patchLocal(id: string, patch: Partial<AcquisitionChannel>) {
+  async function updateChannel(id: string, patch: Partial<AcquisitionChannel>) {
     setChannels((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  }
-
-  async function saveChannel(ch: AcquisitionChannel) {
-    setBusy(ch.id);
     const { error } = await supabase
       .from('acquisition_channels')
-      .update({
-        name: ch.name.trim() || 'Sem nome',
-        kind: ch.kind,
-        match_sources: ch.match_sources,
-        match_utm_sources: ch.match_utm_sources,
-        match_utm_mediums: ch.match_utm_mediums,
-        match_pipeline_ids: ch.match_pipeline_ids,
-      })
-      .eq('id', ch.id);
-    setBusy(null);
-    if (error) toast.error('Falha ao salvar o canal');
-    else toast.success('Canal salvo');
+      .update(patch)
+      .eq('id', id);
+    if (error) {
+      toast.error('Falha ao salvar o canal');
+      load();
+    }
   }
 
   async function removeChannel(id: string) {
+    const ch = channels.find((c) => c.id === id);
+    if (
+      ch &&
+      !window.confirm(
+        `Apagar o canal "${ch.name}"? Os leads dele passam a "Sem canal".`
+      )
+    )
+      return;
     const { error } = await supabase
       .from('acquisition_channels')
       .delete()
@@ -267,24 +277,6 @@ export function AcquisitionSettings() {
     setChannels((cs) => cs.filter((c) => c.id !== id));
   }
 
-  async function move(id: string, dir: -1 | 1) {
-    const ordered = [...channels].sort((a, b) => a.position - b.position);
-    const i = ordered.findIndex((c) => c.id === id);
-    const j = i + dir;
-    if (j < 0 || j >= ordered.length) return;
-    [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
-    const renum = ordered.map((c, k) => ({ ...c, position: k }));
-    setChannels(renum);
-    await Promise.all(
-      [renum[i], renum[j]].map((c) =>
-        supabase
-          .from('acquisition_channels')
-          .update({ position: c.position })
-          .eq('id', c.id)
-      )
-    );
-  }
-
   // ---------------- contas de anúncio ----------------
   async function addAdAccount() {
     if (!accountId) return;
@@ -296,14 +288,12 @@ export function AcquisitionSettings() {
       return;
     }
     setBusy('ad');
-    const { error } = await supabase
-      .from('ad_accounts')
-      .insert({
-        account_id: accountId,
-        provider: 'meta',
-        external_id,
-        name: newAd.name.trim() || null,
-      });
+    const { error } = await supabase.from('ad_accounts').insert({
+      account_id: accountId,
+      provider: 'meta',
+      external_id,
+      name: newAd.name.trim() || null,
+    });
     setBusy(null);
     if (error) {
       toast.error(
@@ -379,14 +369,165 @@ export function AcquisitionSettings() {
     <section className="animate-in fade-in-50 max-w-3xl duration-200">
       <SettingsPanelHead
         title="Aquisição"
-        description="A régua desta conta para o relatório de aquisição: de onde vêm os leads, quanto custou e quanto virou venda."
+        description="Configure uma vez e o Relatório de aquisição mostra, por canal, quanto custou e quanto vendeu. Comece pelos canais."
       />
 
-      {/* ---------------- Régua ---------------- */}
-      <Card>
+      {/* ---------------- Canais ---------------- */}
+      <AcquisitionChannelsEditor
+        channels={channels}
+        origins={touches}
+        pipelines={pipelines.map((p) => ({
+          ...p,
+          deals: pipelineDeals[p.id] ?? 0,
+        }))}
+        readOnly={ro}
+        busy={busy === 'suggest'}
+        onChannelsChange={applyChannels}
+        onCreateSuggested={createSuggested}
+        onAddChannel={addChannel}
+        onRenameChannel={(id, name) => updateChannel(id, { name })}
+        onKindChange={(id, kind) => updateChannel(id, { kind })}
+        onRemoveChannel={removeChannel}
+      />
+
+      {/* ---------------- Contas de anúncio ---------------- */}
+      <Card className="mt-6">
         <CardHeader>
           <CardTitle className="text-foreground flex items-center gap-2">
-            <Ruler className="text-primary size-4" /> Régua da conta
+            <Megaphone className="text-primary size-4" /> Contas de anúncio
+            (Meta)
+          </CardTitle>
+          <CardDescription className="text-muted-foreground">
+            O gasto destas contas entra no relatório e é atualizado a cada 6
+            horas, no canal escolhido ao lado (padrão: o primeiro canal pago). A
+            conta precisa estar compartilhada com o Gerenciador de Negócios da
+            Sales 3R.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {adAccounts.length === 0 && (
+            <p className="text-muted-foreground text-sm">
+              Nenhuma conta vinculada.
+            </p>
+          )}
+          {!ro && adAccounts.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={syncNow}
+              disabled={busy === 'sync'}
+            >
+              {busy === 'sync' ? (
+                <Loader2 className="mr-1 size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1 size-4" />
+              )}
+              Sincronizar agora
+            </Button>
+          )}
+          {adAccounts.map((a) => (
+            <div
+              key={a.id}
+              className="border-border flex items-center gap-3 rounded-lg border px-3 py-2 text-sm"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-foreground truncate">
+                  {a.name || 'Conta de anúncio'}
+                </div>
+                <div className="text-muted-foreground font-mono text-xs">
+                  {a.external_id} ·{' '}
+                  {a.last_sync_error
+                    ? `erro: ${a.last_sync_error}`
+                    : a.last_synced_at
+                      ? `sincronizada em ${new Date(a.last_synced_at).toLocaleString('pt-BR')}`
+                      : 'ainda não sincronizada'}
+                </div>
+              </div>
+              {ordered.length > 0 && (
+                <select
+                  value={a.channel_id ?? ''}
+                  disabled={ro}
+                  onChange={(e) => setAdChannel(a.id, e.target.value || null)}
+                  className={selectCls + ' h-8 w-40'}
+                  aria-label="Canal que recebe o gasto"
+                >
+                  <option value="">1º canal pago</option>
+                  {ordered.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!ro && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeAdAccount(a.id)}
+                  aria-label="Desvincular"
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+          {!ro && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grid gap-1">
+                <Label className="text-muted-foreground text-xs">
+                  ID da conta
+                </Label>
+                <Input
+                  className="h-8 w-48 font-mono text-xs"
+                  placeholder="657811041489547"
+                  value={newAd.external_id}
+                  onChange={(e) =>
+                    setNewAd({ ...newAd, external_id: e.target.value })
+                  }
+                />
+              </div>
+              <div className="grid min-w-0 flex-1 gap-1">
+                <Label className="text-muted-foreground text-xs">
+                  Nome (opcional)
+                </Label>
+                <Input
+                  className="h-8"
+                  placeholder="Ex.: Conta principal"
+                  value={newAd.name}
+                  onChange={(e) => setNewAd({ ...newAd, name: e.target.value })}
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addAdAccount}
+                disabled={busy === 'ad'}
+              >
+                {busy === 'ad' ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  'Vincular'
+                )}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {/* ---------------- Custos fora da mídia ---------------- */}
+      {accountId && (
+        <AcquisitionCostsCard
+          accountId={accountId}
+          channels={ordered}
+          currency={defaultCurrency || 'BRL'}
+          readOnly={ro}
+        />
+      )}
+
+      {/* ---------------- Régua ---------------- */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <Ruler className="text-primary size-4" /> Regras do relatório
           </CardTitle>
           <CardDescription className="text-muted-foreground">
             Venda é o negócio marcado como <strong>Ganho</strong> pelo time, e
@@ -535,346 +676,6 @@ export function AcquisitionSettings() {
                 'Salvar régua'
               )}
             </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ---------------- Canais ---------------- */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <Waypoints className="text-primary size-4" /> Canais
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Cada lead cai no primeiro canal (de cima para baixo) cuja regra
-            bate. Canais sem rastro digital, como prospecção ativa e eventos,
-            são reconhecidos pelo funil.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {totalTouches > 0 && (
-            <div className="border-border bg-muted/40 rounded-lg border p-3 text-sm">
-              <div className="text-foreground font-medium">
-                {unmatchedCount === 0
-                  ? 'Todas as origens dos últimos 90 dias têm canal.'
-                  : `${unmatchedCount} de ${totalTouches} leads dos últimos 90 dias ainda caem em "Não identificado".`}
-              </div>
-              {unmatched.length > 0 && (
-                <ul className="text-muted-foreground mt-2 space-y-1 text-xs">
-                  <li className="font-mono">
-                    origem · utm_source · utm_medium
-                  </li>
-                  {unmatched.slice(0, 8).map((t) => (
-                    <li key={touchLabel(t)} className="font-mono">
-                      {touchLabel(t)}{' '}
-                      <span className="text-foreground">({t.n})</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {ordered.length === 0 ? (
-            <div className="border-border text-muted-foreground rounded-lg border border-dashed p-4 text-sm">
-              Nenhum canal ainda.
-              {!ro && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-3"
-                  onClick={createSuggested}
-                  disabled={busy === 'suggest'}
-                >
-                  {busy === 'suggest' ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    'Criar canais sugeridos'
-                  )}
-                </Button>
-              )}
-            </div>
-          ) : (
-            ordered.map((ch, idx) => (
-              <div
-                key={ch.id}
-                className="border-border space-y-3 rounded-lg border p-3"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={ch.name}
-                    disabled={ro}
-                    onChange={(e) =>
-                      patchLocal(ch.id, { name: e.target.value })
-                    }
-                    className="h-8 min-w-0 flex-1"
-                  />
-                  <select
-                    value={ch.kind}
-                    disabled={ro}
-                    onChange={(e) =>
-                      patchLocal(ch.id, { kind: e.target.value as ChannelKind })
-                    }
-                    className={selectCls + ' h-8 w-auto'}
-                  >
-                    {CHANNEL_KINDS.map((k) => (
-                      <option key={k.value} value={k.value}>
-                        {k.label}
-                      </option>
-                    ))}
-                  </select>
-                  {!ro && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={idx === 0}
-                        onClick={() => move(ch.id, -1)}
-                        aria-label="Subir"
-                      >
-                        <ArrowUp className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={idx === ordered.length - 1}
-                        onClick={() => move(ch.id, 1)}
-                        aria-label="Descer"
-                      >
-                        <ArrowDown className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeChannel(ch.id)}
-                        aria-label="Remover"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {(
-                    [
-                      ['match_sources', 'Origem (source)'],
-                      ['match_utm_sources', 'utm_source'],
-                      ['match_utm_mediums', 'utm_medium'],
-                    ] as const
-                  ).map(([field, label]) => (
-                    <div key={field} className="grid gap-1">
-                      <Label className="text-muted-foreground text-xs">
-                        {label}
-                      </Label>
-                      <Input
-                        className="h-8 font-mono text-xs"
-                        placeholder="separe por vírgula"
-                        disabled={ro}
-                        defaultValue={ch[field].join(', ')}
-                        onBlur={(e) =>
-                          patchLocal(ch.id, {
-                            [field]: parseList(e.target.value),
-                          })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                {pipelines.length > 0 && (
-                  <div className="grid gap-1">
-                    <Label className="text-muted-foreground text-xs">
-                      Ou: todo negócio destes funis
-                    </Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {pipelines.map((p) => {
-                        const on = ch.match_pipeline_ids.includes(p.id);
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            disabled={ro}
-                            onClick={() =>
-                              patchLocal(ch.id, {
-                                match_pipeline_ids: on
-                                  ? ch.match_pipeline_ids.filter(
-                                      (x) => x !== p.id
-                                    )
-                                  : [...ch.match_pipeline_ids, p.id],
-                              })
-                            }
-                            className={
-                              'rounded-full border px-2.5 py-0.5 text-xs transition-colors ' +
-                              (on
-                                ? 'border-primary bg-primary/10 text-primary'
-                                : 'border-border bg-muted text-muted-foreground hover:border-primary')
-                            }
-                          >
-                            {p.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {!ro && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => saveChannel(ch)}
-                    disabled={busy === ch.id}
-                  >
-                    {busy === ch.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      'Salvar canal'
-                    )}
-                  </Button>
-                )}
-              </div>
-            ))
-          )}
-
-          {!ro && ordered.length > 0 && (
-            <Button variant="outline" size="sm" onClick={addChannel}>
-              <Plus className="mr-1 size-4" /> Adicionar canal
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ---------------- Custos fora da mídia ---------------- */}
-      {accountId && (
-        <AcquisitionCostsCard
-          accountId={accountId}
-          channels={ordered}
-          currency={defaultCurrency || 'BRL'}
-          readOnly={ro}
-        />
-      )}
-
-      {/* ---------------- Contas de anúncio ---------------- */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <Megaphone className="text-primary size-4" /> Contas de anúncio
-            (Meta)
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            O gasto destas contas entra no relatório e é atualizado a cada 6
-            horas, no canal escolhido ao lado (padrão: o primeiro canal pago). A
-            conta precisa estar compartilhada com o Gerenciador de Negócios da
-            Sales 3R.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {adAccounts.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              Nenhuma conta vinculada.
-            </p>
-          )}
-          {!ro && adAccounts.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={syncNow}
-              disabled={busy === 'sync'}
-            >
-              {busy === 'sync' ? (
-                <Loader2 className="mr-1 size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-1 size-4" />
-              )}
-              Sincronizar agora
-            </Button>
-          )}
-          {adAccounts.map((a) => (
-            <div
-              key={a.id}
-              className="border-border flex items-center gap-3 rounded-lg border px-3 py-2 text-sm"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-foreground truncate">
-                  {a.name || 'Conta de anúncio'}
-                </div>
-                <div className="text-muted-foreground font-mono text-xs">
-                  {a.external_id} ·{' '}
-                  {a.last_sync_error
-                    ? `erro: ${a.last_sync_error}`
-                    : a.last_synced_at
-                      ? `sincronizada em ${new Date(a.last_synced_at).toLocaleString('pt-BR')}`
-                      : 'ainda não sincronizada'}
-                </div>
-              </div>
-              {ordered.length > 0 && (
-                <select
-                  value={a.channel_id ?? ''}
-                  disabled={ro}
-                  onChange={(e) => setAdChannel(a.id, e.target.value || null)}
-                  className={selectCls + ' h-8 w-40'}
-                  aria-label="Canal que recebe o gasto"
-                >
-                  <option value="">1º canal pago</option>
-                  {ordered.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {!ro && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeAdAccount(a.id)}
-                  aria-label="Desvincular"
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              )}
-            </div>
-          ))}
-          {!ro && (
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="grid gap-1">
-                <Label className="text-muted-foreground text-xs">
-                  ID da conta
-                </Label>
-                <Input
-                  className="h-8 w-48 font-mono text-xs"
-                  placeholder="657811041489547"
-                  value={newAd.external_id}
-                  onChange={(e) =>
-                    setNewAd({ ...newAd, external_id: e.target.value })
-                  }
-                />
-              </div>
-              <div className="grid min-w-0 flex-1 gap-1">
-                <Label className="text-muted-foreground text-xs">
-                  Nome (opcional)
-                </Label>
-                <Input
-                  className="h-8"
-                  placeholder="Ex.: Conta principal"
-                  value={newAd.name}
-                  onChange={(e) => setNewAd({ ...newAd, name: e.target.value })}
-                />
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={addAdAccount}
-                disabled={busy === 'ad'}
-              >
-                {busy === 'ad' ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  'Vincular'
-                )}
-              </Button>
-            </div>
           )}
         </CardContent>
       </Card>

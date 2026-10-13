@@ -63,14 +63,25 @@ export function channelMatches(
   return !!pipelineId && ch.match_pipeline_ids.includes(pipelineId);
 }
 
-/** Canal do toque/negócio, ou null = "Não identificado". */
+/**
+ * Canal do toque/negócio, ou null = "Não identificado".
+ * O FUNIL vem primeiro: "todo negócio deste funil conta como Eventos" vale
+ * mesmo que o contato tenha vindo de um anúncio antes (mig 117). Sem regra de
+ * funil, vale a origem do lead.
+ */
 export function classify(
   channels: AcquisitionChannel[],
   touch: Touch | null,
   pipelineId: string | null = null
 ): AcquisitionChannel | null {
   const ordered = [...channels].sort((a, b) => a.position - b.position);
-  return ordered.find((ch) => channelMatches(ch, touch, pipelineId)) ?? null;
+  if (pipelineId) {
+    const porFunil = ordered.find((ch) =>
+      ch.match_pipeline_ids.includes(pipelineId)
+    );
+    if (porFunil) return porFunil;
+  }
+  return ordered.find((ch) => channelMatches(ch, touch, null)) ?? null;
 }
 
 /** Rótulo curto de uma origem, para listar "origens sem canal". */
