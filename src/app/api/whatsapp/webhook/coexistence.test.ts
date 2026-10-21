@@ -40,8 +40,24 @@ function builder(table: string) {
   let limit = Infinity
   let head = false
   let onConflict: string[] = []
+  let orderBy: { col: string; asc: boolean; nullsFirst: boolean } | null = null
 
   const rows = () => (db[table] ??= [])
+
+  // Como o Postgres: `asc` põe nulos por último, `desc` por primeiro, a menos
+  // que `nullsFirst` diga o contrário.
+  function sorted(list: Row[]): Row[] {
+    if (!orderBy) return list
+    const { col, asc, nullsFirst } = orderBy
+    return [...list].sort((a, b) => {
+      const x = a[col] ?? null
+      const y = b[col] ?? null
+      if (x === y) return 0
+      if (x === null) return nullsFirst ? -1 : 1
+      if (y === null) return nullsFirst ? 1 : -1
+      return (x < y ? -1 : 1) * (asc ? 1 : -1)
+    })
+  }
 
   function run(): { data: unknown; error: unknown; count?: number } {
     if (op === 'insert') {
@@ -72,11 +88,19 @@ function builder(table: string) {
       return { data: null, error: null }
     }
     if (head) return { data: null, error: null, count: matched.length }
-    return finish(matched.slice(0, limit))
+    return finish(sorted(matched).slice(0, limit))
   }
 
   function finish(list: Row[]) {
     if (mode === 'many') return { data: list, error: null }
+    // PostgREST: `.single()` e `.maybeSingle()` erram com 2+ linhas — foi isso
+    // que fez o webhook abrir uma conversa nova a cada mensagem.
+    if (list.length > 1) {
+      return {
+        data: null,
+        error: { code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned' },
+      }
+    }
     if (list.length === 0) {
       return mode === 'single'
         ? { data: null, error: { code: 'PGRST116', message: 'no rows' } }
@@ -102,7 +126,11 @@ function builder(table: string) {
     like: (c: string, pat: string) => (
       filters.push((r) => String(r[c] ?? '').endsWith(pat.replace(/^%/, ''))), b
     ),
-    order: () => b,
+    order: (col: string, o?: { ascending?: boolean; nullsFirst?: boolean }) => {
+      const asc = o?.ascending !== false
+      orderBy = { col, asc, nullsFirst: o?.nullsFirst ?? !asc }
+      return b
+    },
     limit: (n: number) => ((limit = n), b),
     single: () => ((mode = 'single'), b),
     maybeSingle: () => ((mode = 'maybe'), b),
@@ -307,5 +335,39 @@ describe('coexistência', () => {
       history: [{ errors: [{ code: 2593109, title: 'History sharing declined' }] }],
     })
     expect(db.whatsapp_config[0].coex_last_error).toBe('History sharing declined (código 2593109)')
+  })
+})
+
+describe('uma conversa por contato e canal', () => {
+  it('mensagens em sequência caem na mesma conversa', async () => {
+    seed('cloud')
+    await send('messages', inbound('wamid.C1', 'bom dia', '1700000000'))
+    await send('messages', inbound('wamid.C2', 'tudo bem?', '1700000002'))
+    await send('messages', inbound('wamid.C3', 'quero atendimento humano', '1700000010'))
+    expect(db.conversations).toHaveLength(1)
+    expect(db.messages).toHaveLength(3)
+  })
+
+  it('duplicata já existente (corrida de duas entregas): usa a mais recente e não abre outra a cada mensagem', async () => {
+    seed('cloud')
+    await send('messages', inbound('wamid.D1', 'bom dia', '1700000000'))
+    // Duas entregas simultâneas da Meta deixaram uma conversa duplicada. Com
+    // `.single()` a busca passava a errar (2 linhas) e cada mensagem seguinte
+    // abria uma conversa nova — com o agente ligado de novo em cada uma.
+    const [primeira] = db.conversations
+    primeira.last_message_at = '2026-10-21T11:56:15.000Z'
+    db.conversations.push({
+      ...primeira,
+      id: 'dup-1',
+      last_message_at: '2026-10-21T11:56:17.000Z',
+      ai_handoff: true,
+    })
+
+    await send('messages', inbound('wamid.D2', 'tudo bem?', '1700000002'))
+    await send('messages', inbound('wamid.D3', 'quero atendimento humano', '1700000010'))
+
+    expect(db.conversations).toHaveLength(2)
+    const novas = db.messages.filter((m) => m.message_id !== 'wamid.D1')
+    expect(novas.map((m) => m.conversation_id)).toEqual(['dup-1', 'dup-1'])
   })
 })

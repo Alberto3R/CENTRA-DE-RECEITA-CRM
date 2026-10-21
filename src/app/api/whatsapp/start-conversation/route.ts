@@ -43,6 +43,10 @@ export async function POST(request: Request) {
       .select("id")
       .eq("account_id", ctx.accountId)
       .eq("contact_id", contact.id)
+      // O contato pode ter mais de uma conversa (uma por canal): `.maybeSingle()`
+      // sozinho erra com 2+ linhas e caía na criação de outra.
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(1)
       .maybeSingle();
     if (existing) {
       return NextResponse.json({ conversationId: existing.id });
