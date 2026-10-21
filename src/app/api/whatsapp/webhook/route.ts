@@ -1274,6 +1274,32 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
+/**
+ * A conversa mais recente do contato neste canal (`null` = conversa legada,
+ * sem canal). Duas mensagens quase simultâneas do mesmo contato podem criar
+ * duas conversas; `.single()` e `.maybeSingle()` erram com 2+ linhas e o
+ * código abria OUTRA a cada mensagem seguinte, com o agente ligado de novo em
+ * cada uma. Por isso `limit(1)` na mais recente, como já fazem flows/engine e
+ * email/poll.
+ */
+async function findConversation(
+  accountId: string,
+  contactId: string,
+  channelId: string | null,
+) {
+  const base = supabaseAdmin()
+    .from('conversations')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+  const scoped =
+    channelId === null ? base.is('channel_id', null) : base.eq('channel_id', channelId)
+  return scoped
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+}
+
 async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
@@ -1283,13 +1309,11 @@ async function findOrCreateConversation(
   channelId: string,
 ) {
   // Look for existing conversation in this account + channel.
-  const { data: existing, error: findError } = await supabaseAdmin()
-    .from('conversations')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .eq('channel_id', channelId)
-    .single()
+  const { data: existing, error: findError } = await findConversation(
+    accountId,
+    contactId,
+    channelId,
+  )
 
   if (!findError && existing) {
     return existing
@@ -1297,13 +1321,7 @@ async function findOrCreateConversation(
 
   // Retrocompatibilidade: conversa legada (channel_id ainda nulo) do mesmo
   // contato → adota o canal atual em vez de criar uma duplicata.
-  const { data: legacy } = await supabaseAdmin()
-    .from('conversations')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .is('channel_id', null)
-    .maybeSingle()
+  const { data: legacy } = await findConversation(accountId, contactId, null)
   if (legacy) {
     const { data: adopted } = await supabaseAdmin()
       .from('conversations')
@@ -1328,6 +1346,13 @@ async function findOrCreateConversation(
     .single()
 
   if (createError) {
+    // Perdeu a corrida: outra entrega simultânea criou a conversa entre a
+    // nossa busca e o insert, e o índice único (migração 119) recusou a
+    // duplicata. Relê a existente em vez de descartar a mensagem.
+    if (isUniqueViolation(createError)) {
+      const { data: raced } = await findConversation(accountId, contactId, channelId)
+      if (raced) return raced
+    }
     console.error('Error creating conversation:', createError)
     return null
   }
