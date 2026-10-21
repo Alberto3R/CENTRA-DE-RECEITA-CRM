@@ -19,6 +19,10 @@
 -- conversa quando perde a corrida. Esta migração limpa o que já existe e
 -- impede que a primeira duplicata volte a nascer.
 --
+-- ⚠️ Aplicar DEPOIS do deploy do código deste PR. O código antigo não relê a
+--    conversa quando o insert esbarra no índice do passo 6: a mensagem de quem
+--    perde a corrida seria descartada.
+--
 -- Em ordem
 --
 --   1. guarda em `_bkp_conversas_dup_119` tudo o que vai mexer (conversas,
