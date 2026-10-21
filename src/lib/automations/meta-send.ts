@@ -1,7 +1,8 @@
 import { sendTextMessage, sendTemplateMessage, sendMediaMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
+import { sendTextViaChannel, isInstagramChannel, isQrChannel } from '@/lib/messaging/send'
+import { sendMedia as sendZapiMedia, sendText as sendZapiText, zapiCredsFromChannel } from '@/lib/zapi/client'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -173,9 +174,32 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const accessToken = decrypt(config.access_token)
+  // WhatsApp por QR code: texto e documento saem pela Z-API; modelo da Meta
+  // não existe fora da API oficial.
+  const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+  const accessToken = qr ? '' : decrypt(config.access_token)
 
   const attempt = async (phone: string): Promise<string> => {
+    if (qr) {
+      if (input.kind === 'template') {
+        throw new Error(
+          'Modelos da Meta não funcionam no WhatsApp conectado por QR code — use uma mensagem de texto.',
+        )
+      }
+      if (input.kind === 'document') {
+        const r = await sendZapiMedia({
+          creds: qr,
+          phone,
+          kind: 'document',
+          link: input.link,
+          caption: input.caption,
+          filename: input.filename,
+        })
+        return r.messageId
+      }
+      const r = await sendZapiText({ creds: qr, phone, text: input.text })
+      return r.messageId
+    }
     if (input.kind === 'template') {
       const r = await sendTemplateMessage({
         phoneNumberId: config.phone_number_id,

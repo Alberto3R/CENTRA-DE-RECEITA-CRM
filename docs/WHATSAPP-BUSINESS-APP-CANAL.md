@@ -120,6 +120,31 @@ será descontinuada em **15/out/2026**.
 de 15/out. O evento `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` pode vir **só com `waba_id`**: o botão não exige
 mais `phone_number_id`, e o back acha o número na WABA (`pickCoexPhoneNumber`).
 
+## Caminho B — o que foi feito (Z-API, 21/out/2026)
+
+Decisão do Alberto para a MA Decorações: WhatsApp Business **conectado por QR code**, não
+coexistência (que é a API oficial rodando no celular). Provedor: **Z-API** (a mesma dos grupos, sem
+servidor nosso; uma instância por número, na conta Z-API da Sales 3R).
+
+| Peça | Onde |
+|---|---|
+| Canal = linha de `whatsapp_config` com `connection_mode='qr'` (+ `qr_instance_id`, `qr_client_token` cifrado, `qr_webhook_secret`, `qr_last_error`); `access_token` guarda o token da instância | `supabase/migrations/120_whatsapp_qr_zapi.sql` |
+| Cliente Z-API por canal (status, QR, código por telefone, desconectar, webhooks, envio de texto/mídia) | `src/lib/zapi/client.ts` |
+| Tradução dos eventos da Z-API para o formato da Cloud API (puro, testado) | `src/lib/zapi/callback.ts` |
+| Webhook: mesmo endpoint com `?zapi=<segredo>`; recebida → `processMessage`; pelo celular → `handleMessageEcho`; status → `handleStatusUpdate`; conectar/desconectar → canal | `src/app/api/whatsapp/webhook/route.ts` |
+| Mídia recebida copiada para o bucket `chat-media` (a Z-API apaga em 30 dias) | `src/lib/zapi/media.ts` |
+| Envio: inbox, agente 3R, fluxos (texto e mídia) e automações (texto e documento) saem pela Z-API | `send/route.ts`, `messaging/send.ts`, `ai-agent/handle.ts`, `flows/meta-send.ts`, `automations/meta-send.ts` |
+| Bloqueado com aviso: modelo, disparo em massa, botões/listas de fluxo, ligação, agendamento por modelo; inbox sem janela de 24 h | idem + `broadcast/route.ts`, `templates/*`, `message-thread.tsx` |
+| Tela do QR (atualiza a cada 10 s por ~1 min, "Gerar novo QR", código por telefone, desconectar) | `src/components/settings/qr-channel-panel.tsx` + `/api/whatsapp/qr/[channelId]` |
+| Criar o canal de um cliente (credenciais não passam pela tela do cliente) | `scripts/plugar-zapi-canal.mjs` |
+
+**Ordem para ligar um cliente:** (1) código no ar; (2) migration 120 aplicada; (3)
+`ZAPI_INSTANCE_ID=… ZAPI_TOKEN=… ZAPI_CLIENT_TOKEN=… node scripts/plugar-zapi-canal.mjs <account_id> "<nome>"`;
+(4) o cliente escaneia o QR em Configurações → WhatsApp.
+
+**Limites conhecidos:** contato que chega só com LID (sem telefone) fica com o LID no lugar do telefone;
+modelos/disparo/CAPI/ligação não existem; risco de restrição do número pela Meta (não oficial).
+
 ## Caminho B: o que ajustar no CRM (Baileys / Evolution API)
 
 ### Infra

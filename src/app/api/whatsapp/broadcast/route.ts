@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { isQrChannel, QR_SEM_MODELO } from '@/lib/messaging/send'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
 import {
@@ -150,6 +151,12 @@ export async function POST(request: Request) {
           error:
             'WhatsApp not configured. Please set up your WhatsApp integration first.',
         },
+        { status: 400 }
+      )
+    }
+    if (isQrChannel(config)) {
+      return NextResponse.json(
+        { error: QR_SEM_MODELO },
         { status: 400 }
       )
     }

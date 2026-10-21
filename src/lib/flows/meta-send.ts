@@ -9,7 +9,8 @@ import {
 } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
+import { sendTextViaChannel, isInstagramChannel, isQrChannel } from '@/lib/messaging/send'
+import { sendMedia as sendZapiMedia, zapiCredsFromChannel } from '@/lib/zapi/client'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -90,11 +91,12 @@ export async function engineSendText(
     throw new Error('canal não configurado para esta conta')
   }
 
-  // ── Instagram: texto pelo Messenger Platform (send_message / collect_input) ──
-  if (isInstagramChannel(config)) {
+  // ── Instagram (Messenger Platform) e WhatsApp por QR (Z-API): texto pelo
+  //    envio agnóstico de canal (send_message / collect_input) ──
+  if (isInstagramChannel(config) || isQrChannel(config)) {
     const { providerMessageId } = await sendTextViaChannel({
       channel: config,
-      contact: { instagram_id: contact.instagram_id },
+      contact: { instagram_id: contact.instagram_id, phone: contact.phone },
       text: args.text,
     })
     const { error: igMsgErr } = await db.from('messages').insert({
@@ -234,9 +236,22 @@ export async function engineSendMedia(
     throw new Error('WhatsApp not configured for this account')
   }
 
-  const accessToken = decrypt(config.access_token)
+  // WhatsApp por QR code: a mídia sai pela Z-API (link público, igual à Meta).
+  const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+  const accessToken = qr ? '' : decrypt(config.access_token)
 
   const attempt = async (phone: string): Promise<string> => {
+    if (qr) {
+      const r = await sendZapiMedia({
+        creds: qr,
+        phone,
+        kind: args.kind,
+        link: args.link,
+        caption: args.caption,
+        filename: args.filename,
+      })
+      return r.messageId
+    }
     const r = await sendMediaMessage({
       phoneNumberId: config.phone_number_id,
       accessToken,
@@ -381,6 +396,11 @@ async function sendInteractiveViaMeta(
   const config = await resolveChannelConfig(db, input.accountId)
   if (!config) {
     throw new Error('WhatsApp not configured for this account')
+  }
+  if (isQrChannel(config)) {
+    throw new Error(
+      'Botões e listas não funcionam no WhatsApp conectado por QR code — use uma pergunta em texto no fluxo.',
+    )
   }
 
   const accessToken = decrypt(config.access_token)

@@ -29,6 +29,14 @@ import {
   type CoexistenceValue,
   type CoexMessage,
 } from '@/lib/whatsapp/coexistence'
+import {
+  formatConnectedPhone,
+  mapZapiStatus,
+  parseZapiReceived,
+  type ZapiCallback,
+  type ZapiMessage,
+} from '@/lib/zapi/callback'
+import { persistZapiMedia } from '@/lib/zapi/media'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,6 +260,11 @@ async function resolveChannelAppSecrets(rawBody: string): Promise<string[]> {
 
 // POST - Receive messages
 export async function POST(request: Request) {
+  // WhatsApp conectado por QR code (Z-API): mesmo endpoint, autenticado pelo
+  // segredo do canal na URL — a Z-API não assina o webhook.
+  const zapiSecret = new URL(request.url).searchParams.get('zapi')
+  if (zapiSecret !== null) return handleZapiPost(request, zapiSecret)
+
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
@@ -683,7 +696,9 @@ async function processMessage(
   // Canal (whatsapp_config.id) em que a mensagem chegou — amarra a conversa
   // ao número certo (multi-canal).
   channelId: string,
-  opts: { runBots: boolean } = { runBots: true }
+  // preParsed: conteúdo já traduzido (Z-API traz a mídia como link pronto,
+  // sem passar pela Graph API da Meta).
+  opts: { runBots: boolean; preParsed?: ParsedContent } = { runBots: true }
 ) {
   // Fase 4 (BSUID): com WhatsApp usernames, o remetente pode chegar
   // identificado por um BSUID ("BR.13491208…") em vez do telefone. Olhamos
@@ -740,7 +755,7 @@ async function processMessage(
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+    opts.preParsed ?? (await parseMessageContent(message, accessToken))
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -980,14 +995,7 @@ async function processMessage(
   }
 }
 
-async function parseMessageContent(
-  message: WhatsAppMessage,
-  accessToken: string,
-  // Histórico da coexistência chega em lotes grandes: conferir cada mídia na
-  // Meta seria uma chamada HTTP por anexo. Ali montamos o link do proxy
-  // direto — mídia com mais de 14 dias pode não abrir (limite da Meta).
-  { verifyMedia = true }: { verifyMedia?: boolean } = {}
-): Promise<{
+interface ParsedContent {
   contentText: string | null
   mediaUrl: string | null
   mediaType: string | null
@@ -999,7 +1007,16 @@ async function parseMessageContent(
    * tap with the right affordance. Null for everything else.
    */
   interactiveReplyId: string | null
-}> {
+}
+
+async function parseMessageContent(
+  message: WhatsAppMessage,
+  accessToken: string,
+  // Histórico da coexistência chega em lotes grandes: conferir cada mídia na
+  // Meta seria uma chamada HTTP por anexo. Ali montamos o link do proxy
+  // direto — mídia com mais de 14 dias pode não abrir (limite da Meta).
+  { verifyMedia = true }: { verifyMedia?: boolean } = {}
+): Promise<ParsedContent> {
   // getMediaUrl signature is (mediaId, accessToken) — earlier code had
   // the args swapped, so every verification hit an invalid Meta URL and
   // fell through to the catch block, leaving mediaUrl as null. That's
@@ -1485,7 +1502,12 @@ async function resolveCoexConversation(channel: CoexChannel, rawCustomerId: stri
  * como mensagem de atendente (origin='app') e vale como "humano assumiu":
  * pausa a IA e o flow ativo, igual a uma resposta manual pelo inbox.
  */
-async function handleMessageEcho(channel: CoexChannel, echo: CoexMessage) {
+async function handleMessageEcho(
+  channel: CoexChannel,
+  echo: CoexMessage,
+  // Z-API (QR code): o conteúdo já vem traduzido, com a mídia em link pronto.
+  preParsed?: ParsedContent,
+) {
   if (!echo?.id || !echo.to) return
   // Reação dada pelo celular: fora do escopo da v1 (não é mensagem).
   if (echo.type === 'reaction') return
@@ -1497,10 +1519,8 @@ async function handleMessageEcho(channel: CoexChannel, echo: CoexMessage) {
   if (await messageAlreadyStored(conversation.id, echo.id)) return
 
   const message = echo as unknown as WhatsAppMessage
-  const { contentText, mediaUrl, interactiveReplyId } = await parseMessageContent(
-    message,
-    channel.accessToken,
-  )
+  const { contentText, mediaUrl, interactiveReplyId } =
+    preParsed ?? (await parseMessageContent(message, channel.accessToken))
   const replyTo = message.context?.id
     ? await lookupInternalIdByMetaId(message.context.id, conversation.id)
     : null
@@ -1716,5 +1736,178 @@ async function handleAppStateSync(channel: CoexChannel, value: CoexistenceValue)
       .from('contacts')
       .update({ name: fullName, updated_at: new Date().toISOString() })
       .eq('id', existing.id)
+  }
+}
+
+// ============================================================
+// Z-API — WhatsApp Business conectado por QR code (migration 120).
+//
+// Mesmo endpoint, com ?zapi=<qr_webhook_secret>. A Z-API não assina o
+// webhook: o segredo na URL identifica o canal, e o instanceId do corpo
+// tem que bater com o do canal. Cada evento é traduzido para o formato da
+// Cloud API e passa pelos MESMOS tratadores: mensagem recebida →
+// processMessage (contato, conversa, funil, fluxos, automações, agente);
+// enviada pelo celular → handleMessageEcho (vira "pelo celular" e pausa a
+// IA); status → handleStatusUpdate.
+// ============================================================
+
+interface ZapiChannelRow {
+  id: string
+  account_id: string
+  user_id: string
+  qr_instance_id: string | null
+}
+
+async function handleZapiPost(request: Request, secret: string) {
+  if (!secret) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const { data: channel, error } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('id, account_id, user_id, qr_instance_id')
+    .eq('qr_webhook_secret', secret)
+    .eq('connection_mode', 'qr')
+    .maybeSingle()
+  if (error) {
+    console.error('[zapi] falha ao carregar canal:', error.message)
+    return NextResponse.json({ error: 'internal' }, { status: 500 })
+  }
+  if (!channel) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  let body: ZapiCallback
+  try {
+    body = (await request.json()) as ZapiCallback
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+  const row = channel as ZapiChannelRow
+  if (body?.instanceId && body.instanceId !== row.qr_instance_id) {
+    console.warn('[zapi] instanceId não confere com o canal', row.id)
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  after(
+    processZapiCallback(row, body).catch((err) => {
+      console.error('[zapi] erro ao processar evento:', err)
+    }),
+  )
+  return NextResponse.json({ status: 'received' }, { status: 200 })
+}
+
+function zapiParsedContent(msg: ZapiMessage): ParsedContent {
+  return {
+    contentText: msg.contentText,
+    mediaUrl: msg.mediaUrl,
+    mediaType: null,
+    interactiveReplyId: msg.interactiveReplyId,
+  }
+}
+
+/** ZapiMessage → o shape de mensagem da Cloud API que processMessage lê. */
+function zapiToWhatsAppMessage(msg: ZapiMessage): WhatsAppMessage {
+  return {
+    id: msg.id,
+    from: msg.customer,
+    timestamp: msg.timestamp,
+    type: msg.type,
+    ...(msg.type === 'text' ? { text: { body: msg.contentText ?? '' } } : {}),
+    ...(msg.replyToId ? { context: { id: msg.replyToId } } : {}),
+    ...(msg.referral ? { referral: msg.referral } : {}),
+    ...(msg.reaction
+      ? { reaction: { message_id: msg.reaction.targetId, emoji: msg.reaction.emoji } }
+      : {}),
+  }
+}
+
+async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
+  const now = new Date().toISOString()
+
+  switch (cb.type) {
+    case 'ConnectedCallback': {
+      await supabaseAdmin()
+        .from('whatsapp_config')
+        .update({
+          status: 'connected',
+          connected_at: now,
+          display_phone_number: formatConnectedPhone(cb.phone),
+          qr_last_error: null,
+          updated_at: now,
+        })
+        .eq('id', channel.id)
+      return
+    }
+
+    case 'DisconnectedCallback': {
+      await supabaseAdmin()
+        .from('whatsapp_config')
+        .update({
+          status: 'disconnected',
+          qr_last_error: cb.error || 'Sessão do WhatsApp desconectada',
+          updated_at: now,
+        })
+        .eq('id', channel.id)
+      return
+    }
+
+    case 'MessageStatusCallback': {
+      const status = mapZapiStatus(cb.status)
+      if (!status) return
+      const ts = String(Math.floor((cb.momment ?? Date.now()) / 1000))
+      for (const id of cb.ids ?? []) {
+        await handleStatusUpdate({ id, status, timestamp: ts, recipient_id: cb.phone ?? '' })
+      }
+      return
+    }
+
+    case 'ReceivedCallback': {
+      const msg = parseZapiReceived(cb)
+      if (!msg) return
+      // A Z-API apaga a mídia em 30 dias: copia para o bucket do chat.
+      if (msg.mediaUrl) {
+        msg.mediaUrl = await persistZapiMedia({
+          db: supabaseAdmin(),
+          accountId: channel.account_id,
+          messageId: msg.id,
+          url: msg.mediaUrl,
+        })
+      }
+
+      if (msg.fromPhone) {
+        // O vendedor respondeu pelo celular: entra como atendente e pausa a IA.
+        await handleMessageEcho(
+          {
+            id: channel.id,
+            accountId: channel.account_id,
+            ownerUserId: channel.user_id,
+            accessToken: '',
+          },
+          {
+            id: msg.id,
+            from: '',
+            to: msg.customer,
+            timestamp: msg.timestamp,
+            type: msg.type,
+          },
+          zapiParsedContent(msg),
+        )
+        return
+      }
+
+      await processMessage(
+        zapiToWhatsAppMessage(msg),
+        { profile: { name: msg.name }, wa_id: msg.customer },
+        channel.account_id,
+        channel.user_id,
+        // Sem token/número da Meta: o envio (agente, fluxos) resolve o canal e
+        // sai pela Z-API.
+        '',
+        '',
+        channel.id,
+        { runBots: true, preParsed: zapiParsedContent(msg) },
+      )
+      return
+    }
+
+    default:
+      return
   }
 }

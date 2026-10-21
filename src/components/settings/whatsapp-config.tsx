@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
 import { CoexistenceConnect, CoexistenceStatus } from './coexistence-connect';
+import { QrChannelPanel } from './qr-channel-panel';
 import {
   Accordion,
   AccordionItem,
@@ -195,8 +196,14 @@ export function WhatsAppConfig() {
       // Clear any stale probe result when reloading the row.
       setRegistrationProbe(null);
 
+      // Canal por QR code (Z-API): o painel próprio consulta a sessão — não há
+      // nada da Meta para verificar.
+      if (chosen?.connection_mode === 'qr') {
+        setConnectionStatus(chosen.status === 'connected' ? 'connected' : 'disconnected');
+        setResetReason(null);
+        setStatusMessage('');
+      } else if (chosen) {
       // Then verify health via the API (decrypts token + pings Meta)
-      if (chosen) {
         try {
           const res = await fetch(
             `/api/whatsapp/config?channelId=${chosen.id}`,
@@ -700,6 +707,16 @@ export function WhatsAppConfig() {
         </div>
       )}
 
+      {mode === 'edit' && config?.connection_mode === 'qr' ? (
+        <QrChannelPanel
+          key={config.id}
+          channel={config}
+          onChange={() => {
+            if (accountId) fetchConfig(accountId);
+          }}
+        />
+      ) : (
+      <>
       <CoexistenceConnect
         onConnected={() => {
           if (accountId) fetchConfig(accountId);
@@ -1389,6 +1406,8 @@ export function WhatsAppConfig() {
         </Card>
       </div>
     </div>
+      </>
+      )}
     </section>
   );
 }

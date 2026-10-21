@@ -267,8 +267,16 @@ export interface WhatsAppConfig {
   created_at?: string;
   channel_type?: 'whatsapp' | 'instagram' | 'email';
   display_phone_number?: string | null;
-  /** 'coexistence' = número do app WhatsApp Business do celular (migration 102). */
-  connection_mode?: 'cloud' | 'coexistence';
+  /**
+   * 'coexistence' = número do app WhatsApp Business do celular na API oficial
+   * (migration 102); 'qr' = WhatsApp Business conectado por QR code via Z-API
+   * (migration 120).
+   */
+  connection_mode?: 'cloud' | 'coexistence' | 'qr';
+  /** Canal QR: instância da Z-API (o token e o Client-Token ficam cifrados). */
+  qr_instance_id?: string | null;
+  /** Canal QR: motivo da última queda da sessão. */
+  qr_last_error?: string | null;
   coex_onboarded_at?: string | null;
   coex_history_sync_requested_at?: string | null;
   coex_history_progress?: number | null;
