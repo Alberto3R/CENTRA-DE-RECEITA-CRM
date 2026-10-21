@@ -2,9 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { encrypt } from '@/lib/whatsapp/encryption'
+import { pickCoexPhoneNumber } from '@/lib/whatsapp/coexistence'
 import {
   MetaApiError,
   exchangeEmbeddedSignupCode,
+  isPhoneOnBizApp,
+  listWabaPhoneNumbers,
   requestSmbAppDataSync,
   subscribeWabaToApp,
   verifyPhoneNumber,
@@ -23,7 +26,9 @@ import {
  *   4. pede a sincronização da agenda e do histórico (180 dias). A Meta só
  *      aceita isso uma vez e até 24h depois da conexão.
  *
- * Body: { code, phone_number_id, waba_id, label? }
+ * Body: { code, waba_id, phone_number_id?, label? }
+ * `phone_number_id` é opcional: no fluxo da coexistência a Meta pode fechar
+ * o Embedded Signup só com o `waba_id` — aí o número é achado na WABA.
  * Env: NEXT_PUBLIC_META_APP_ID + META_EMBEDDED_SIGNUP_APP_SECRET (o app da
  * Meta configurado como Tech Provider, dono do Embedded Signup).
  */
@@ -69,12 +74,12 @@ export async function POST(request: Request) {
     label?: string
   } | null
   const code = body?.code?.trim()
-  const phoneNumberId = body?.phone_number_id?.trim()
+  let phoneNumberId = body?.phone_number_id?.trim() || null
   const wabaId = body?.waba_id?.trim()
   const label = body?.label?.trim() || null
-  if (!code || !phoneNumberId || !wabaId) {
+  if (!code || !wabaId) {
     return NextResponse.json(
-      { error: 'Faltou o código, o número ou a conta do WhatsApp vindos da Meta.' },
+      { error: 'Faltou o código ou a conta do WhatsApp vindos da Meta.' },
       { status: 400 },
     )
   }
@@ -88,6 +93,37 @@ export async function POST(request: Request) {
       { error: `A Meta recusou o código da conexão: ${metaMessage(err)}` },
       { status: 502 },
     )
+  }
+
+  // 1b. sem phone_number_id no evento → acha o número dentro da WABA
+  if (!phoneNumberId) {
+    try {
+      const numbers = await listWabaPhoneNumbers({ wabaId, accessToken })
+      const flagged =
+        numbers.length > 1
+          ? await Promise.all(
+              numbers.map(async (n) => ({
+                ...n,
+                is_on_biz_app: await isPhoneOnBizApp({ phoneNumberId: n.id, accessToken }),
+              })),
+            )
+          : numbers
+      phoneNumberId = pickCoexPhoneNumber(flagged)?.id ?? null
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Não consegui listar os números da conta do WhatsApp: ${metaMessage(err)}` },
+        { status: 502 },
+      )
+    }
+    if (!phoneNumberId) {
+      return NextResponse.json(
+        {
+          error:
+            'A Meta não disse qual número foi conectado e a conta do WhatsApp tem mais de um. Fale com o suporte para ligar o número certo.',
+        },
+        { status: 409 },
+      )
+    }
   }
 
   // 2. número + webhook

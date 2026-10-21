@@ -145,3 +145,21 @@ export function latestMessage<T extends { timestamp: string }>(
 export function timestampToIso(ts: string): string {
   return new Date(parseInt(ts, 10) * 1000).toISOString()
 }
+
+/**
+ * Escolhe o número que acabou de entrar pela coexistência quando a Meta não
+ * manda `phone_number_id` no fim do Embedded Signup — o evento
+ * FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING pode vir só com `waba_id`.
+ *
+ * Um número só na WABA: é ele. Mais de um: vale o único com
+ * `is_on_biz_app=true` (o que roda no app do celular). Qualquer outra
+ * combinação é ambígua — devolve null e o chamador pede ajuda em vez de
+ * chutar e ligar o número errado.
+ */
+export function pickCoexPhoneNumber<T extends { id: string; is_on_biz_app?: boolean }>(
+  numbers: T[],
+): T | null {
+  if (numbers.length === 1) return numbers[0]
+  const onApp = numbers.filter((n) => n.is_on_biz_app === true)
+  return onApp.length === 1 ? onApp[0] : null
+}

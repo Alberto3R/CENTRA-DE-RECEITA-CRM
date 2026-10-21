@@ -115,6 +115,11 @@ será descontinuada em **15/out/2026**.
 ⚠️ A conferir no teste real: o valor `featureType: 'whatsapp_business_app_onboarding'` no `FB.login`
 (a doc v4 habilita o onboarding pela configuração; o extra é inofensivo se sobrar).
 
+**21/out/2026:** o verificador "Check a launch config" da Meta confirmou que os extras do `FB.login`
+(`setup`, `featureType`, `sessionInfoVersion`) abrem a v4 com o onboarding do app **ativado**, antes e depois
+de 15/out. O evento `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` pode vir **só com `waba_id`**: o botão não exige
+mais `phone_number_id`, e o back acha o número na WABA (`pickCoexPhoneNumber`).
+
 ## Caminho B: o que ajustar no CRM (Baileys / Evolution API)
 
 ### Infra
