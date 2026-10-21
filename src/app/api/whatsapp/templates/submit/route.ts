@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { isQrChannel, QR_SEM_MODELO } from '@/lib/messaging/send'
 import { submitMessageTemplate } from '@/lib/whatsapp/meta-api'
 import {
   validateTemplatePayload,
@@ -157,6 +158,9 @@ export async function POST(request: Request) {
         },
         { status: 400 },
       )
+    }
+    if (isQrChannel(config)) {
+      return NextResponse.json({ error: QR_SEM_MODELO }, { status: 400 })
     }
 
     const dryRun =

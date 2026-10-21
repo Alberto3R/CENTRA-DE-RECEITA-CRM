@@ -252,6 +252,32 @@ export function MessageThread({
     };
   }, []);
 
+  // WhatsApp conectado por QR code (Z-API): não existe a janela de 24 h da
+  // API oficial, nem modelo, agendamento por modelo ou ligação da Meta.
+  const threadChannelId =
+    (conversation as { channel_id?: string | null } | null)?.channel_id ?? null;
+  const [isQr, setIsQr] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!threadChannelId) {
+      setIsQr(false);
+      return;
+    }
+    createClient()
+      .from("whatsapp_config")
+      .select("connection_mode")
+      .eq("id", threadChannelId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setIsQr((data as { connection_mode?: string } | null)?.connection_mode === "qr");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadChannelId]);
+
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
     if (!messages.length) return { expired: false, remaining: "" };
@@ -958,7 +984,8 @@ export function MessageThread({
             <p className="truncate text-xs text-muted-foreground">{contactSubtitleText}</p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. */}
+              the name + back arrow keep their room. Sem janela no QR. */}
+          {!isQr && (
           <Badge
             variant="outline"
             className={cn(
@@ -969,6 +996,7 @@ export function MessageThread({
             <Clock className="h-3 w-3" />
             {sessionInfo.remaining}
           </Badge>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -976,7 +1004,7 @@ export function MessageThread({
               o softphone WebRTC. Requer calling habilitado + permissão do
               lead + tier — senão avisa via tooltip/estado. Não faz sentido
               no Instagram (sem telefone) — escondido nesse canal. */}
-          {!isInstagram && <WaCallButton contactId={contact.id} compact />}
+          {!isInstagram && !isQr && <WaCallButton contactId={contact.id} compact />}
           {/* Ligação PSTN direta (Telnyx) — telefone comum, caller id de Goiânia.
               Também só faz sentido quando há telefone (não no Instagram). */}
           {!isInstagram && <TelnyxCallButton contactId={contact.id} compact />}
@@ -1266,13 +1294,13 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
-        sessionExpired={sessionInfo.expired}
+        sessionExpired={isQr ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
         // Agendamento é via template HSM — não existe no Instagram.
         onOpenSchedule={
-          isInstagram || !contact ? undefined : () => setScheduleOpen(true)
+          isInstagram || isQr || !contact ? undefined : () => setScheduleOpen(true)
         }
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}

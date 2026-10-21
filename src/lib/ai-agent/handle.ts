@@ -12,7 +12,7 @@ import { runAgent, type AgentTurn, type AgentTool, type ToolExecutor } from './r
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { availableSlots, createMeetEvent, type SchedulingConfig } from '@/lib/google/calendar'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTextViaChannel, isInstagramChannel } from '@/lib/messaging/send'
+import { sendTextViaChannel, isInstagramChannel, isQrChannel } from '@/lib/messaging/send'
 import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
 import { loadOutboundTurns, formatTemplateTurn } from './outbound-context'
 import { registrarTurno } from './turnos'
@@ -266,7 +266,8 @@ export async function maybeRunAgent(params: {
 
   // Envio agnóstico de canal: WhatsApp mantém o fetch nativo (contactWaId +
   // token vindo do webhook, comportamento intacto); Instagram sai pelo
-  // Messenger Platform via o canal resolvido. Grava sempre como 'bot'.
+  // Messenger Platform e o WhatsApp por QR pela Z-API, ambos via o canal
+  // resolvido. Grava sempre como 'bot'.
   const send = async (text: string): Promise<string | null> => {
     if (isInstagramChannel(channel)) {
       try {
@@ -278,6 +279,20 @@ export async function maybeRunAgent(params: {
         return r.providerMessageId
       } catch (e) {
         console.error('[ai-agent] envio Instagram falhou', e)
+        return null
+      }
+    }
+    // WhatsApp por QR code: sai pela Z-API do canal (não há token da Meta).
+    if (isQrChannel(channel)) {
+      try {
+        const r = await sendTextViaChannel({
+          channel,
+          contact: { phone: contactWaId },
+          text,
+        })
+        return r.providerMessageId
+      } catch (e) {
+        console.error('[ai-agent] envio QR (Z-API) falhou', e)
         return null
       }
     }

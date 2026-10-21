@@ -9,6 +9,12 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
+import { isQrChannel } from '@/lib/messaging/send'
+import {
+  sendMedia as sendZapiMedia,
+  sendText as sendZapiText,
+  zapiCredsFromChannel,
+} from '@/lib/zapi/client'
 import { sendInstagramReply } from '@/lib/instagram/send'
 import { conversaEhDeEmail, responderPorEmail } from '@/lib/email/reply'
 import {
@@ -294,6 +300,19 @@ export async function POST(request: Request) {
       )
     }
 
+    // WhatsApp conectado por QR code (Z-API): texto e mídia saem pela
+    // instância do canal. Modelo da Meta não existe fora da API oficial.
+    const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+    if (qr && message_type === 'template') {
+      return NextResponse.json(
+        {
+          error:
+            'Modelos da Meta não funcionam no WhatsApp conectado por QR code. Mande uma mensagem de texto.',
+        },
+        { status: 400 },
+      )
+    }
+
     const accessToken = decrypt(config.access_token)
 
     // Self-heal legacy CBC-encrypted tokens. Fire-and-forget: we
@@ -387,6 +406,27 @@ export async function POST(request: Request) {
     }
 
     const attempt = async (phone: string): Promise<string> => {
+      if (qr) {
+        if (isMediaKind) {
+          const result = await sendZapiMedia({
+            creds: qr,
+            phone,
+            kind: message_type as MediaKind,
+            link: media_url,
+            caption: content_text || undefined,
+            filename: filename || undefined,
+            replyToId: contextMessageId,
+          })
+          return result.messageId
+        }
+        const result = await sendZapiText({
+          creds: qr,
+          phone,
+          text: content_text,
+          replyToId: contextMessageId,
+        })
+        return result.messageId
+      }
       if (message_type === 'template') {
         const result = await sendTemplateMessage({
           phoneNumberId: config.phone_number_id,
@@ -455,9 +495,9 @@ export async function POST(request: Request) {
       if (lastError) throw lastError
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
-      console.error('Meta API send failed for all variants:', message)
+      console.error(`${qr ? 'Z-API' : 'Meta API'} send failed for all variants:`, message)
       return NextResponse.json(
-        { error: `Meta API error: ${message}` },
+        { error: `${qr ? 'Z-API' : 'Meta API'} error: ${message}` },
         { status: 502 }
       )
     }

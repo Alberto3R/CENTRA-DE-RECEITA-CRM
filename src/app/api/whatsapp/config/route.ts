@@ -132,7 +132,7 @@ export async function GET(request: Request) {
     const channelId = new URL(request.url).searchParams.get('channelId')
     let cfgQuery = supabase
       .from('whatsapp_config')
-      .select('phone_number_id, access_token, status')
+      .select('phone_number_id, access_token, status, connection_mode')
       .eq('account_id', accountId)
     cfgQuery = channelId
       ? cfgQuery.eq('id', channelId)
@@ -155,6 +155,21 @@ export async function GET(request: Request) {
           message: 'No WhatsApp configuration saved yet. Fill in the form and click Save Configuration.',
         },
         { status: 200 }
+      )
+    }
+
+    // WhatsApp por QR code (Z-API): não há nada na Meta para checar — o
+    // estado da sessão vem dos eventos de conectar/desconectar da Z-API.
+    if ((config as { connection_mode?: string }).connection_mode === 'qr') {
+      return NextResponse.json(
+        {
+          connected: config.status === 'connected',
+          mode: 'qr',
+          ...(config.status === 'connected'
+            ? {}
+            : { reason: 'qr_disconnected', message: 'Escaneie o QR code para conectar o WhatsApp.' }),
+        },
+        { status: 200 },
       )
     }
 

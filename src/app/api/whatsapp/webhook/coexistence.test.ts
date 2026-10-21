@@ -3,7 +3,8 @@
  *
  * Exercita o POST real (assinatura HMAC de verdade) com os três campos da
  * coexistência e confere o que fica gravado: echo do celular, histórico,
- * agenda e o dedupe de mensagem repetida.
+ * agenda e o dedupe de mensagem repetida. No fim, o mesmo endpoint com
+ * ?zapi=<segredo> (WhatsApp conectado por QR code, Z-API).
  */
 import { createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -369,5 +370,143 @@ describe('uma conversa por contato e canal', () => {
     expect(db.conversations).toHaveLength(2)
     const novas = db.messages.filter((m) => m.message_id !== 'wamid.D1')
     expect(novas.map((m) => m.conversation_id)).toEqual(['dup-1', 'dup-1'])
+  })
+})
+
+// ------------------------------------------------------------------
+// Z-API — WhatsApp Business conectado por QR code (migration 120). Mesmo
+// endpoint, com ?zapi=<segredo>; a Z-API não assina o webhook.
+// ------------------------------------------------------------------
+
+const ZAPI_SECRET = 'segredo-qr'
+const ZAPI_INSTANCE = 'INST-1'
+
+function seedQr() {
+  for (const k of Object.keys(db)) delete db[k]
+  db.whatsapp_config = [
+    {
+      id: 'ch-qr',
+      account_id: 'acc-1',
+      user_id: 'u-1',
+      phone_number_id: null,
+      access_token: encrypt('tok-instancia'),
+      connection_mode: 'qr',
+      qr_instance_id: ZAPI_INSTANCE,
+      qr_webhook_secret: ZAPI_SECRET,
+      status: 'disconnected',
+    },
+  ]
+  db.contacts = []
+  db.conversations = []
+  db.messages = []
+}
+
+async function zapiPost(body: Record<string, unknown>, secret = ZAPI_SECRET) {
+  const res = await POST(
+    new Request(`http://x/api/whatsapp/webhook?zapi=${secret}`, {
+      method: 'POST',
+      body: JSON.stringify({ instanceId: ZAPI_INSTANCE, ...body }),
+    }),
+  )
+  await Promise.all(pending.splice(0))
+  return res
+}
+
+const recebida = (messageId: string, extra: Record<string, unknown> = {}) => ({
+  type: 'ReceivedCallback',
+  messageId,
+  phone: CLIENTE,
+  fromMe: false,
+  momment: 1700000000000,
+  senderName: 'Pablo',
+  isGroup: false,
+  text: { message: 'quero ver o sofá' },
+  ...extra,
+})
+
+describe('Z-API (WhatsApp por QR code)', () => {
+  it('segredo errado ou instância de outro canal: 401 e nada gravado', async () => {
+    seedQr()
+    expect((await zapiPost(recebida('Z0'), 'outro')).status).toBe(401)
+    const res = await POST(
+      new Request(`http://x/api/whatsapp/webhook?zapi=${ZAPI_SECRET}`, {
+        method: 'POST',
+        body: JSON.stringify({ ...recebida('Z0'), instanceId: 'OUTRA' }),
+      }),
+    )
+    expect(res.status).toBe(401)
+    expect(db.messages).toHaveLength(0)
+  })
+
+  it('mensagem recebida: contato, conversa no canal QR, mensagem e bots', async () => {
+    seedQr()
+    const res = await zapiPost(recebida('Z1'))
+    expect(res.status).toBe(200)
+    expect(db.contacts).toHaveLength(1)
+    expect(db.contacts[0]).toMatchObject({ phone: CLIENTE, name: 'Pablo' })
+    expect(db.conversations[0]).toMatchObject({ channel_id: 'ch-qr' })
+    expect(db.messages[0]).toMatchObject({
+      sender_type: 'customer',
+      content_type: 'text',
+      content_text: 'quero ver o sofá',
+      message_id: 'Z1',
+    })
+    expect(flows).toHaveBeenCalledTimes(1)
+    expect(agent).toHaveBeenCalledTimes(1)
+  })
+
+  it('reentrega da mesma mensagem não grava de novo', async () => {
+    seedQr()
+    await zapiPost(recebida('Z2'))
+    await zapiPost(recebida('Z2'))
+    expect(db.messages).toHaveLength(1)
+    expect(agent).toHaveBeenCalledTimes(1)
+  })
+
+  it('enviada pelo celular: entra como atendente "pelo celular" e pausa a IA', async () => {
+    seedQr()
+    await zapiPost(recebida('Z3'))
+    await zapiPost(recebida('Z4', { fromMe: true, text: { message: 'tenho sim, te mando fotos' } }))
+    const eco = db.messages.find((m) => m.message_id === 'Z4')
+    expect(eco).toMatchObject({ sender_type: 'agent', origin: 'app', content_text: 'tenho sim, te mando fotos' })
+    expect(db.conversations).toHaveLength(1)
+    expect(db.conversations[0].ai_handoff).toBe(true)
+  })
+
+  it('eco do que o próprio CRM mandou pela API (fromApi) é ignorado', async () => {
+    seedQr()
+    await zapiPost(recebida('Z5', { fromMe: true, fromApi: true }))
+    expect(db.messages).toHaveLength(0)
+  })
+
+  it('grupo e aviso de sistema (ligação) são ignorados', async () => {
+    seedQr()
+    await zapiPost(recebida('Z6', { isGroup: true }))
+    await zapiPost(recebida('Z7', { notification: 'CALL_MISSED_VOICE', text: undefined }))
+    expect(db.messages).toHaveLength(0)
+  })
+
+  it('status da Z-API atualiza a mensagem (RECEIVED → entregue, READ → lida)', async () => {
+    seedQr()
+    db.messages.push({ id: 'm-1', conversation_id: 'c', message_id: 'Z8', status: 'sent' })
+    await zapiPost({ type: 'MessageStatusCallback', status: 'RECEIVED', ids: ['Z8'], momment: 1700000001000 })
+    expect(db.messages[0].status).toBe('delivered')
+    await zapiPost({ type: 'MessageStatusCallback', status: 'READ', ids: ['Z8'], momment: 1700000002000 })
+    expect(db.messages[0].status).toBe('read')
+  })
+
+  it('conectar e desconectar atualizam o canal', async () => {
+    seedQr()
+    await zapiPost({ type: 'ConnectedCallback', connected: true, phone: '5531997729804' })
+    expect(db.whatsapp_config[0]).toMatchObject({
+      status: 'connected',
+      display_phone_number: '+55 31 99772-9804',
+      qr_last_error: null,
+    })
+    await zapiPost({ type: 'DisconnectedCallback', disconnected: true, error: 'Device has been disconnected' })
+    expect(db.whatsapp_config[0]).toMatchObject({
+      status: 'disconnected',
+      qr_last_error: 'Device has been disconnected',
+    })
   })
 })

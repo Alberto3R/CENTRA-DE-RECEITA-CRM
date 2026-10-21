@@ -122,7 +122,7 @@ export function SettingsOverview({
         // assim que surgia um 2º canal → card acusava "não configurado".
         supabase
           .from('whatsapp_config')
-          .select('phone_number_id')
+          .select('phone_number_id, connection_mode')
           .eq('account_id', acctId)
           .eq('channel_type', 'whatsapp')
           .order('is_primary', { ascending: false })
@@ -132,7 +132,9 @@ export function SettingsOverview({
       ]);
       if (cancelled) return;
       setWhatsapp({
-        configured: row.status === 'fulfilled' && !!row.value.data?.phone_number_id,
+        configured:
+          row.status === 'fulfilled' &&
+          (!!row.value.data?.phone_number_id || row.value.data?.connection_mode === 'qr'),
         connected: health.status === 'fulfilled' && !!health.value?.connected,
       });
       setWhatsappLoading(false);

@@ -1,5 +1,5 @@
 /**
- * Envio de texto agnóstico de canal (WhatsApp, Instagram ou E-mail).
+ * Envio de texto agnóstico de canal (WhatsApp, WhatsApp por QR, Instagram ou E-mail).
  *
  * As engines (automations, flows, agente de IA) já resolvem o canal da
  * conversa e gravam a própria linha em `messages` com o `sender_type` que faz
@@ -21,6 +21,7 @@ import { isEmailChannel, toEmailChannel } from '@/lib/email/config'
 import { enviarEmailSMTP } from '@/lib/email/outbound'
 import { getInstagramPageToken, sendInstagramText } from '@/lib/instagram/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { sendText as sendZapiText, zapiCredsFromChannel } from '@/lib/zapi/client'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -36,6 +37,17 @@ export function isInstagramChannel(
   channel: ResolvedChannel | null | undefined,
 ): boolean {
   return channel?.channel_type === 'instagram'
+}
+
+/** Aviso padrão: modelo e disparo em massa só existem na API oficial. */
+export const QR_SEM_MODELO =
+  'Modelos e disparo em massa não funcionam no WhatsApp conectado por QR code — só na API oficial da Meta.'
+
+/** WhatsApp conectado por QR code (Z-API) — não é Cloud API. */
+export function isQrChannel(
+  channel: ResolvedChannel | null | undefined,
+): boolean {
+  return channel?.connection_mode === 'qr'
 }
 
 export interface ChannelContact {
@@ -114,6 +126,17 @@ export async function sendTextViaChannel(args: {
       pageId: channel.ig_page_id,
       pageToken,
       igsid: contact.instagram_id,
+      text,
+    })
+    return { providerMessageId: r.messageId }
+  }
+
+  // ── WhatsApp por QR code (Z-API) ───────────────────────────────────────
+  if (isQrChannel(channel)) {
+    if (!contact.phone) throw new Error('contato sem telefone')
+    const r = await sendZapiText({
+      creds: zapiCredsFromChannel(channel),
+      phone: contact.phone,
       text,
     })
     return { providerMessageId: r.messageId }
