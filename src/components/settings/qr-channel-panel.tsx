@@ -183,8 +183,12 @@ export function QrChannelPanel({
 
   const expired = polls >= MAX_POLLS;
 
+  // Container query, não breakpoint da janela: a área de Configurações fica
+  // estreita mesmo em tela de 1024 px (menu lateral + menu de seções), e o
+  // QR espremido numa coluna fina não dá para escanear.
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+    <div className="@container">
+    <div className="grid gap-6 @3xl:grid-cols-[1fr_340px]">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base text-foreground">
@@ -273,6 +277,7 @@ export function QrChannelPanel({
           ) : null}
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 }
