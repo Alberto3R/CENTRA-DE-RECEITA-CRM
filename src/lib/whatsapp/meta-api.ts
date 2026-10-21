@@ -370,6 +370,25 @@ export async function listWabaPhoneNumbers(args: {
   return data.data ?? []
 }
 
+/**
+ * O número está no app WhatsApp Business do celular (coexistência)?
+ * `is_on_biz_app` só é garantido no nó do número, não na listagem do WABA —
+ * por isso a consulta é uma a uma. Erro vira `undefined` (desconhecido).
+ */
+export async function isPhoneOnBizApp(args: {
+  phoneNumberId: string
+  accessToken: string
+}): Promise<boolean | undefined> {
+  const { phoneNumberId, accessToken } = args
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=is_on_biz_app`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) return undefined
+  const data = (await response.json()) as { is_on_biz_app?: boolean }
+  return typeof data.is_on_biz_app === 'boolean' ? data.is_on_biz_app : undefined
+}
+
 export interface DebugTokenInfo {
   is_valid: boolean
   scopes: string[]

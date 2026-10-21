@@ -6,6 +6,7 @@ import {
   isHistoryComplete,
   latestMessage,
   mapHistoryStatus,
+  pickCoexPhoneNumber,
   toContentType,
 } from './coexistence'
 
@@ -67,5 +68,29 @@ describe('histórico', () => {
     const msgs = [{ timestamp: '10' }, { timestamp: '30' }, { timestamp: '20' }]
     expect(latestMessage(msgs)?.timestamp).toBe('30')
     expect(latestMessage([])).toBeNull()
+  })
+})
+
+describe('pickCoexPhoneNumber', () => {
+  it('um número só na WABA: é ele', () => {
+    expect(pickCoexPhoneNumber([{ id: '1' }])?.id).toBe('1')
+  })
+  it('vários números: o único que está no app do celular', () => {
+    expect(
+      pickCoexPhoneNumber([
+        { id: '1', is_on_biz_app: false },
+        { id: '2', is_on_biz_app: true },
+      ])?.id,
+    ).toBe('2')
+  })
+  it('ambíguo ou vazio: não chuta', () => {
+    expect(pickCoexPhoneNumber([])).toBeNull()
+    expect(pickCoexPhoneNumber([{ id: '1' }, { id: '2' }])).toBeNull()
+    expect(
+      pickCoexPhoneNumber([
+        { id: '1', is_on_biz_app: true },
+        { id: '2', is_on_biz_app: true },
+      ]),
+    ).toBeNull()
   })
 })

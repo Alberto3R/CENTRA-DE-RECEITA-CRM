@@ -90,6 +90,11 @@ export function CoexistenceConnect({ onConnected }: { onConnected: () => void })
         setBusy(false);
         return;
       }
+      if (data.event === 'ERROR') {
+        toast.error(data.data?.error_message || 'A Meta interrompeu a conexão.');
+        setBusy(false);
+        return;
+      }
       if (data.data?.phone_number_id) pending.current.phoneNumberId = data.data.phone_number_id;
       if (data.data?.waba_id) pending.current.wabaId = data.data.waba_id;
       void tryFinish();
@@ -101,7 +106,9 @@ export function CoexistenceConnect({ onConnected }: { onConnected: () => void })
 
   async function tryFinish() {
     const { code, phoneNumberId, wabaId } = pending.current;
-    if (!code || !phoneNumberId || !wabaId || finishing.current) return;
+    // No fluxo do app do celular o evento de fim pode vir só com waba_id —
+    // o back acha o número na WABA. phone_number_id vai quando a Meta mandar.
+    if (!code || !wabaId || finishing.current) return;
     finishing.current = true;
     try {
       const res = await fetch('/api/whatsapp/coexistence/onboard', {
