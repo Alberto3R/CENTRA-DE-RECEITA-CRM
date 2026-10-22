@@ -390,6 +390,7 @@ function seedQr() {
       user_id: 'u-1',
       phone_number_id: null,
       access_token: encrypt('tok-instancia'),
+      qr_client_token: encrypt('client-token'),
       connection_mode: 'qr',
       qr_instance_id: ZAPI_INSTANCE,
       qr_webhook_secret: ZAPI_SECRET,
@@ -495,18 +496,30 @@ describe('Z-API (WhatsApp por QR code)', () => {
     expect(db.messages[0].status).toBe('read')
   })
 
-  it('conectar e desconectar atualizam o canal', async () => {
+  it('conectar e desconectar atualizam o canal e marcam o aviso da queda', async () => {
     seedQr()
-    await zapiPost({ type: 'ConnectedCallback', connected: true, phone: '5531997729804' })
-    expect(db.whatsapp_config[0]).toMatchObject({
-      status: 'connected',
-      display_phone_number: '+55 31 99772-9804',
-      qr_last_error: null,
-    })
-    await zapiPost({ type: 'DisconnectedCallback', disconnected: true, error: 'Device has been disconnected' })
-    expect(db.whatsapp_config[0]).toMatchObject({
-      status: 'disconnected',
-      qr_last_error: 'Device has been disconnected',
-    })
+    process.env.QR_ALERTA_ESPERA_MS = '0'
+    // Z-API confirma que continua fora (não voltou sozinho).
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ connected: false }))))
+    try {
+      await zapiPost({ type: 'ConnectedCallback', connected: true, phone: '5531997729804' })
+      expect(db.whatsapp_config[0]).toMatchObject({
+        status: 'connected',
+        display_phone_number: '+55 31 99772-9804',
+        qr_last_error: null,
+      })
+      await zapiPost({ type: 'DisconnectedCallback', disconnected: true, error: 'Device has been disconnected' })
+      expect(db.whatsapp_config[0]).toMatchObject({
+        status: 'disconnected',
+        qr_last_error: 'Device has been disconnected',
+      })
+      expect(db.whatsapp_config[0].qr_alerted_at).toBeTruthy()
+
+      await zapiPost({ type: 'ConnectedCallback', connected: true, phone: '5531997729804' })
+      expect(db.whatsapp_config[0]).toMatchObject({ status: 'connected', qr_alerted_at: null })
+    } finally {
+      vi.unstubAllGlobals()
+      delete process.env.QR_ALERTA_ESPERA_MS
+    }
   })
 })

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { CheckCircle2, Loader2, QrCode, RefreshCw, Smartphone, AlertTriangle } from 'lucide-react';
+import { BellRing, CheckCircle2, Loader2, QrCode, RefreshCw, Smartphone, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -156,6 +156,7 @@ export function QrChannelPanel({
 
   if (state?.connected) {
     return (
+      <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base text-foreground">
@@ -178,13 +179,20 @@ export function QrChannelPanel({
           </Button>
         </CardContent>
       </Card>
+      <QrAlertContactCard channel={channel} />
+      </div>
     );
   }
 
   const expired = polls >= MAX_POLLS;
 
+  // Container query, não breakpoint da janela: a área de Configurações fica
+  // estreita mesmo em tela de 1024 px (menu lateral + menu de seções), e o
+  // QR espremido numa coluna fina não dá para escanear.
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+    <div className="space-y-6">
+    <div className="@container">
+    <div className="grid gap-6 @3xl:grid-cols-[1fr_340px]">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base text-foreground">
@@ -274,5 +282,111 @@ export function QrChannelPanel({
         </CardContent>
       </Card>
     </div>
+    </div>
+    <QrAlertContactCard channel={channel} />
+    </div>
+  );
+}
+
+/**
+ * Quem é avisado quando o WhatsApp cai (migration 121). O aviso sai pelo
+ * número oficial da Sales 3R (o que caiu não manda nada) e por e-mail.
+ */
+function QrAlertContactCard({ channel }: { channel: WhatsAppConfig }) {
+  const [phone, setPhone] = useState(channel.alert_phone ?? '');
+  const [email, setEmail] = useState(channel.alert_email ?? '');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  async function post(body: Record<string, unknown>) {
+    const res = await fetch(`/api/whatsapp/qr/${channel.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok, json };
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const { ok, json } = await post({ action: 'alert-contact', phone, email });
+      if (!ok) {
+        toast.error(json.error || 'Não consegui salvar.');
+        return;
+      }
+      setPhone(json.phone ?? '');
+      setEmail(json.email ?? '');
+      toast.success('Contato do aviso salvo.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    try {
+      const { ok, json } = await post({ action: 'alert-test' });
+      if (!ok) {
+        toast.error(json.error || 'Não consegui mandar o teste.');
+        return;
+      }
+      const canais = [json.whatsapp ? 'WhatsApp' : null, json.email ? 'e-mail' : null].filter(Boolean);
+      if (canais.length) toast.success(`Aviso de teste enviado por ${canais.join(' e ')}.`);
+      else toast.error('O teste não saiu. Confira o WhatsApp e o e-mail salvos.');
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base text-foreground">
+          <BellRing className="size-4 text-primary" />
+          Quem avisar se o WhatsApp cair
+        </CardTitle>
+        <CardDescription className="text-muted-foreground">
+          Se a conexão cair, essa pessoa recebe um WhatsApp da Sales 3R e um e-mail na hora,
+          e outro quando voltar. Sem e-mail aqui, o aviso vai para o dono da conta.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="alert-phone">WhatsApp do responsável</Label>
+            <Input
+              id="alert-phone"
+              placeholder="31 99999-9999"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="alert-email">E-mail do responsável</Label>
+            <Input
+              id="alert-email"
+              type="email"
+              placeholder="responsavel@empresa.com.br"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            Salvar
+          </Button>
+          <Button variant="outline" onClick={test} disabled={testing || saving}>
+            {testing ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+            Mandar aviso de teste
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

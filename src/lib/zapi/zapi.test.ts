@@ -113,6 +113,7 @@ describe('envio de texto pelo canal QR', () => {
     vi.stubGlobal('fetch', fetchMock)
     const channel = {
       connection_mode: 'qr',
+      status: 'connected',
       qr_instance_id: 'INST',
       access_token: encrypt('TOK'),
       qr_client_token: encrypt('CT'),
@@ -128,8 +129,17 @@ describe('envio de texto pelo canal QR', () => {
 
   it('erro da Z-API vira exceção com a mensagem dela', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'You are not connected.' }), { status: 400 })))
-    const channel = { connection_mode: 'qr', qr_instance_id: 'INST', access_token: encrypt('TOK'), qr_client_token: encrypt('CT') }
+    const channel = { connection_mode: 'qr', status: 'connected', qr_instance_id: 'INST', access_token: encrypt('TOK'), qr_client_token: encrypt('CT') }
     await expect(sendTextViaChannel({ channel, contact: { phone: '5531997729804' }, text: 'x' }))
       .rejects.toThrow('You are not connected.')
+  })
+
+  it('canal desconectado: nem chama a Z-API (mensagem iria para a fila)', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const channel = { connection_mode: 'qr', status: 'disconnected', qr_instance_id: 'INST', access_token: encrypt('TOK'), qr_client_token: encrypt('CT') }
+    await expect(sendTextViaChannel({ channel, contact: { phone: '5531997729804' }, text: 'x' }))
+      .rejects.toThrow('desconectado')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

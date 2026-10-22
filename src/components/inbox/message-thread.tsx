@@ -29,6 +29,7 @@ import {
   UserRound,
   Hand,
   Bot,
+  AlertTriangle,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -257,21 +258,26 @@ export function MessageThread({
   const threadChannelId =
     (conversation as { channel_id?: string | null } | null)?.channel_id ?? null;
   const [isQr, setIsQr] = useState(false);
+  // Canal por QR fora do ar: mensagem não entra nem sai — avisa no compositor.
+  const [qrDown, setQrDown] = useState(false);
   useEffect(() => {
     let cancelled = false;
     if (!threadChannelId) {
       setIsQr(false);
+      setQrDown(false);
       return;
     }
     createClient()
       .from("whatsapp_config")
-      .select("connection_mode")
+      .select("connection_mode, status")
       .eq("id", threadChannelId)
       .maybeSingle()
       .then(({ data }) => {
-        if (!cancelled) {
-          setIsQr((data as { connection_mode?: string } | null)?.connection_mode === "qr");
-        }
+        if (cancelled) return;
+        const row = data as { connection_mode?: string; status?: string } | null;
+        const qr = row?.connection_mode === "qr";
+        setIsQr(qr);
+        setQrDown(qr && row?.status !== "connected");
       });
     return () => {
       cancelled = true;
@@ -1289,6 +1295,16 @@ export function MessageThread({
           conversationId={conversation.id}
           refreshToken={scheduleToken}
         />
+      )}
+
+      {qrDown && (
+        <div className="flex items-start gap-2 border-t border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            O WhatsApp deste número está desconectado da Central: nenhuma mensagem entra nem sai
+            até reconectar. Peça para o responsável escanear o QR em Configurações → WhatsApp.
+          </span>
+        </div>
       )}
 
       {/* Composer */}

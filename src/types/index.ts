@@ -277,6 +277,9 @@ export interface WhatsAppConfig {
   qr_instance_id?: string | null;
   /** Canal QR: motivo da última queda da sessão. */
   qr_last_error?: string | null;
+  /** Quem é avisado se o canal cair (migration 121). */
+  alert_phone?: string | null;
+  alert_email?: string | null;
   coex_onboarded_at?: string | null;
   coex_history_sync_requested_at?: string | null;
   coex_history_progress?: number | null;

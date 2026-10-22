@@ -9,7 +9,7 @@ import {
 } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTextViaChannel, isInstagramChannel, isQrChannel } from '@/lib/messaging/send'
+import { sendTextViaChannel, isInstagramChannel, isQrChannel, QR_DESCONECTADO } from '@/lib/messaging/send'
 import { sendMedia as sendZapiMedia, zapiCredsFromChannel } from '@/lib/zapi/client'
 import {
   sanitizePhoneForMeta,
@@ -238,6 +238,7 @@ export async function engineSendMedia(
 
   // WhatsApp por QR code: a mídia sai pela Z-API (link público, igual à Meta).
   const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+  if (qr && config.status !== 'connected') throw new Error(QR_DESCONECTADO)
   const accessToken = qr ? '' : decrypt(config.access_token)
 
   const attempt = async (phone: string): Promise<string> => {

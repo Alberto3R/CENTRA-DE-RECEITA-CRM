@@ -37,6 +37,7 @@ import {
   type ZapiMessage,
 } from '@/lib/zapi/callback'
 import { persistZapiMedia } from '@/lib/zapi/media'
+import { registrarConexao, registrarQueda } from '@/lib/zapi/alerts'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1819,32 +1820,17 @@ function zapiToWhatsAppMessage(msg: ZapiMessage): WhatsAppMessage {
 }
 
 async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
-  const now = new Date().toISOString()
-
   switch (cb.type) {
     case 'ConnectedCallback': {
-      await supabaseAdmin()
-        .from('whatsapp_config')
-        .update({
-          status: 'connected',
-          connected_at: now,
-          display_phone_number: formatConnectedPhone(cb.phone),
-          qr_last_error: null,
-          updated_at: now,
-        })
-        .eq('id', channel.id)
+      // Marca conectado e, se a queda tinha sido avisada, avisa que voltou.
+      await registrarConexao(supabaseAdmin(), channel.id, formatConnectedPhone(cb.phone))
       return
     }
 
     case 'DisconnectedCallback': {
-      await supabaseAdmin()
-        .from('whatsapp_config')
-        .update({
-          status: 'disconnected',
-          qr_last_error: cb.error || 'Sessão do WhatsApp desconectada',
-          updated_at: now,
-        })
-        .eq('id', channel.id)
+      // Marca desconectado e avisa o responsável (só na queda nova, depois de
+      // conferir que não voltou sozinho).
+      await registrarQueda(supabaseAdmin(), channel.id, cb.error || null)
       return
     }
 

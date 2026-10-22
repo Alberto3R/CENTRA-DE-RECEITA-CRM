@@ -9,7 +9,7 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { isQrChannel } from '@/lib/messaging/send'
+import { isQrChannel, QR_DESCONECTADO } from '@/lib/messaging/send'
 import {
   sendMedia as sendZapiMedia,
   sendText as sendZapiText,
@@ -303,6 +303,9 @@ export async function POST(request: Request) {
     // WhatsApp conectado por QR code (Z-API): texto e mídia saem pela
     // instância do canal. Modelo da Meta não existe fora da API oficial.
     const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+    if (qr && config.status !== 'connected') {
+      return NextResponse.json({ error: QR_DESCONECTADO }, { status: 409 })
+    }
     if (qr && message_type === 'template') {
       return NextResponse.json(
         {
