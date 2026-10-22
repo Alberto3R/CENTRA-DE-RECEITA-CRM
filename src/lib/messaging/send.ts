@@ -43,6 +43,10 @@ export function isInstagramChannel(
 export const QR_SEM_MODELO =
   'Modelos e disparo em massa não funcionam no WhatsApp conectado por QR code — só na API oficial da Meta.'
 
+/** Aviso padrão: canal por QR fora do ar não envia nada. */
+export const QR_DESCONECTADO =
+  'O WhatsApp está desconectado da Central. Reconecte em Configurações → WhatsApp (QR code) — a mensagem não foi enviada.'
+
 /** WhatsApp conectado por QR code (Z-API) — não é Cloud API. */
 export function isQrChannel(
   channel: ResolvedChannel | null | undefined,
@@ -133,6 +137,9 @@ export async function sendTextViaChannel(args: {
 
   // ── WhatsApp por QR code (Z-API) ───────────────────────────────────────
   if (isQrChannel(channel)) {
+    // Desconectado, a Z-API aceita e deixa na fila: sairia horas depois, ou
+    // nunca. Melhor falhar na hora.
+    if (channel.status !== 'connected') throw new Error(QR_DESCONECTADO)
     if (!contact.phone) throw new Error('contato sem telefone')
     const r = await sendZapiText({
       creds: zapiCredsFromChannel(channel),

@@ -1,7 +1,7 @@
 import { sendTextMessage, sendTemplateMessage, sendMediaMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTextViaChannel, isInstagramChannel, isQrChannel } from '@/lib/messaging/send'
+import { sendTextViaChannel, isInstagramChannel, isQrChannel, QR_DESCONECTADO } from '@/lib/messaging/send'
 import { sendMedia as sendZapiMedia, sendText as sendZapiText, zapiCredsFromChannel } from '@/lib/zapi/client'
 import {
   sanitizePhoneForMeta,
@@ -177,6 +177,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // WhatsApp por QR code: texto e documento saem pela Z-API; modelo da Meta
   // não existe fora da API oficial.
   const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+  if (qr && config.status !== 'connected') throw new Error(QR_DESCONECTADO)
   const accessToken = qr ? '' : decrypt(config.access_token)
 
   const attempt = async (phone: string): Promise<string> => {
