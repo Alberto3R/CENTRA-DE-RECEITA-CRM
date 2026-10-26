@@ -18,6 +18,45 @@ export function normalizePhone(phone: string): string {
 }
 
 /**
+ * Telefone digitado num formulário brasileiro → forma canônica da Meta
+ * (55 + DDD + número, só dígitos).
+ *
+ * Quem preenche "(81) 99999-9999" manda 11 dígitos sem o 55. Guardado
+ * assim, a Meta lê o DDD como código de país (81 = Japão, 51 = Peru,
+ * 62 = Indonésia, 34 = Espanha) e o template volta 131026; e a resposta
+ * do lead pelo WhatsApp chega como 5581… e não casa com o contato.
+ *
+ * Regra: só o comprimento decide, nunca o prefixo (DDD 55 existe —
+ * Santa Maria/RS). 10 ou 11 dígitos = número brasileiro sem DDI → ganha o
+ * 55. Com "+" na frente o número já veio internacional e fica como está.
+ * Um 0 de tronco ("011 9…") é descartado antes.
+ */
+export function normalizeBrPhone(raw: string): string {
+  if (!raw) return ''
+  const international = raw.trim().startsWith('+')
+  let d = normalizePhone(raw)
+  if (international) return d
+  if ((d.length === 11 || d.length === 12) && d.startsWith('0')) d = d.slice(1)
+  if (d.length === 10 || d.length === 11) return `55${d}`
+  return d
+}
+
+/**
+ * Chaves de busca de um contato para o telefone de formulário: a canônica
+ * primeiro e, se ela tem o 55 do Brasil, também a versão sem ele — é assim
+ * que ficaram os contatos gravados antes da normalização.
+ */
+export function brPhoneLookupKeys(raw: string): string[] {
+  const canonical = normalizeBrPhone(raw)
+  if (!canonical) return []
+  const keys = [canonical]
+  if (canonical.startsWith('55') && (canonical.length === 12 || canonical.length === 13)) {
+    keys.push(canonical.slice(2))
+  }
+  return keys
+}
+
+/**
  * Compare two phone numbers accounting for trunk prefix differences.
  * e.g. "370063949836" (with trunk 0) matches "37063949836" (without trunk 0)
  * by comparing the last 8 digits.

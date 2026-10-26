@@ -1,12 +1,64 @@
 import { describe, expect, it } from "vitest";
 import {
+  brPhoneLookupKeys,
   isRecipientNotAllowedError,
   isValidE164,
+  normalizeBrPhone,
   normalizePhone,
   phoneVariants,
   phonesMatch,
   sanitizePhoneForMeta,
 } from "./phone-utils";
+
+describe("normalizeBrPhone", () => {
+  it("adds 55 to an 11-digit mobile typed without the country code", () => {
+    expect(normalizeBrPhone("(81) 99999-1234")).toBe("5581999991234");
+    expect(normalizeBrPhone("11999991234")).toBe("5511999991234");
+  });
+
+  it("adds 55 to a 10-digit landline", () => {
+    expect(normalizeBrPhone("(11) 3333-4444")).toBe("551133334444");
+  });
+
+  it("keeps numbers that already carry the 55", () => {
+    expect(normalizeBrPhone("5511999991234")).toBe("5511999991234");
+    expect(normalizeBrPhone("+55 (11) 99999-1234")).toBe("5511999991234");
+    expect(normalizeBrPhone("551133334444")).toBe("551133334444");
+  });
+
+  it("decides by length, never by prefix: DDD 55 still gets the country code", () => {
+    // Santa Maria/RS — começa com 55 mas é DDD, não DDI.
+    expect(normalizeBrPhone("55999221234")).toBe("5555999221234");
+  });
+
+  it("drops a trunk 0 before the DDD", () => {
+    expect(normalizeBrPhone("011999991234")).toBe("5511999991234");
+  });
+
+  it("trusts a + prefix as an international number", () => {
+    expect(normalizeBrPhone("+1 415 555 1212")).toBe("14155551212");
+    expect(normalizeBrPhone("+351 912 345 678")).toBe("351912345678");
+  });
+
+  it("returns empty for empty input", () => {
+    expect(normalizeBrPhone("")).toBe("");
+  });
+});
+
+describe("brPhoneLookupKeys", () => {
+  it("returns the canonical key first and the legacy no-55 key second", () => {
+    expect(brPhoneLookupKeys("81999991234")).toEqual(["5581999991234", "81999991234"]);
+    expect(brPhoneLookupKeys("+55 81 99999-1234")).toEqual(["5581999991234", "81999991234"]);
+  });
+
+  it("returns only the number itself for non-Brazilian numbers", () => {
+    expect(brPhoneLookupKeys("+1 415 555 1212")).toEqual(["14155551212"]);
+  });
+
+  it("returns nothing for empty input", () => {
+    expect(brPhoneLookupKeys("")).toEqual([]);
+  });
+});
 
 describe("sanitizePhoneForMeta", () => {
   it("strips +, spaces, and dashes leaving only digits", () => {

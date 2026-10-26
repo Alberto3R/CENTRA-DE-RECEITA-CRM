@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { normalizePhone } from '@/lib/whatsapp/phone-utils'
-import { decrypt } from '@/lib/whatsapp/encryption'
+import { brPhoneLookupKeys } from '@/lib/whatsapp/phone-utils'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
-import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
+import { engineSendTemplate } from '@/lib/automations/meta-send'
 import { marcarContatoComTag } from '@/lib/contacts/marcar-tag'
 import { extractAttribution } from '@/lib/attribution/extract'
 
@@ -11,7 +10,9 @@ import { extractAttribution } from '@/lib/attribution/extract'
 // POST /api/leads/[token] — captação de lead por formulário, self-service
 // por conta. O token na URL identifica a config (lead_capture_config):
 // conta + funil + etapa FIXA (1 form = 1 etapa). Cria/acha o contato
-// (dedup por telefone) e abre um negócio na etapa configurada.
+// (dedup por telefone, já com o 55) e abre um negócio na etapa configurada —
+// ou reaproveita o negócio aberto do mesmo contato no mesmo funil, quando a
+// pessoa preenche o formulário de novo.
 //
 // Paralelo ao gateway de pagamento. NÃO substitui /api/leads (fluxo por
 // env da Sales 3R/AUGRA, com gate de qualificação) — este é o caminho novo,
@@ -32,6 +33,45 @@ function admin() {
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null
+}
+
+/** Corpo do template com {{1}}, {{2}}… trocados — vira o balão no inbox. */
+function renderBody(body: string | null | undefined, params: string[]): string | null {
+  if (!body) return null
+  return body.replace(/\{\{(\d+)\}\}/g, (m, n) => params[Number(n) - 1] ?? m)
+}
+
+/**
+ * Conversa do contato neste canal: a mais recente, ou uma nova. A boas-vindas
+ * precisa de conversa para ficar registrada no inbox — sem ela o vendedor não
+ * vê o que o lead recebeu. Corrida com o webhook: o índice único (migração
+ * 119) recusa a duplicata e a gente relê.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function findOrCreateConversation(db: any, accountId: string, userId: string, contactId: string, channelId: string) {
+  const find = () =>
+    db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .eq('channel_id', channelId)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
+  const { data: existing } = await find()
+  if (existing) return existing.id as string
+  const { data: created, error } = await db
+    .from('conversations')
+    .insert({ account_id: accountId, user_id: userId, contact_id: contactId, channel_id: channelId })
+    .select('id')
+    .single()
+  if (created) return created.id as string
+  if (error) {
+    const { data: raced } = await find()
+    if (raced) return raced.id as string
+  }
+  return null
 }
 
 export async function POST(
@@ -57,10 +97,16 @@ export async function POST(
     return NextResponse.json({ ok: false, error: 'invalid json' }, { status: 400 })
   }
 
-  const name = str(a.nome) ?? str(a.name) ?? 'Lead (formulário)'
+  const givenName = str(a.nome) ?? str(a.name)
+  const name = givenName ?? 'Lead (formulário)'
   const phoneRaw = str(a.phone_e164) ?? str(a.whatsapp) ?? str(a.telefone) ?? str(a.phone)
   if (!phoneRaw) return NextResponse.json({ ok: false, error: 'missing phone' }, { status: 400 })
-  const phone = normalizePhone(phoneRaw)
+  // Formulário brasileiro manda "(81) 99999-1234": sem o 55 a Meta lê o DDD
+  // como país e o lead nunca recebe nada. A 1ª chave é a canônica (com 55);
+  // a 2ª acha o contato gravado antes desta correção, ainda sem o 55.
+  const phoneKeys = brPhoneLookupKeys(phoneRaw)
+  const phone = phoneKeys[0]
+  if (!phone) return NextResponse.json({ ok: false, error: 'missing phone' }, { status: 400 })
   const email = str(a.email)
 
   const { data: acc } = await db
@@ -85,27 +131,44 @@ export async function POST(
     stageId = first?.id ?? null
   }
 
-  // Contato — dedup por phone_normalized (mesma chave do resto do CRM).
+  // Contato — dedup por phone_normalized (mesma chave do resto do CRM),
+  // pela forma canônica e pela antiga sem 55. Se só existir a antiga, ela
+  // ganha o 55 aqui, para a resposta do lead no WhatsApp cair nela.
   let contactId: string
-  const { data: existing } = await db
-    .from('contacts')
-    .select('id, name, email')
-    .eq('account_id', cfg.account_id)
-    .eq('phone_normalized', phone)
-    .maybeSingle()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const findByKeys = async (): Promise<any | null> => {
+    const { data: rows } = await db
+      .from('contacts')
+      .select('id, name, email, phone_normalized')
+      .eq('account_id', cfg.account_id)
+      .in('phone_normalized', phoneKeys)
+    const list = (rows ?? []) as Array<{ phone_normalized: string }>
+    list.sort((x, y) => phoneKeys.indexOf(x.phone_normalized) - phoneKeys.indexOf(y.phone_normalized))
+    return list[0] ?? null
+  }
+  const existing = await findByKeys()
   if (existing) {
     contactId = existing.id
     const patch: Record<string, string> = {}
-    if (!existing.name && name) patch.name = name
+    if (!existing.name && givenName) patch.name = givenName
     if (!existing.email && email) patch.email = email
-    if (Object.keys(patch).length) await db.from('contacts').update(patch).eq('id', contactId)
+    if (existing.phone_normalized !== phone) patch.phone = phone
+    if (Object.keys(patch).length) {
+      const { error: upErr } = await db.from('contacts').update(patch).eq('id', contactId)
+      // Já existe outro contato com o número canônico (índice único): deixa o
+      // telefone como está e grava só o resto.
+      if (upErr && patch.phone) {
+        delete patch.phone
+        if (Object.keys(patch).length) await db.from('contacts').update(patch).eq('id', contactId)
+      }
+    }
   } else {
     const { data: created, error: cErr } = await db
       .from('contacts')
       .insert({
         account_id: cfg.account_id,
         user_id: ownerId,
-        phone: phoneRaw,
+        phone,
         name,
         email,
         company: str(a.empresa) ?? str(a.segmento),
@@ -114,12 +177,7 @@ export async function POST(
       .single()
     if (cErr || !created) {
       // corrida de dedup: re-busca
-      const { data: again } = await db
-        .from('contacts')
-        .select('id')
-        .eq('account_id', cfg.account_id)
-        .eq('phone_normalized', phone)
-        .maybeSingle()
+      const again = await findByKeys()
       if (!again) return NextResponse.json({ ok: false, error: 'contact insert failed' }, { status: 500 })
       contactId = again.id
     } else {
@@ -135,23 +193,39 @@ export async function POST(
     console.error('[leads/token] tag falhou', e)
   }
 
-  // Negócio na etapa fixa da config.
-  const { data: deal } = await db
+  // Negócio: quem preenche de novo já tem um aberto neste funil — reaproveita
+  // em vez de abrir outro (um lead chegou a ter 4 negócios iguais). O reenvio
+  // fica no histórico do negócio. Senão, abre na etapa fixa da config.
+  const { data: openDeal } = await db
     .from('deals')
-    .insert({
-      account_id: cfg.account_id,
-      user_id: ownerId,
-      pipeline_id: cfg.pipeline_id,
-      stage_id: stageId,
-      contact_id: contactId,
-      title: `${name} — Formulário`,
-      status: 'open',
-      currency: acc?.default_currency ?? 'BRL',
-      notes: str(a.mensagem) ? `Formulário: ${str(a.mensagem)}` : null,
-    })
     .select('id')
-    .single()
-  const dealId = deal?.id ?? null
+    .eq('account_id', cfg.account_id)
+    .eq('contact_id', contactId)
+    .eq('pipeline_id', cfg.pipeline_id)
+    .eq('status', 'open')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  const reused = Boolean(openDeal?.id)
+  let dealId: string | null = openDeal?.id ?? null
+  if (!reused) {
+    const { data: deal } = await db
+      .from('deals')
+      .insert({
+        account_id: cfg.account_id,
+        user_id: ownerId,
+        pipeline_id: cfg.pipeline_id,
+        stage_id: stageId,
+        contact_id: contactId,
+        title: `${name} — Formulário`,
+        status: 'open',
+        currency: acc?.default_currency ?? 'BRL',
+        notes: str(a.mensagem) ? `Formulário: ${str(a.mensagem)}` : null,
+      })
+      .select('id')
+      .single()
+    dealId = deal?.id ?? null
+  }
 
   // Atribuição (UTMs + payload bruto) — best-effort, nunca derruba a resposta.
   // UTM/fbclid vêm do corpo ou, se a landing não mandar, da query string da
@@ -170,55 +244,73 @@ export async function POST(
     console.error('[leads/token] attribution falhou', e)
   }
 
-  // Enriquece o evento 'created' do histórico (deal_events, migration 081) com
-  // origem/UTM/payload — vira o "Negócio criado via integração → Mostrar dados".
+  // Histórico do negócio (deal_events, migration 081) com origem/UTM/payload.
+  // Negócio novo: enriquece o evento 'created' — vira o "Negócio criado via
+  // integração → Mostrar dados". Reenvio: registra 'form_resubmitted'.
   // Best-effort: nunca derruba a resposta.
   if (dealId) {
+    const metadata = {
+      integration: cfg.name ?? 'Captação de lead',
+      origem: str(a.origem) ?? 'form',
+      utm_source: attr.utm_source,
+      utm_medium: attr.utm_medium,
+      utm_campaign: attr.utm_campaign,
+      utm_content: attr.utm_content,
+      utm_term: attr.utm_term,
+      landing_url: attr.landing_url,
+      payload: a,
+    }
     try {
-      await db
-        .from('deal_events')
-        .update({
-          type: 'created_via_integration',
-          metadata: {
-            integration: cfg.name ?? 'Captação de lead',
-            origem: str(a.origem) ?? 'form',
-            utm_source: attr.utm_source,
-            utm_medium: attr.utm_medium,
-            utm_campaign: attr.utm_campaign,
-            utm_content: attr.utm_content,
-            utm_term: attr.utm_term,
-            landing_url: attr.landing_url,
-            payload: a,
-          },
+      if (reused) {
+        await db.from('deal_events').insert({
+          deal_id: dealId,
+          account_id: cfg.account_id,
+          type: 'form_resubmitted',
+          metadata,
         })
-        .eq('deal_id', dealId)
-        .eq('type', 'created')
+      } else {
+        await db
+          .from('deal_events')
+          .update({ type: 'created_via_integration', metadata })
+          .eq('deal_id', dealId)
+          .eq('type', 'created')
+      }
     } catch (e) {
-      console.error('[leads/token] deal_event enrich falhou', e)
+      console.error('[leads/token] deal_event falhou', e)
     }
   }
 
-  // Mensagem de abertura (template aprovado), se configurada — best-effort.
-  if (cfg.welcome_template) {
+  // Mensagem de abertura (template aprovado), se configurada — só para lead
+  // novo (quem reenvia o formulário não recebe de novo). Sai pelo mesmo
+  // caminho das automações, que grava o balão na conversa: o vendedor vê no
+  // inbox o que o lead recebeu. Best-effort.
+  let welcomeSent = false
+  if (cfg.welcome_template && !reused) {
     try {
       const wa = await resolveChannelConfig(db, cfg.account_id)
-      if (wa?.phone_number_id && wa?.access_token) {
+      if (wa?.id) {
         const { data: tpl } = await db
           .from('message_templates')
-          .select('status, language')
+          .select('status, language, body_text')
           .eq('channel_id', wa.id)
           .eq('name', cfg.welcome_template)
           .maybeSingle()
         if (tpl?.status === 'APPROVED') {
-          const firstName = (name || '').trim().split(/\s+/)[0] || 'tudo bem'
-          await sendTemplateMessage({
-            phoneNumberId: wa.phone_number_id as string,
-            accessToken: decrypt(wa.access_token as string),
-            to: phone,
-            templateName: cfg.welcome_template,
-            language: (tpl.language as string) || 'pt_BR',
-            params: [firstName],
-          })
+          const conversationId = await findOrCreateConversation(db, cfg.account_id, ownerId, contactId, wa.id)
+          if (conversationId) {
+            const firstName = givenName?.split(/\s+/)[0] || 'tudo bem'
+            await engineSendTemplate({
+              accountId: cfg.account_id,
+              userId: ownerId,
+              conversationId,
+              contactId,
+              templateName: cfg.welcome_template,
+              language: (tpl.language as string) || 'pt_BR',
+              params: [firstName],
+              contentText: renderBody(tpl.body_text as string | null, [firstName]),
+            })
+            welcomeSent = true
+          }
         }
       }
     } catch (e) {
@@ -226,5 +318,8 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({ ok: true, contact_id: contactId, deal_id: dealId }, { status: 200 })
+  return NextResponse.json(
+    { ok: true, contact_id: contactId, deal_id: dealId, reused_deal: reused, welcome_sent: welcomeSent },
+    { status: 200 },
+  )
 }
