@@ -64,6 +64,7 @@ function statusLabel(v: string | null): string {
 const ICONS: Record<string, typeof Sparkles> = {
   created: Sparkles,
   created_via_integration: Webhook,
+  form_resubmitted: Webhook,
   stage_changed: ArrowRightLeft,
   assignee_changed: UserCog,
   status_changed: CircleCheck,
@@ -118,12 +119,16 @@ export function DealHistory({ dealId }: { dealId: string }) {
     switch (e.type) {
       case "created":
         return { title: "Negócio criado" };
-      case "created_via_integration": {
+      case "created_via_integration":
+      case "form_resubmitted": {
         const m = e.metadata ?? {};
         const integ = (m.integration as string) || "integração";
         const origem = (m.origem as string) || null;
         return {
-          title: `Negócio criado via ${integ}`,
+          title:
+            e.type === "form_resubmitted"
+              ? `Preencheu de novo: ${integ}`
+              : `Negócio criado via ${integ}`,
           body: (
             <div className="mt-1.5 space-y-1.5">
               {origem && (
