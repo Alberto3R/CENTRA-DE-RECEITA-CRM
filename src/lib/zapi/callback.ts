@@ -17,7 +17,13 @@ export interface ZapiReceivedCallback {
   instanceId?: string
   messageId?: string
   phone?: string
+  /** LID da conversa (…@lid): o id estável do contato no WhatsApp. */
   chatLid?: string | null
+  /** LID de quem mandou — no fromMe é o do próprio número conectado. */
+  senderLid?: string | null
+  /** Só em grupo: quem do grupo falou. */
+  participantPhone?: string | null
+  participantLid?: string | null
   fromMe?: boolean
   /** true quando a mensagem saiu pela própria API (nós). */
   fromApi?: boolean
@@ -91,10 +97,15 @@ export type ZapiCallback =
 /** Mensagem já traduzida, pronta para gravar. */
 export interface ZapiMessage {
   id: string
-  /** Cliente: telefone só com dígitos (ou o LID, quando a Z-API não tem o número). */
-  customer: string
+  /** Telefone do cliente, só dígitos. `null` quando a Z-API só mandou o LID —
+   *  o que acontece muito no eco do que o vendedor manda pelo celular. */
+  phone: string | null
+  /** LID do cliente ("171459523662078@lid"), quando veio. */
+  lid: string | null
   /** Nome que o cliente usa no WhatsApp ('' quando é o vendedor falando). */
   name: string
+  /** Nome da conversa no celular — no eco, é como o vendedor vê o cliente. */
+  chatName: string
   /** Mandada pelo vendedor no celular (não pelo CRM). */
   fromPhone: boolean
   /** Segundos, em string — o formato do `timestamp` da Cloud API. */
@@ -119,14 +130,42 @@ export interface ZapiMessage {
   } | null
 }
 
-function customerId(cb: ZapiReceivedCallback): string | null {
+/**
+ * O `phone` da Z-API é o id da CONVERSA: número, grupo ("…-group"), canal
+ * ("…@newsletter"), lista de transmissão ("…-broadcast") ou Status
+ * ("status@broadcast" — os stories dos contatos, que chegam sem `isGroup`
+ * nem `broadcast` e viravam um contato sem telefone por mensagem).
+ * Só número e LID são conversa 1:1.
+ */
+export function isOneToOneChatId(raw: string | null | undefined): boolean {
+  const id = (raw || '').trim().toLowerCase()
+  if (!id) return false
+  if (id.endsWith('-group') || id.endsWith('@g.us')) return false
+  if (id.endsWith('@newsletter')) return false
+  if (id.endsWith('-broadcast') || id.endsWith('@broadcast')) return false
+  if (id.includes('@') && !id.endsWith('@lid') && !id.endsWith('@s.whatsapp.net')) return false
+  return /\d/.test(id)
+}
+
+/** "171459523662078@lid" / "171459523662078" → "171459523662078@lid". */
+export function toLid(raw: string | null | undefined): string | null {
+  const id = (raw || '').trim().toLowerCase()
+  if (!id.endsWith('@lid')) return null
+  const digits = normalizePhone(id)
+  return digits ? `${digits}@lid` : null
+}
+
+/** Telefone e LID do cliente da conversa. Os dois podem vir, ou só um. */
+function customerIds(cb: ZapiReceivedCallback): { phone: string | null; lid: string | null } {
   const raw = (cb.phone || '').trim()
-  if (!raw) return null
-  // Grupo e canal já foram filtrados; LID (…@lid) fica como está — é o que a
-  // Z-API aceita de volta no envio quando não conhece o telefone.
-  if (raw.includes('@')) return raw
-  const digits = normalizePhone(raw)
-  return digits || null
+  const phoneIsLid = raw.toLowerCase().endsWith('@lid')
+  const phone = phoneIsLid ? null : normalizePhone(raw) || null
+  // No fromMe o senderLid é o do vendedor, não o do cliente.
+  const lid =
+    toLid(cb.chatLid) ??
+    (phoneIsLid ? toLid(raw) : null) ??
+    (cb.fromMe ? null : toLid(cb.senderLid))
+  return { phone, lid }
 }
 
 function contactCardText(c: NonNullable<ZapiReceivedCallback['contact']>): string {
@@ -138,9 +177,9 @@ function contactCardText(c: NonNullable<ZapiReceivedCallback['contact']>): strin
 
 /**
  * ReceivedCallback → mensagem do CRM. `null` = ignorar: grupo, canal, lista de
- * transmissão, resposta a status, aviso de sistema (ligação, grupo), mensagem
- * ainda cifrada ("aguardando mensagem") ou o eco do que o próprio CRM mandou
- * pela API (já está gravado).
+ * transmissão, Status, resposta a status, aviso de sistema (ligação, grupo),
+ * mensagem ainda cifrada ("aguardando mensagem"), o eco do que o próprio CRM
+ * mandou pela API (já está gravado) ou mensagem sem telefone nem LID.
  */
 export function parseZapiReceived(cb: ZapiReceivedCallback): ZapiMessage | null {
   if (cb.type !== 'ReceivedCallback') return null
@@ -148,13 +187,17 @@ export function parseZapiReceived(cb: ZapiReceivedCallback): ZapiMessage | null 
   if (cb.notification || cb.waitingMessage) return null
   if (cb.fromMe && cb.fromApi) return null
   if (!cb.messageId) return null
-  const customer = customerId(cb)
-  if (!customer) return null
+  // Grupo pode chegar sem isGroup: quem falou dentro dele vem em participant*.
+  if (!isOneToOneChatId(cb.phone) || cb.participantPhone || cb.participantLid) return null
+  const { phone, lid } = customerIds(cb)
+  if (!phone && !lid) return null
 
   const base: ZapiMessage = {
     id: cb.messageId,
-    customer,
+    phone,
+    lid,
     name: cb.fromMe ? '' : (cb.senderName || cb.chatName || '').trim(),
+    chatName: (cb.chatName || '').trim(),
     fromPhone: Boolean(cb.fromMe),
     timestamp: String(Math.floor((cb.momment ?? Date.now()) / 1000)),
     type: 'text',

@@ -56,6 +56,8 @@ export function isQrChannel(
 
 export interface ChannelContact {
   phone?: string | null
+  /** LID do WhatsApp (…@lid) — só o canal por QR code sabe mandar para ele. */
+  wa_lid?: string | null
   instagram_id?: string | null
   email?: string | null
   name?: string | null
@@ -140,10 +142,11 @@ export async function sendTextViaChannel(args: {
     // Desconectado, a Z-API aceita e deixa na fila: sairia horas depois, ou
     // nunca. Melhor falhar na hora.
     if (channel.status !== 'connected') throw new Error(QR_DESCONECTADO)
-    if (!contact.phone) throw new Error('contato sem telefone')
+    const to = contact.phone || contact.wa_lid
+    if (!to) throw new Error('contato sem telefone')
     const r = await sendZapiText({
       creds: zapiCredsFromChannel(channel),
-      phone: contact.phone,
+      phone: to,
       text,
     })
     return { providerMessageId: r.messageId }

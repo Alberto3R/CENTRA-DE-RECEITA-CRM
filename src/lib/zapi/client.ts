@@ -126,6 +126,23 @@ export async function updateEveryWebhook(
   })
 }
 
+// ── Contatos ─────────────────────────────────────────────────────────────
+
+/**
+ * LID ("…@lid") de um telefone, pelo "Is on WhatsApp?" da Z-API. O caminho
+ * contrário (LID → telefone) não existe: o WhatsApp esconde o número. É assim
+ * que o eco de uma conversa que só chega por LID acha o cliente certo.
+ * `null` quando o número não tem WhatsApp ou a Z-API não devolveu o LID.
+ */
+export async function lidOfPhone(creds: ZapiCreds, phone: string): Promise<string | null> {
+  const r = await zapiFetch<unknown>(creds, `phone-exists/${encodeURIComponent(phone)}`)
+  // A doc mostra ora um objeto, ora uma lista com um objeto.
+  const item = (Array.isArray(r) ? r[0] : r) as { exists?: boolean; lid?: string | null } | null
+  if (!item?.exists || !item.lid) return null
+  const digits = item.lid.replace(/\D/g, '')
+  return digits ? `${digits}@lid` : null
+}
+
 // ── Envio ────────────────────────────────────────────────────────────────
 
 export interface ZapiSendResult {

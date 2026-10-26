@@ -7,7 +7,7 @@
  * ?zapi=<segredo> (WhatsApp conectado por QR code, Z-API).
  */
 import { createHmac } from 'node:crypto'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { encrypt } from '@/lib/whatsapp/encryption'
 
 // ------------------------------------------------------------------
@@ -21,6 +21,7 @@ let seq = 0
 const UNIQUE: Record<string, string[][]> = {
   messages: [['conversation_id', 'message_id']],
   whatsapp_app_contacts: [['channel_id', 'phone']],
+  contacts: [['account_id', 'wa_lid']],
 }
 
 function violates(table: string, row: Row, ignoreId?: unknown): boolean {
@@ -41,6 +42,8 @@ function builder(table: string) {
   let limit = Infinity
   let head = false
   let onConflict: string[] = []
+  // `select('contact:contacts(*)')`: o embed do PostgREST.
+  let embedContact = false
   let orderBy: { col: string; asc: boolean; nullsFirst: boolean } | null = null
 
   const rows = () => (db[table] ??= [])
@@ -92,7 +95,13 @@ function builder(table: string) {
     return finish(sorted(matched).slice(0, limit))
   }
 
-  function finish(list: Row[]) {
+  function finish(rowsOut: Row[]) {
+    const list = embedContact
+      ? rowsOut.map((r) => ({
+          ...r,
+          contact: (db.contacts ?? []).find((c) => c.id === r.contact_id) ?? null,
+        }))
+      : rowsOut
     if (mode === 'many') return { data: list, error: null }
     // PostgREST: `.single()` e `.maybeSingle()` erram com 2+ linhas — foi isso
     // que fez o webhook abrir uma conversa nova a cada mensagem.
@@ -111,8 +120,9 @@ function builder(table: string) {
   }
 
   const b: Record<string, unknown> = {
-    select: (_cols?: string, opts?: { head?: boolean }) => {
+    select: (cols?: string, opts?: { head?: boolean }) => {
       if (opts?.head) head = true
+      if (cols?.includes('contact:contacts(')) embedContact = true
       return b
     },
     insert: (p: Row | Row[]) => ((op = 'insert'), (payload = p), b),
@@ -521,5 +531,135 @@ describe('Z-API (WhatsApp por QR code)', () => {
       vi.unstubAllGlobals()
       delete process.env.QR_ALERTA_ESPERA_MS
     }
+  })
+})
+
+// ------------------------------------------------------------------
+// Canal QR na vida real (MA Decorações, 21–26/out): Status virando
+// contato, eco do celular só com o LID e áudio sem transcrição.
+// ------------------------------------------------------------------
+
+const MICHELLE = '553189139932'
+const LID_MICHELLE = '171459523662078@lid'
+
+/** fetch falso: phone-exists da Z-API, áudio no bucket e o Scribe. */
+function stubRede(lids: Record<string, string> = {}) {
+  const calls: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input)
+      calls.push(url)
+      const pe = url.match(/\/phone-exists\/(\d+)$/)
+      if (pe) {
+        const lid = lids[pe[1]] ?? null
+        return new Response(JSON.stringify([{ exists: true, phone: pe[1], lid }]))
+      }
+      if (url.includes('api.elevenlabs.io')) {
+        return new Response(JSON.stringify({ text: 'quanto fica o sofá algarve de 2,20?' }))
+      }
+      if (url.startsWith('https://midia.z-api')) {
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'audio/ogg' } })
+      }
+      return new Response('{}', { status: 404 })
+    }),
+  )
+  return calls
+}
+
+describe('Z-API — Status, LID e áudio', () => {
+  beforeEach(() => {
+    process.env.ELEVENLABS_API_KEY = 'test-eleven'
+    agent.mockClear()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env.ELEVENLABS_API_KEY
+  })
+
+  it('Status dos contatos e grupo sem isGroup: nenhum contato, nenhuma conversa', async () => {
+    seedQr()
+    for (const [i, extra] of [
+      { phone: 'status@broadcast', senderName: 'Manu Marques' },
+      { phone: 'status@broadcast', senderName: 'Manu Marques', video: { videoUrl: 'https://v' }, text: undefined },
+      { phone: 'status@broadcast', senderName: 'Eliene' },
+      { phone: '120363019502650977-group', senderName: 'Camarano' },
+      { phone: '120363019502650977-group', participantPhone: '5531988887777' },
+    ].entries()) {
+      await zapiPost(recebida(`ST${i}`, extra))
+    }
+    expect(db.contacts).toHaveLength(0)
+    expect(db.conversations).toHaveLength(0)
+    expect(db.messages).toHaveLength(0)
+  })
+
+  it('cliente com telefone e LID: o eco que chega só com o LID cai na conversa dele', async () => {
+    seedQr()
+    stubRede()
+    await zapiPost(recebida('MI1', { phone: MICHELLE, chatLid: LID_MICHELLE, senderName: 'Michelle Gomes', text: { message: 'valor do sofá algarve?' } }))
+    expect(db.contacts[0]).toMatchObject({ phone: MICHELLE, wa_lid: LID_MICHELLE })
+
+    await zapiPost(recebida('MI2', { fromMe: true, phone: LID_MICHELLE, chatLid: LID_MICHELLE, senderLid: '999@lid', text: { message: 'Med 2.20x99x73 r$17397,00 por r$11.480,00' } }))
+    expect(db.contacts).toHaveLength(1)
+    expect(db.conversations).toHaveLength(1)
+    expect(db.messages.map((m) => m.sender_type)).toEqual(['customer', 'agent'])
+    expect(db.messages[1]).toMatchObject({ conversation_id: db.conversations[0].id, origin: 'app' })
+  })
+
+  it('LID que ninguém conhece: pergunta à Z-API o LID dos contatos recentes e acha o cliente', async () => {
+    seedQr()
+    // Michelle chegou antes, sem chatLid no payload.
+    await zapiPost(recebida('MI1', { phone: MICHELLE, senderName: 'Michelle Gomes' }))
+    const calls = stubRede({ [MICHELLE]: LID_MICHELLE })
+    await zapiPost(recebida('MI2', { fromMe: true, phone: LID_MICHELLE, text: { message: 'Couro legítimo' } }))
+
+    expect(calls.some((u) => u.endsWith(`/phone-exists/${MICHELLE}`))).toBe(true)
+    expect(db.contacts).toHaveLength(1)
+    expect(db.contacts[0]).toMatchObject({ phone: MICHELLE, wa_lid: LID_MICHELLE })
+    expect(db.conversations).toHaveLength(1)
+    expect(db.messages).toHaveLength(2)
+
+    // Daí em diante casa direto pelo LID, sem perguntar de novo.
+    calls.length = 0
+    await zapiPost(recebida('MI3', { fromMe: true, phone: LID_MICHELLE, text: { message: 'Ok' } }))
+    expect(calls.filter((u) => u.includes('phone-exists'))).toHaveLength(0)
+    expect(db.messages).toHaveLength(3)
+  })
+
+  it('LID sem dono: contato só com o LID (telefone vazio), que ganha o telefone depois', async () => {
+    seedQr()
+    stubRede()
+    const LID = '13924468584681@lid'
+    await zapiPost(recebida('EV1', { phone: LID, chatLid: LID, senderName: 'Evangeline', text: { message: 'data da entrega do sofá?' } }))
+    await zapiPost(recebida('EV2', { fromMe: true, phone: LID, chatName: 'Evangeline', text: { message: 'segunda olho pra você' } }))
+    expect(db.contacts).toHaveLength(1)
+    expect(db.contacts[0]).toMatchObject({ phone: null, wa_lid: LID, name: 'Evangeline' })
+    expect(db.conversations).toHaveLength(1)
+    // O agente responde pelo LID (a Z-API aceita).
+    expect(agent).toHaveBeenCalledWith(expect.objectContaining({ contactWaId: LID }))
+
+    await zapiPost(recebida('EV3', { phone: '553187359149', chatLid: LID, senderName: 'Evangeline' }))
+    expect(db.contacts).toHaveLength(1)
+    expect(db.contacts[0]).toMatchObject({ phone: '553187359149', wa_lid: LID })
+    expect(db.messages).toHaveLength(3)
+  })
+
+  it('áudio do cliente e do vendedor entram transcritos; o agente lê a transcrição', async () => {
+    seedQr()
+    stubRede()
+    await zapiPost(recebida('AU1', { phone: MICHELLE, chatLid: LID_MICHELLE, text: undefined, audio: { audioUrl: 'https://midia.z-api/a1.ogg' } }))
+    await zapiPost(recebida('AU2', { fromMe: true, phone: LID_MICHELLE, text: undefined, audio: { audioUrl: 'https://midia.z-api/a2.ogg' } }))
+    expect(db.messages).toHaveLength(2)
+    for (const m of db.messages) {
+      expect(m).toMatchObject({ content_type: 'audio', transcript: 'quanto fica o sofá algarve de 2,20?' })
+    }
+    expect(agent).toHaveBeenCalledWith(expect.objectContaining({ inboundText: 'quanto fica o sofá algarve de 2,20?' }))
+  })
+
+  it('transcrição fora do ar não perde o áudio', async () => {
+    seedQr()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('erro', { status: 500 })))
+    await zapiPost(recebida('AU3', { text: undefined, audio: { audioUrl: 'https://midia.z-api/a3.ogg' } }))
+    expect(db.messages[0]).toMatchObject({ content_type: 'audio', transcript: null })
   })
 })
