@@ -83,3 +83,38 @@ function diarizado(data: ScribeResponse): string {
   flush();
   return lines.join("\n");
 }
+
+/**
+ * Transcreve o áudio de um link (o arquivo já copiado para o bucket
+ * `chat-media`). Para o webhook: nunca lança — sem chave, link fora do ar,
+ * Scribe lento ou com erro, devolve `null` e a mensagem é gravada sem
+ * transcrição (o player continua funcionando).
+ */
+export async function transcribeAudioUrl(
+  url: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<string | null> {
+  if (!process.env.ELEVENLABS_API_KEY) return null;
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? 25_000);
+  try {
+    const res = await fetch(url, { signal });
+    if (!res.ok) return null;
+    const blob = new Blob([await res.arrayBuffer()], {
+      type: res.headers.get("content-type") || "audio/ogg",
+    });
+    if (blob.size === 0) return null;
+    const texto = await Promise.race([
+      transcribeAudio(blob, "voz.ogg"),
+      new Promise<never>((_, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      ),
+    ]);
+    return texto.trim() || null;
+  } catch (err) {
+    console.warn(
+      "[transcribe] áudio sem transcrição:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}

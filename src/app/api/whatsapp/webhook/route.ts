@@ -37,6 +37,8 @@ import {
   type ZapiMessage,
 } from '@/lib/zapi/callback'
 import { persistZapiMedia } from '@/lib/zapi/media'
+import { lidOfPhone, zapiCredsFromChannel } from '@/lib/zapi/client'
+import { transcribeAudioUrl } from '@/lib/ai/transcribe'
 import { registrarConexao, registrarQueda } from '@/lib/zapi/alerts'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
@@ -698,8 +700,11 @@ async function processMessage(
   // ao número certo (multi-canal).
   channelId: string,
   // preParsed: conteúdo já traduzido (Z-API traz a mídia como link pronto,
-  // sem passar pela Graph API da Meta).
-  opts: { runBots: boolean; preParsed?: ParsedContent } = { runBots: true }
+  // sem passar pela Graph API da Meta). contact: contato já resolvido (Z-API
+  // casa por LID, que não é telefone).
+  opts: { runBots: boolean; preParsed?: ParsedContent; contact?: ContactOutcome } = {
+    runBots: true,
+  }
 ) {
   // Fase 4 (BSUID): com WhatsApp usernames, o remetente pode chegar
   // identificado por um BSUID ("BR.13491208…") em vez do telefone. Olhamos
@@ -722,13 +727,15 @@ async function processMessage(
   }
 
   // Find or create contact
-  const contactOutcome = await findOrCreateContact(
-    accountId,
-    configOwnerUserId,
-    senderPhone,
-    contactName,
-    senderBsuid
-  )
+  const contactOutcome =
+    opts.contact ??
+    (await findOrCreateContact(
+      accountId,
+      configOwnerUserId,
+      senderPhone,
+      contactName,
+      senderBsuid
+    ))
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
 
@@ -755,7 +762,7 @@ async function processMessage(
   if (await messageAlreadyStored(conversation.id, message.id)) return
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
+  const { contentText, mediaUrl, mediaType, interactiveReplyId, transcript = null } =
     opts.preParsed ?? (await parseMessageContent(message, accessToken))
 
   // Resolve swipe-reply context if present. A missing parent is fine —
@@ -823,6 +830,7 @@ async function processMessage(
     // the column; null for every other content_type so existing inserts
     // behave identically.
     interactive_reply_id: interactiveReplyId,
+    transcript,
   })
 
   if (msgError) {
@@ -938,7 +946,9 @@ async function processMessage(
   // message all exist before any step — including send_message — runs.
   // Fire-and-forget: a slow or failing automation must not block the
   // webhook's 200 OK response to Meta.
-  const inboundText = contentText ?? message.text?.body ?? ''
+  // Áudio transcrito conta como texto: o agente e as palavras-chave leem o
+  // que o cliente falou.
+  const inboundText = contentText ?? message.text?.body ?? transcript ?? ''
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
@@ -1008,6 +1018,8 @@ interface ParsedContent {
    * tap with the right affordance. Null for everything else.
    */
   interactiveReplyId: string | null
+  /** Áudio já transcrito (canal QR) → `messages.transcript`. */
+  transcript?: string | null
 }
 
 async function parseMessageContent(
@@ -1506,21 +1518,23 @@ async function resolveCoexConversation(channel: CoexChannel, rawCustomerId: stri
 async function handleMessageEcho(
   channel: CoexChannel,
   echo: CoexMessage,
-  // Z-API (QR code): o conteúdo já vem traduzido, com a mídia em link pronto.
+  // Z-API (QR code): o conteúdo já vem traduzido, com a mídia em link pronto,
+  // e a conversa já resolvida (o eco pode chegar só com o LID do cliente).
   preParsed?: ParsedContent,
+  zapiResolved?: { contact: ContactRow; conversation: { id: string } },
 ) {
-  if (!echo?.id || !echo.to) return
+  if (!echo?.id || (!echo.to && !zapiResolved)) return
   // Reação dada pelo celular: fora do escopo da v1 (não é mensagem).
   if (echo.type === 'reaction') return
 
-  const resolved = await resolveCoexConversation(channel, echo.to)
+  const resolved = zapiResolved ?? (await resolveCoexConversation(channel, echo.to ?? ''))
   if (!resolved) return
   const { contact, conversation } = resolved
 
   if (await messageAlreadyStored(conversation.id, echo.id)) return
 
   const message = echo as unknown as WhatsAppMessage
-  const { contentText, mediaUrl, interactiveReplyId } =
+  const { contentText, mediaUrl, interactiveReplyId, transcript = null } =
     preParsed ?? (await parseMessageContent(message, channel.accessToken))
   const replyTo = message.context?.id
     ? await lookupInternalIdByMetaId(message.context.id, conversation.id)
@@ -1539,6 +1553,7 @@ async function handleMessageEcho(
     created_at: createdAt,
     reply_to_message_id: replyTo,
     interactive_reply_id: interactiveReplyId,
+    transcript,
   })
   if (error) {
     if (!isUniqueViolation(error)) console.error('[coex] echo não gravado:', error.message)
@@ -1750,6 +1765,11 @@ async function handleAppStateSync(channel: CoexChannel, value: CoexistenceValue)
 // processMessage (contato, conversa, funil, fluxos, automações, agente);
 // enviada pelo celular → handleMessageEcho (vira "pelo celular" e pausa a
 // IA); status → handleStatusUpdate.
+//
+// Quem é o cliente: a Z-API manda o telefone, o LID (…@lid, id privado do
+// WhatsApp) ou os dois. O eco do que o vendedor manda pelo celular muitas
+// vezes vem SÓ com o LID — e LID não vira telefone. Por isso o contato guarda
+// o LID (`contacts.wa_lid`, migration 122) e é procurado por ele primeiro.
 // ============================================================
 
 interface ZapiChannelRow {
@@ -1757,14 +1777,19 @@ interface ZapiChannelRow {
   account_id: string
   user_id: string
   qr_instance_id: string | null
+  access_token: string | null
+  qr_client_token: string | null
 }
+
+/** Quantos contatos recentes do canal perguntamos à Z-API por evento. */
+const LID_LEARN_LIMIT = 15
 
 async function handleZapiPost(request: Request, secret: string) {
   if (!secret) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const { data: channel, error } = await supabaseAdmin()
     .from('whatsapp_config')
-    .select('id, account_id, user_id, qr_instance_id')
+    .select('id, account_id, user_id, qr_instance_id, access_token, qr_client_token')
     .eq('qr_webhook_secret', secret)
     .eq('connection_mode', 'qr')
     .maybeSingle()
@@ -1804,10 +1829,10 @@ function zapiParsedContent(msg: ZapiMessage): ParsedContent {
 }
 
 /** ZapiMessage → o shape de mensagem da Cloud API que processMessage lê. */
-function zapiToWhatsAppMessage(msg: ZapiMessage): WhatsAppMessage {
+function zapiToWhatsAppMessage(msg: ZapiMessage, from: string): WhatsAppMessage {
   return {
     id: msg.id,
-    from: msg.customer,
+    from,
     timestamp: msg.timestamp,
     type: msg.type,
     ...(msg.type === 'text' ? { text: { body: msg.contentText ?? '' } } : {}),
@@ -1817,6 +1842,144 @@ function zapiToWhatsAppMessage(msg: ZapiMessage): WhatsAppMessage {
       ? { reaction: { message_id: msg.reaction.targetId, emoji: msg.reaction.emoji } }
       : {}),
   }
+}
+
+async function findContactByLid(accountId: string, lid: string): Promise<ContactRow | null> {
+  const { data } = await supabaseAdmin()
+    .from('contacts')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('wa_lid', lid)
+    .limit(1)
+    .maybeSingle()
+  return data ?? null
+}
+
+/** Grava o LID no contato (se ainda não tiver). Outro contato com o mesmo LID
+ *  (índice único) = já está ligado, não mexe. */
+async function linkLid(contact: ContactRow, lid: string) {
+  if (contact.wa_lid) return
+  const { error } = await supabaseAdmin()
+    .from('contacts')
+    .update({ wa_lid: lid, updated_at: new Date().toISOString() })
+    .eq('id', contact.id)
+    .is('wa_lid', null)
+  if (error && !isUniqueViolation(error)) console.warn('[zapi] LID não gravado:', error.message)
+  if (!error) contact.wa_lid = lid
+}
+
+/**
+ * LID desconhecido: pergunta à Z-API o LID dos contatos (com telefone) que
+ * falaram por último neste canal e ainda não têm LID. Telefone → LID existe
+ * ("Is on WhatsApp?"); LID → telefone não. Devolve o contato dono do LID.
+ */
+async function learnLidFromRecentContacts(
+  channel: ZapiChannelRow,
+  lid: string,
+): Promise<ContactRow | null> {
+  let creds
+  try {
+    creds = zapiCredsFromChannel(channel)
+  } catch {
+    return null
+  }
+  const { data: convs } = await supabaseAdmin()
+    .from('conversations')
+    .select('contact:contacts(*)')
+    .eq('account_id', channel.account_id)
+    .eq('channel_id', channel.id)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(50)
+  const candidates = ((convs ?? []) as { contact: ContactRow | null }[])
+    .map((c) => c.contact)
+    .filter((c): c is ContactRow => Boolean(c && c.phone && !c.wa_lid))
+    .slice(0, LID_LEARN_LIMIT)
+
+  for (const contact of candidates) {
+    let found: string | null
+    try {
+      found = await lidOfPhone(creds, normalizePhone(contact.phone))
+    } catch (err) {
+      console.warn('[zapi] phone-exists falhou:', err instanceof Error ? err.message : err)
+      return null
+    }
+    if (!found) continue
+    await linkLid(contact, found)
+    if (found === lid) return contact
+  }
+  return null
+}
+
+/**
+ * O contato do cliente da mensagem — nunca um contato sem telefone e sem
+ * LID, e nunca o LID no lugar do telefone. Ordem: pelo LID; pelo telefone
+ * (e liga o LID a ele); aprendendo o LID dos contatos recentes; por último,
+ * um contato só com LID (phone null, como o do Instagram), que ganha o
+ * telefone quando o cliente aparecer com ele.
+ */
+async function resolveZapiContact(
+  channel: ZapiChannelRow,
+  msg: ZapiMessage,
+): Promise<ContactOutcome | null> {
+  const accountId = channel.account_id
+  // No eco, o nome da conversa é como o vendedor salvou o cliente: só serve
+  // para batizar um contato novo, nunca para renomear.
+  const inboundName = msg.fromPhone ? '' : msg.name
+
+  if (msg.lid) {
+    const byLid = await findContactByLid(accountId, msg.lid)
+    if (byLid) {
+      const patch: Record<string, unknown> = {}
+      if (msg.phone && !byLid.phone) patch.phone = msg.phone
+      if (inboundName && inboundName !== byLid.name) patch.name = inboundName
+      if (Object.keys(patch).length > 0) {
+        const { error } = await supabaseAdmin()
+          .from('contacts')
+          .update({ ...patch, updated_at: new Date().toISOString() })
+          .eq('id', byLid.id)
+        if (!error) Object.assign(byLid, patch)
+        // Telefone já é de outro contato: os dois ficam até o saneamento juntar.
+        else console.warn('[zapi] contato do LID não atualizado:', error.message)
+      }
+      return { contact: byLid, wasCreated: false }
+    }
+  }
+
+  if (msg.phone) {
+    const outcome = await findOrCreateContact(
+      accountId,
+      channel.user_id,
+      msg.phone,
+      inboundName || (msg.fromPhone ? msg.chatName : ''),
+    )
+    if (outcome && msg.lid) await linkLid(outcome.contact, msg.lid)
+    return outcome
+  }
+
+  if (!msg.lid) return null
+  const learned = await learnLidFromRecentContacts(channel, msg.lid)
+  if (learned) return { contact: learned, wasCreated: false }
+
+  const { data, error } = await supabaseAdmin()
+    .from('contacts')
+    .insert({
+      account_id: accountId,
+      user_id: channel.user_id,
+      phone: null,
+      name: inboundName || msg.chatName || 'Contato do WhatsApp',
+      wa_lid: msg.lid,
+    })
+    .select()
+    .single()
+  if (error) {
+    if (isUniqueViolation(error)) {
+      const raced = await findContactByLid(accountId, msg.lid)
+      if (raced) return { contact: raced, wasCreated: false }
+    }
+    console.error('[zapi] contato por LID não criado:', error.message)
+    return null
+  }
+  return { contact: data, wasCreated: true }
 }
 
 async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
@@ -1847,6 +2010,8 @@ async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
     case 'ReceivedCallback': {
       const msg = parseZapiReceived(cb)
       if (!msg) return
+      const contact = await resolveZapiContact(channel, msg)
+      if (!contact) return
       // A Z-API apaga a mídia em 30 dias: copia para o bucket do chat.
       if (msg.mediaUrl) {
         msg.mediaUrl = await persistZapiMedia({
@@ -1856,9 +2021,25 @@ async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
           url: msg.mediaUrl,
         })
       }
+      const content = zapiParsedContent(msg)
+      // Áudio — do cliente e do vendedor (que no celular responde quase tudo
+      // por voz) — entra transcrito: sem isso não dá para medir resposta,
+      // follow-up nem deixar o agente ler o que o cliente pediu.
+      if (msg.type === 'audio' && msg.mediaUrl) {
+        content.transcript = await transcribeAudioUrl(msg.mediaUrl)
+      }
+      // Para onde responder: telefone; sem ele, o LID (a Z-API aceita).
+      const recipient: string = contact.contact.phone || contact.contact.wa_lid
 
       if (msg.fromPhone) {
         // O vendedor respondeu pelo celular: entra como atendente e pausa a IA.
+        const conversation = await findOrCreateConversation(
+          channel.account_id,
+          channel.user_id,
+          contact.contact.id,
+          channel.id,
+        )
+        if (!conversation) return
         await handleMessageEcho(
           {
             id: channel.id,
@@ -1869,18 +2050,19 @@ async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
           {
             id: msg.id,
             from: '',
-            to: msg.customer,
+            to: recipient,
             timestamp: msg.timestamp,
             type: msg.type,
           },
-          zapiParsedContent(msg),
+          content,
+          { contact: contact.contact, conversation },
         )
         return
       }
 
       await processMessage(
-        zapiToWhatsAppMessage(msg),
-        { profile: { name: msg.name }, wa_id: msg.customer },
+        zapiToWhatsAppMessage(msg, recipient),
+        { profile: { name: msg.name }, wa_id: recipient },
         channel.account_id,
         channel.user_id,
         // Sem token/número da Meta: o envio (agente, fluxos) resolve o canal e
@@ -1888,7 +2070,7 @@ async function processZapiCallback(channel: ZapiChannelRow, cb: ZapiCallback) {
         '',
         '',
         channel.id,
-        { runBots: true, preParsed: zapiParsedContent(msg) },
+        { runBots: true, preParsed: content, contact },
       )
       return
     }

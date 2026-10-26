@@ -20,7 +20,7 @@ const base = {
 describe('parseZapiReceived', () => {
   it('texto: telefone em dígitos, timestamp em segundos', () => {
     const m = parseZapiReceived({ ...base, text: { message: 'oi' } })
-    expect(m).toMatchObject({ id: 'M1', customer: '5531997729804', name: 'Thais', type: 'text', contentText: 'oi', timestamp: '1700000000' })
+    expect(m).toMatchObject({ id: 'M1', phone: '5531997729804', lid: null, name: 'Thais', type: 'text', contentText: 'oi', timestamp: '1700000000' })
   })
 
   it('imagem e documento trazem o link e a legenda/nome', () => {
@@ -71,9 +71,34 @@ describe('parseZapiReceived', () => {
     expect(parseZapiReceived({ ...base, messageId: undefined })).toBeNull()
   })
 
-  it('LID (sem telefone) fica como está', () => {
-    expect(parseZapiReceived({ ...base, phone: '81896604192873@lid', text: { message: 'oi' } })?.customer)
-      .toBe('81896604192873@lid')
+  it('Status (stories), grupo sem isGroup, canal e lista de transmissão são ignorados', () => {
+    // Era isto que abria um contato sem telefone por mensagem (Eliene, Manu…).
+    expect(parseZapiReceived({ ...base, phone: 'status@broadcast', text: { message: 'URGENTE' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, phone: '120363019502650977-group', text: { message: 'x' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, phone: '120363019502650977@g.us', text: { message: 'x' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, phone: '5531999999999@newsletter', text: { message: 'x' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, phone: '1774895799-broadcast', text: { message: 'x' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, participantPhone: '5531988887777', text: { message: 'x' } })).toBeNull()
+    expect(parseZapiReceived({ ...base, phone: '', text: { message: 'x' } })).toBeNull()
+  })
+
+  it('telefone e LID: os dois quando vêm', () => {
+    expect(parseZapiReceived({ ...base, chatLid: '171459523662078@lid', text: { message: 'oi' } }))
+      .toMatchObject({ phone: '5531997729804', lid: '171459523662078@lid' })
+    expect(parseZapiReceived({ ...base, senderLid: '171459523662078@lid', text: { message: 'oi' } }))
+      .toMatchObject({ phone: '5531997729804', lid: '171459523662078@lid' })
+  })
+
+  it('só LID: o LID nunca vira telefone', () => {
+    expect(parseZapiReceived({ ...base, phone: '81896604192873@lid', text: { message: 'oi' } }))
+      .toMatchObject({ phone: null, lid: '81896604192873@lid' })
+  })
+
+  it('eco (fromMe): o senderLid é do vendedor, não do cliente', () => {
+    expect(parseZapiReceived({ ...base, fromMe: true, senderLid: '999@lid', chatName: 'Michelle', text: { message: 'r$11.480' } }))
+      .toMatchObject({ phone: '5531997729804', lid: null, name: '', chatName: 'Michelle' })
+    expect(parseZapiReceived({ ...base, fromMe: true, phone: '171459523662078@lid', senderLid: '999@lid', text: { message: 'x' } }))
+      .toMatchObject({ phone: null, lid: '171459523662078@lid' })
   })
 })
 

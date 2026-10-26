@@ -269,7 +269,10 @@ export async function POST(request: Request) {
       })
     }
 
-    if (!contact?.phone) {
+    // Contato que só chegou pelo LID do WhatsApp (canal por QR code): sem
+    // telefone, a Z-API entrega pelo próprio LID.
+    const lid: string | null = contact?.phone ? null : (contact?.wa_lid ?? null)
+    if (!contact?.phone && !lid) {
       return NextResponse.json(
         { error: 'Contact phone number not found' },
         { status: 400 }
@@ -277,8 +280,8 @@ export async function POST(request: Request) {
     }
 
     // Sanitize and validate phone
-    const sanitizedPhone = sanitizePhoneForMeta(contact.phone)
-    if (!isValidE164(sanitizedPhone)) {
+    const sanitizedPhone = lid ?? sanitizePhoneForMeta(contact.phone)
+    if (!lid && !isValidE164(sanitizedPhone)) {
       return NextResponse.json(
         { error: 'Invalid phone number format' },
         { status: 400 }
@@ -303,6 +306,12 @@ export async function POST(request: Request) {
     // WhatsApp conectado por QR code (Z-API): texto e mídia saem pela
     // instância do canal. Modelo da Meta não existe fora da API oficial.
     const qr = isQrChannel(config) ? zapiCredsFromChannel(config) : null
+    if (lid && !qr) {
+      return NextResponse.json(
+        { error: 'Este contato não tem telefone — só dá para responder pelo WhatsApp conectado por QR code.' },
+        { status: 400 },
+      )
+    }
     if (qr && config.status !== 'connected') {
       return NextResponse.json({ error: QR_DESCONECTADO }, { status: 409 })
     }
@@ -473,7 +482,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      const variants = phoneVariants(sanitizedPhone)
+      const variants = lid ? [lid] : phoneVariants(sanitizedPhone)
       let lastError: unknown = null
 
       for (const variant of variants) {
