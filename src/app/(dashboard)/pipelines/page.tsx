@@ -10,6 +10,8 @@ import { PipelineAnalytics } from "@/components/pipelines/pipeline-analytics";
 import { NovoFunilDialog } from "@/components/pipelines/novo-funil-dialog";
 import { ImportarFunilDialog } from "@/components/pipelines/importar-funil-dialog";
 import { SaudeFunil } from "@/components/pipelines/saude-funil";
+import { ConversaLateral } from "@/components/pipelines/conversa-lateral";
+import { latestConversationId } from "@/components/pipelines/deal-card";
 import { aplicarModelo } from "@/lib/pipelines/aplicar-modelo";
 import { MODELO_PADRAO_ID, modeloPorId } from "@/lib/pipelines/modelos";
 import {
@@ -30,6 +32,19 @@ import { toast } from "sonner";
 import { useCan } from "@/hooks/use-can";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
+
+// Último funil aberto, por marca (cada conta tem os seus funis). Sem isso,
+// voltar para /pipelines sempre caía no funil mais antigo da conta.
+const ULTIMO_FUNIL_KEY = (accountId: string) => `wacrm:pipelines:ultimo:${accountId}`;
+
+function lerUltimoFunil(accountId: string | null): string | null {
+  if (!accountId) return null;
+  try {
+    return localStorage.getItem(ULTIMO_FUNIL_KEY(accountId));
+  } catch {
+    return null;
+  }
+}
 
 // Pipeline creation is admin-class (settings-tier write under
 // the new RLS); deal creation is operational and only requires
@@ -87,6 +102,9 @@ export default function PipelinesPage() {
   const [dealFormOpen, setDealFormOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [defaultStageId, setDefaultStageId] = useState<string>("");
+
+  // Conversa aberta no painel lateral (id do negócio).
+  const [conversaDealId, setConversaDealId] = useState<string | null>(null);
 
   // Guard against double-seeding (React StrictMode double-effect in dev).
   const seedAttempted = useRef(false);
@@ -170,9 +188,12 @@ export default function PipelinesPage() {
       if (cancelled) return;
       setPipelines(list);
       if (list.length > 0) {
-        setSelectedPipelineId((prev) =>
-          prev && list.some((p) => p.id === prev) ? prev : list[0].id,
-        );
+        const ultimo = lerUltimoFunil(accountId);
+        setSelectedPipelineId((prev) => {
+          if (prev && list.some((p) => p.id === prev)) return prev;
+          if (ultimo && list.some((p) => p.id === ultimo)) return ultimo;
+          return list[0].id;
+        });
       } else {
         setSelectedPipelineId("");
       }
@@ -181,7 +202,17 @@ export default function PipelinesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadPipelines, seedDefaultPipeline]);
+  }, [loadPipelines, seedDefaultPipeline, accountId]);
+
+  // Guarda o funil escolhido para a próxima visita à página.
+  useEffect(() => {
+    if (!accountId || !selectedPipelineId) return;
+    try {
+      localStorage.setItem(ULTIMO_FUNIL_KEY(accountId), selectedPipelineId);
+    } catch {
+      // Navegador sem storage (modo privado): só não lembra.
+    }
+  }, [accountId, selectedPipelineId]);
 
   // Load stages + deals whenever selected pipeline changes.
   // Clearing on no-selection is a legitimate sync with URL/prop
@@ -360,6 +391,24 @@ export default function PipelinesPage() {
     setDefaultStageId(deal.stage_id);
     setDealFormOpen(true);
   }, []);
+
+  const handleOpenConversation = useCallback((deal: Deal) => {
+    setConversaDealId(deal.id);
+  }, []);
+
+  // Negócios da etapa do negócio aberto no painel, na ordem da coluna, só os
+  // que têm conversa — é o que as setas do painel percorrem.
+  const conversaStageId = deals.find((d) => d.id === conversaDealId)?.stage_id ?? null;
+  const conversaDeals = useMemo(
+    () =>
+      conversaStageId
+        ? boardDeals.filter(
+            (d) => d.stage_id === conversaStageId && latestConversationId(d) !== null,
+          )
+        : [],
+    [boardDeals, conversaStageId],
+  );
+  const conversaStageName = stages.find((s) => s.id === conversaStageId)?.name ?? "";
 
   async function handlePipelineCreated(pipelineId: string) {
     setSelectedPipelineId(pipelineId);
@@ -588,6 +637,7 @@ export default function PipelinesPage() {
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
+            onOpenConversation={handleOpenConversation}
           />
         </>
       )}
@@ -631,6 +681,14 @@ export default function PipelinesPage() {
           }}
         />
       )}
+
+      {/* Conversa do lead em painel lateral, navegável pela etapa */}
+      <ConversaLateral
+        deals={conversaDeals}
+        dealId={conversaDealId}
+        stageName={conversaStageName}
+        onDealChange={setConversaDealId}
+      />
 
       {/* Deal Form (Sheet) */}
       <DealForm
