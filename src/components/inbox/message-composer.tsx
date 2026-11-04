@@ -46,6 +46,10 @@ import {
   deleteAccountMedia,
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
+import {
+  imagemDaAreaDeTransferencia,
+  prepararImagemColada,
+} from "@/lib/inbox/imagem-colada";
 import { ReplyQuote } from "./reply-quote";
 import { AudioPlayer } from "./audio-player";
 
@@ -369,6 +373,23 @@ export function MessageComposer({
     [stageUpload],
   );
 
+  // Ctrl/Cmd+V com imagem (ex.: "Copiar imagem" num site) anexa como foto,
+  // igual ao WhatsApp Web. Texto colado segue o caminho normal do textarea.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (isInstagram || inputsDisabled || busy || recording) return;
+      const file = imagemDaAreaDeTransferencia(e.clipboardData);
+      if (!file) return;
+      e.preventDefault();
+      void prepararImagemColada(file, MEDIA_MAX_BYTES_BY_KIND.image)
+        .then((pronta) => stageUpload("image", pronta))
+        .catch((err) =>
+          toast.error(err instanceof Error ? err.message : "Não foi possível colar a imagem."),
+        );
+    },
+    [isInstagram, inputsDisabled, busy, recording, stageUpload],
+  );
+
   // ---- Voice recording (client-side Ogg/Opus, no server transcode) ---
 
   // The encoded Ogg/Opus file from opus-recorder → upload as an audio
@@ -487,7 +508,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="relative border-t border-border bg-card p-3">
+    <div className="relative border-t border-border bg-card p-3" onPaste={handlePaste}>
       {/* Menu de respostas rápidas. Ancorado acima do compositor; a
           seleção acontece no onMouseDown porque o onBlur do textarea
           fecharia o menu antes de um onClick chegar. */}
