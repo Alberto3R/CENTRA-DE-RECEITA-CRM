@@ -18,6 +18,8 @@ interface DealCardProps {
   deal: Deal;
   stage: PipelineStage | null;
   onEdit: (deal: Deal) => void;
+  /** Abre a conversa no painel lateral do funil, sem trocar de página. */
+  onOpenConversation?: (deal: Deal) => void;
   isOverlay?: boolean;
 }
 
@@ -33,7 +35,7 @@ function contactTags(deal: Deal): TagLite[] {
 // Conversa mais recente do contato, embutida no mesmo select
 // (`conversations(id, last_message_at)`). Se existir, o card leva pra ela
 // em vez de oferecer iniciar uma nova.
-function latestConversationId(deal: Deal): string | null {
+export function latestConversationId(deal: Deal): string | null {
   const convs = (deal.contact as unknown as {
     conversations?: { id: string; last_message_at: string | null }[];
   } | null)?.conversations;
@@ -57,7 +59,7 @@ function initials(name?: string, fallback?: string) {
   return source.charAt(0).toUpperCase();
 }
 
-export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
+export function DealCard({ deal, stage, onEdit, onOpenConversation, isOverlay }: DealCardProps) {
   const contactLabel = deal.contact?.name || deal.contact?.phone || "Sem contato";
   const assigneeLabel = deal.assignee?.full_name || null;
   const tags = contactTags(deal);
@@ -226,7 +228,21 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         >
           <WaCallButton contactId={deal.contact.id} compact />
           <TelnyxCallButton contactId={deal.contact.id} compact />
-          {conversationId ? (
+          {conversationId && onOpenConversation ? (
+            <button
+              type="button"
+              onClick={() => onOpenConversation(deal)}
+              title="Ver conversa"
+              aria-label="Ver conversa"
+              className={buttonVariants({
+                variant: "ghost",
+                size: "icon-sm",
+                className: "text-muted-foreground hover:text-primary",
+              })}
+            >
+              <MessageSquare className="h-4 w-4" />
+            </button>
+          ) : conversationId ? (
             <Link
               href={`/inbox?c=${conversationId}`}
               title="Abrir conversa"

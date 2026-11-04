@@ -330,6 +330,11 @@ export function MessageThread({
   // separate from the unread-reset effect so that incoming messages
   // arriving while the thread is open don't trigger a full refetch —
   // they only flip hasUnread, which only the reset effect listens to.
+  // Conversa cujas mensagens já estão na tela. O spinner só aparece ao
+  // abrir uma conversa: num resync (a cada 30 s, foco, reconexão) trocar a
+  // lista pelo spinner esvaziava a área de rolagem, o navegador zerava o
+  // scrollTop e quem estava lendo era jogado para o início da conversa.
+  const loadedConversationIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
 
@@ -337,7 +342,7 @@ export function MessageThread({
     let cancelled = false;
 
     (async () => {
-      setLoading(true);
+      if (loadedConversationIdRef.current !== conversationId) setLoading(true);
 
       const { data, error } = await supabase
         .from("messages")
@@ -351,6 +356,7 @@ export function MessageThread({
         console.error("Failed to fetch messages:", error);
       } else {
         onMessagesLoadedRef.current(data ?? []);
+        loadedConversationIdRef.current = conversationId;
       }
 
       if (!cancelled) setLoading(false);
