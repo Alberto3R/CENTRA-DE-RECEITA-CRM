@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { CURRENCIES } from "@/lib/currency";
+import { parseValorBR, previaValorBR, valorParaCampo } from "@/lib/valor-br";
 import { DEFAULT_LOSS_REASONS } from "@/lib/deals/loss-reasons";
 import type {
   Contact,
@@ -132,7 +133,7 @@ export function DealForm({
     setLostReasonOpen(false);
     if (deal) {
       setTitle(deal.title);
-      setValue(String(deal.value ?? ""));
+      setValue(valorParaCampo(deal.value));
       setCurrency(deal.currency || defaultCurrency);
       // contact_id is nullable when the contact has been deleted
       // (migration 004: ON DELETE SET NULL). "" means "no selection".
@@ -279,7 +280,7 @@ export function DealForm({
 
     const payload = {
       title: title.trim(),
-      value: parseFloat(value) || 0,
+      value: parseValorBR(value) ?? 0,
       currency,
       contact_id: contactId,
       pipeline_id: effectivePipelineId,
@@ -496,13 +497,21 @@ export function DealForm({
                 <div className="relative">
                   <DollarSign className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
-                    placeholder="0"
+                    placeholder="Ex.: 13.685,00"
                     className="border-border bg-muted pl-7 text-foreground"
                   />
                 </div>
+                {value.trim() !== "" && (
+                  <p className="text-xs text-muted-foreground">
+                    {parseValorBR(value) == null
+                      ? "Valor não reconhecido"
+                      : `Fica salvo como ${previaValorBR(parseValorBR(value) ?? 0, currency)}`}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label className="text-muted-foreground">Moeda</Label>
