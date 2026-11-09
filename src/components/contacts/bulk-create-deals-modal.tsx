@@ -7,6 +7,7 @@ import { Loader2, GitBranch } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { bulkCreateDeals } from "@/lib/deals/bulk-create";
+import { parseValorBR } from "@/lib/valor-br";
 import { PipelineStagePicker } from "@/components/pipelines/pipeline-stage-picker";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -99,7 +100,7 @@ export function BulkCreateDealsModal({
         accountId,
         userId: user.id,
         assignedTo: assignedTo || null,
-        value: parseFloat(valor.replace(",", ".")) || 0,
+        value: parseValorBR(valor) ?? 0,
         titlePrefix: prefixo,
         skipExisting: pularExistentes,
       });
