@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TagPicker, TagPills } from "@/components/contacts/tag-picker";
+import { ContactAdReferral } from "@/components/contacts/ad-referral-card";
 import { DealForm } from "@/components/pipelines/deal-form";
 import { format } from "date-fns";
 import {
@@ -302,6 +303,11 @@ export function ContactSidebar({ contact, inSheet = false }: ContactSidebarProps
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Anúncio de onde o lead veio */}
+          <div className="mt-4 empty:hidden">
+            <ContactAdReferral contactId={contact.id} />
           </div>
 
           {/* Divider */}

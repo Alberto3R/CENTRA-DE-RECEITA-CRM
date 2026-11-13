@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Loader2, Megaphone, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { adCardFromAttribution } from "@/lib/acquisition/ad-referral";
+import { AdReferralCard } from "./ad-referral-card";
 
 // Mostra a ORIGEM do lead (atribuição). Os dados são capturados pela
 // captação (/api/leads) e pelo webhook (ctwa_clid), mas até aqui não
@@ -23,6 +25,7 @@ interface Attribution {
   ad_id: string | null;
   ctwa_clid: string | null;
   landing_url: string | null;
+  raw: unknown;
   created_at: string | null;
 }
 
@@ -56,7 +59,7 @@ export function LeadAttributionPanel({ contactId }: { contactId: string }) {
       const { data } = await supabase
         .from("lead_attribution")
         .select(
-          "source, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ang, classificacao, ad_id, ctwa_clid, landing_url, created_at",
+          "source, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ang, classificacao, ad_id, ctwa_clid, landing_url, raw, created_at",
         )
         .eq("contact_id", contactId)
         .order("created_at", { ascending: false })
@@ -95,8 +98,15 @@ export function LeadAttributionPanel({ contactId }: { contactId: string }) {
     ? new Date(attr.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
     : null;
 
+  const adCard = adCardFromAttribution(attr);
+
   return (
     <div className="space-y-1">
+      {adCard && (
+        <div className="mb-3">
+          <AdReferralCard card={adCard} />
+        </div>
+      )}
       {fromCtwa && (
         <div className="mb-2 flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
           <MessageCircle className="size-4 shrink-0" />
