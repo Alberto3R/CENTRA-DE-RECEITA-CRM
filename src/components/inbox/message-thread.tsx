@@ -41,6 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AdReferralBanner } from "@/components/contacts/ad-referral-card";
 import { WaCallButton } from "@/components/whatsapp/wa-call-button";
 import { TelnyxCallButton } from "@/components/telnyx/telnyx-call-button";
 import { MessageBubble } from "./message-bubble";
@@ -1219,6 +1220,10 @@ export function MessageThread({
           )}
         </div>
       </div>
+
+      {/* Anúncio de onde o lead veio (foto + texto + link) — some quando
+          a conversa não veio de anúncio/post. */}
+      <AdReferralBanner key={contact.id} contactId={contact.id} refreshKey={messages.length} />
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">

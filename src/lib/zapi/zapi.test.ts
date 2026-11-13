@@ -42,6 +42,15 @@ describe('parseZapiReceived', () => {
       .toMatchObject({ type: 'reaction', reaction: { emoji: '❤️', targetId: 'X9' } })
   })
 
+  it('anúncio traz a miniatura e o tipo do criativo (para o cartão na conversa)', () => {
+    const m = parseZapiReceived({
+      ...base,
+      text: { message: 'Quero esse sofá' },
+      externalAdReply: { title: 'Sofá', sourceType: 'ad', sourceId: '237', ctwaClid: 'CLID', mediaType: 'IMAGE', thumbnailUrl: 'https://thumb' },
+    })
+    expect(m?.referral).toMatchObject({ media_type: 'IMAGE', thumbnail_url: 'https://thumb', headline: 'Sofá' })
+  })
+
   it('lead de anúncio Click-to-WhatsApp vira referral com ctwa_clid', () => {
     const m = parseZapiReceived({
       ...base,

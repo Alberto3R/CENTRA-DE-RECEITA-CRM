@@ -55,6 +55,10 @@ export interface ZapiReceivedCallback {
   externalAdReply?: {
     title?: string
     body?: string
+    /** "IMAGE" | "VIDEO" — o tipo do criativo. */
+    mediaType?: string
+    /** Miniatura do criativo (link do WhatsApp, expira). */
+    thumbnailUrl?: string
     sourceType?: string
     sourceId?: string
     sourceUrl?: string
@@ -126,6 +130,9 @@ export interface ZapiMessage {
     source_type?: string
     headline?: string
     body?: string
+    media_type?: string
+    /** Miniatura do criativo — o webhook copia para o bucket (o link expira). */
+    thumbnail_url?: string
     ctwa_clid?: string
   } | null
 }
@@ -218,6 +225,8 @@ export function parseZapiReceived(cb: ZapiReceivedCallback): ZapiMessage | null 
       headline: ad.title,
       body: ad.body,
       ctwa_clid: ad.ctwaClid,
+      ...(ad.mediaType ? { media_type: ad.mediaType } : {}),
+      ...(ad.thumbnailUrl ? { thumbnail_url: ad.thumbnailUrl } : {}),
     }
   }
 

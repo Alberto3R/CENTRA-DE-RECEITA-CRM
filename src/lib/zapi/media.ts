@@ -39,26 +39,42 @@ export async function persistZapiMedia(args: {
   messageId: string
   url: string
 }): Promise<string> {
-  const { db, accountId, messageId, url } = args
+  return persistRemoteMedia({ ...args, key: `zapi-${args.messageId}` })
+}
+
+/**
+ * Copia um arquivo de um link externo (que expira) para o bucket do chat e
+ * devolve o link público permanente. Serve a qualquer canal — a imagem do
+ * anúncio Click-to-WhatsApp vem num link da Meta/WhatsApp que expira em dias.
+ * Best-effort: em qualquer falha devolve o próprio `url`.
+ */
+export async function persistRemoteMedia(args: {
+  db: SupabaseClient
+  accountId: string
+  /** Vira parte do nome do arquivo (só [A-Za-z0-9_-]). */
+  key: string
+  url: string
+}): Promise<string> {
+  const { db, accountId, key, url } = args
   try {
     const res = await fetch(url)
     if (!res.ok) return url
     const bytes = Buffer.from(await res.arrayBuffer())
     if (bytes.byteLength === 0 || bytes.byteLength > MEDIA_MAX_BYTES) return url
     const contentType = res.headers.get('content-type')
-    const safeId = messageId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'midia'
-    const path = `account-${accountId}/${Date.now()}-zapi-${safeId}.${mediaExtension(contentType, url)}`
+    const safeKey = key.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'midia'
+    const path = `account-${accountId}/${Date.now()}-${safeKey}.${mediaExtension(contentType, url)}`
     const { error } = await db.storage.from(BUCKET).upload(path, bytes, {
       contentType: contentType ?? undefined,
       upsert: false,
     })
     if (error) {
-      console.warn('[zapi] cópia da mídia falhou:', error.message)
+      console.warn('[midia] cópia falhou:', error.message)
       return url
     }
     return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
   } catch (err) {
-    console.warn('[zapi] cópia da mídia falhou:', err instanceof Error ? err.message : err)
+    console.warn('[midia] cópia falhou:', err instanceof Error ? err.message : err)
     return url
   }
 }

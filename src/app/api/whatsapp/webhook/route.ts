@@ -36,7 +36,8 @@ import {
   type ZapiCallback,
   type ZapiMessage,
 } from '@/lib/zapi/callback'
-import { persistZapiMedia } from '@/lib/zapi/media'
+import { persistRemoteMedia, persistZapiMedia } from '@/lib/zapi/media'
+import { adMediaUrlFromReferral } from '@/lib/acquisition/ad-referral'
 import { lidOfPhone, zapiCredsFromChannel } from '@/lib/zapi/client'
 import { transcribeAudioUrl } from '@/lib/ai/transcribe'
 import { registrarConexao, registrarQueda } from '@/lib/zapi/alerts'
@@ -112,7 +113,13 @@ interface WhatsAppMessage {
     headline?: string
     body?: string
     media_type?: string
+    /** Criativo do anúncio (links da Meta — expiram; o webhook copia). */
+    image_url?: string
+    video_url?: string
+    thumbnail_url?: string
     ctwa_clid?: string
+    /** Nosso: cópia permanente da imagem do criativo no bucket do chat. */
+    ad_image_url?: string
   }
 }
 
@@ -885,6 +892,18 @@ async function processMessage(
     ).limit(1).maybeSingle()
     if (!dup) {
       const organico = ref.source_type === 'post'
+      // Foto do criativo: a Meta manda image_url/thumbnail_url e a Z-API
+      // thumbnailUrl — links que expiram. Copia para o bucket do chat para o
+      // vendedor ver qual anúncio (qual produto) o cliente clicou.
+      const adMedia = adMediaUrlFromReferral(ref)
+      const adImage = adMedia
+        ? await persistRemoteMedia({
+            db: supabaseAdmin(),
+            accountId,
+            key: `anuncio-${ref.source_id ?? 'ctwa'}`,
+            url: adMedia,
+          })
+        : null
       await supabaseAdmin().from('lead_attribution').insert({
         account_id: accountId,
         contact_id: contactRecord.id,
@@ -895,7 +914,7 @@ async function processMessage(
         // em post orgânico o source_id é o id do post, não de anúncio (fica no raw)
         ad_id: organico ? null : ref.source_id ?? null,
         landing_url: ref.source_url ?? null,
-        raw: ref,
+        raw: adImage ? { ...ref, ad_image_url: adImage } : ref,
       })
     }
   }
