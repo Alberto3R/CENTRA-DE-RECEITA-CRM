@@ -56,6 +56,8 @@ interface AnthropicBlock {
   input?: Record<string, unknown>
 }
 
+// Com a hora: o agente precisa saber se é noite ou fim de semana para não
+// prometer "o consultor já te chama" quando ninguém vai responder até a manhã.
 function todayBRT(): string {
   const fmt = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
@@ -63,6 +65,8 @@ function todayBRT(): string {
     month: '2-digit',
     day: '2-digit',
     weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
   })
   return fmt.format(new Date())
 }
@@ -77,7 +81,7 @@ function buildUserMessage(
     ? history.map((t) => `${t.fromCustomer ? 'Cliente' : 'Agente'}: ${t.text}`).join('\n')
     : '(primeiro contato)'
   return [
-    `Data de hoje: ${todayBRT()}, fuso America/Sao_Paulo.`,
+    `Data de hoje: ${todayBRT()} (hora de Brasília).`,
     ...(leadContext ? ['', leadContext] : []),
     '',
     'Transcrição da conversa até agora:',
