@@ -187,11 +187,15 @@ export function useTelnyxCall() {
       let token: string;
       try {
         const res = await fetch("/api/telnyx/token", { method: "POST" });
-        const data = (await res.json()) as { token?: string; error?: string };
+        const data = (await res.json()) as {
+          token?: string;
+          error?: string;
+          code?: string;
+        };
         if (!res.ok || !data.token) {
           setError(data.error ?? "Falha ao autenticar o softphone.");
           setStatus("failed");
-          await markFail(logged.id, data.error);
+          await markFail(logged.id, data.code ?? data.error);
           return;
         }
         token = data.token;
