@@ -53,6 +53,36 @@ export async function generateWebRtcToken(): Promise<string> {
   return text;
 }
 
+/**
+ * Lê o crédito disponível (`available_credit`) do JSON de GET /v2/balance.
+ * Devolve null se a resposta não trouxer um número legível.
+ */
+export function parseAvailableCredit(body: unknown): number | null {
+  const data = (body as { data?: { available_credit?: unknown } } | null)?.data;
+  const raw = data?.available_credit;
+  const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw ?? ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Crédito disponível na conta Telnyx, em dólares. Com crédito zerado ou
+ * negativo o Telnyx recusa a discagem e o SDK só emite um `telnyx.error`
+ * genérico — foi assim que as ligações pararam em nov/2026 sem ninguém saber
+ * por quê. Devolve null se o saldo não puder ser lido (aí não bloqueia).
+ */
+export async function getAvailableCredit(): Promise<number | null> {
+  try {
+    const res = await fetch(`${API}/balance`, {
+      headers: { Authorization: `Bearer ${apiKey()}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return parseAvailableCredit(await res.json());
+  } catch {
+    return null;
+  }
+}
+
 /** Call Control: inicia gravação dual-channel. Best-effort. */
 export async function startRecording(callControlId: string): Promise<void> {
   await fetch(`${API}/calls/${callControlId}/actions/record_start`, {
