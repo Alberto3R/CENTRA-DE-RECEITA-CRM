@@ -8,6 +8,7 @@
 // variantes de telefone, template carregado 1×).
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { IN_CHUNK, selectAllPages, selectInChunks } from "@/lib/supabase/in-chunks";
 import { resolveContactField } from "@/lib/broadcast/contact-fields";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { resolveChannelConfig } from "@/lib/whatsapp/channel";
@@ -78,7 +79,7 @@ async function fetchCustomValues(
   contactIds: string[],
 ): Promise<Map<string, Map<string, string>>> {
   const index = new Map<string, Map<string, string>>();
-  const PAGE = 500;
+  const PAGE = IN_CHUNK; // IDs vão na URL do .in(): lotes pequenos.
   for (let i = 0; i < contactIds.length; i += PAGE) {
     const slice = contactIds.slice(i, i + PAGE);
     const { data } = await admin
@@ -215,13 +216,16 @@ async function drainBroadcast(
 
   // Contatos + custom values.
   const contactIds = claims.map((c) => c.contact_id).filter(Boolean);
-  const { data: contacts } = await admin
-    .from("contacts")
-    .select("id, name, phone, email, company")
-    .in("id", contactIds);
-  const contactById = new Map(
-    (contacts ?? []).map((c) => [c.id as string, c]),
+  const { data: contacts } = await selectInChunks<{
+    id: string;
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    company: string | null;
+  }>(contactIds, (slice) =>
+    admin.from("contacts").select("id, name, phone, email, company").in("id", slice),
   );
+  const contactById = new Map(contacts.map((c) => [c.id, c]));
   const customIndex = await fetchCustomValues(admin, contactIds);
   const jaTocados =
     b.kind === "system"
@@ -401,29 +405,49 @@ async function materializeAudienceIfEmpty(
   } | null;
   if (!filter || filter.type !== "tags" || !filter.tagIds?.length) return;
 
-  const { data: tagged } = await admin
-    .from("contact_tags")
-    .select("contact_id, tag_id")
-    .in("tag_id", filter.tagIds);
-  let contactIds = [...new Set((tagged ?? []).map((r) => r.contact_id as string))];
+  // Paginado: sem .range() a leitura para em 1.000 linhas e o resto da
+  // etiqueta ficaria de fora sem aviso.
+  const tagIds = filter.tagIds;
+  const { data: tagged, error: tagErr } = await selectAllPages<{ contact_id: string }>(
+    (from, to) =>
+      admin
+        .from("contact_tags")
+        .select("contact_id")
+        .in("tag_id", tagIds)
+        .order("contact_id")
+        .range(from, to),
+  );
+  if (tagErr) throw new Error(`Falha ao ler as etiquetas do público: ${tagErr.message}`);
+  let contactIds = [...new Set(tagged.map((r) => r.contact_id))];
 
   if (contactIds.length > 0 && filter.excludeTagIds?.length) {
-    const { data: excluded } = await admin
-      .from("contact_tags")
-      .select("contact_id")
-      .in("tag_id", filter.excludeTagIds);
-    const excludeSet = new Set((excluded ?? []).map((r) => r.contact_id as string));
+    const excludeTagIds = filter.excludeTagIds;
+    const { data: excluded, error: exErr } = await selectAllPages<{ contact_id: string }>(
+      (from, to) =>
+        admin
+          .from("contact_tags")
+          .select("contact_id")
+          .in("tag_id", excludeTagIds)
+          .order("contact_id")
+          .range(from, to),
+    );
+    // Sem a lista de exclusão, o disparo iria para quem pediu para sair.
+    if (exErr) throw new Error(`Falha ao ler as etiquetas de exclusão: ${exErr.message}`);
+    const excludeSet = new Set(excluded.map((r) => r.contact_id));
     contactIds = contactIds.filter((id) => !excludeSet.has(id));
   }
   if (contactIds.length === 0) return;
 
-  await admin.from("broadcast_recipients").insert(
+  // Um insert só (vai no corpo, não na URL): ou entra o público inteiro ou
+  // nada — a checagem de idempotência acima não deixa completar pela metade.
+  const { error: insErr } = await admin.from("broadcast_recipients").insert(
     contactIds.map((contactId) => ({
       broadcast_id: broadcastId,
       contact_id: contactId,
       status: "pending",
     })),
   );
+  if (insErr) throw new Error(`Falha ao criar destinatários: ${insErr.message}`);
   await admin
     .from("broadcasts")
     .update({ total_recipients: contactIds.length })
@@ -546,7 +570,14 @@ export async function processDueBroadcasts(totalBudget = 120): Promise<{
     );
   }
   for (const b of dueScheduled ?? []) {
-    await materializeAudienceIfEmpty(admin, b.id);
+    try {
+      await materializeAudienceIfEmpty(admin, b.id);
+    } catch (err) {
+      // Fica 'scheduled' e o próximo minuto tenta de novo — melhor atrasar
+      // do que disparar para um público incompleto.
+      console.error(`[broadcast] público do disparo ${b.id} não montado:`, err);
+      continue;
+    }
     await admin.from("broadcasts").update({ status: "sending" }).eq("id", b.id);
   }
 
