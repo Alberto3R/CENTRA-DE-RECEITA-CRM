@@ -42,6 +42,23 @@ export function normalizeBrPhone(raw: string): string {
 }
 
 /**
+ * Telefone brasileiro que chegou CORTADO: a pessoa digitou o +55 e a máscara
+ * de 11 dígitos do formulário comeu os 2 últimos ("+55 75 98179-4212" vira
+ * "55759817942"). O normalizeBrPhone põe outro 55 na frente (5555…), o
+ * número parece válido e o template volta 131026 — ninguém percebe.
+ *
+ * Sinal certeiro: 11 dígitos começando em 55 e o 3º dígito diferente de 9.
+ * Se fosse DDD 55 (Santa Maria/RS) seguido de celular, o número começaria
+ * em 9; não sendo, sobram 55 + DDD + 7 dígitos — falta pedaço.
+ * (55 + DDD começando em 9, ex. "55919…", é ambíguo e fica de fora.)
+ */
+export function telefoneBrCortado(raw: string): boolean {
+  if (!raw) return false
+  const d = normalizePhone(raw)
+  return d.length === 11 && d.startsWith('55') && d[2] !== '9'
+}
+
+/**
  * Chaves de busca de um contato para o telefone de formulário: a canônica
  * primeiro e, se ela tem o 55 do Brasil, também a versão sem ele — é assim
  * que ficaram os contatos gravados antes da normalização.
