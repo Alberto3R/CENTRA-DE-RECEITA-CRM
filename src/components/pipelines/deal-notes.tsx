@@ -43,6 +43,7 @@ const ROTULO_KIND: Record<string, string> = {
   diagnostico: "do formulário",
   qualificacao_sdr: "da SDR",
   importada: "importada",
+  alerta: "aviso do sistema",
 };
 
 function dataCurta(iso: string) {

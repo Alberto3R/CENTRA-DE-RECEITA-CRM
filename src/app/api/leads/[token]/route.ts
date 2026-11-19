@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { brPhoneLookupKeys } from '@/lib/whatsapp/phone-utils'
+import { brPhoneLookupKeys, normalizePhone, telefoneBrCortado } from '@/lib/whatsapp/phone-utils'
 import { resolveChannelConfig } from '@/lib/whatsapp/channel'
 import { engineSendTemplate } from '@/lib/automations/meta-send'
 import { marcarContatoComTag } from '@/lib/contacts/marcar-tag'
@@ -33,6 +33,32 @@ function admin() {
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null
+}
+
+const TAG_TELEFONE_INCOMPLETO = 'Telefone incompleto'
+const NOTA_TELEFONE_INCOMPLETO = '⚠️ Telefone incompleto'
+
+/** Tag da conta pelo nome; cria se não existir (corrida → relê). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function acharOuCriarTag(db: any, accountId: string, ownerId: string, nome: string): Promise<string | null> {
+  const achar = async () => {
+    const { data } = await db
+      .from('tags')
+      .select('id')
+      .eq('account_id', accountId)
+      .ilike('name', nome)
+      .limit(1)
+      .maybeSingle()
+    return (data?.id as string | undefined) ?? null
+  }
+  const existente = await achar()
+  if (existente) return existente
+  const { data: criada } = await db
+    .from('tags')
+    .insert({ account_id: accountId, user_id: ownerId, name: nome, color: '#ef4444' })
+    .select('id')
+    .single()
+  return (criada?.id as string | undefined) ?? (await achar())
 }
 
 /** Corpo do template com {{1}}, {{2}}… trocados — vira o balão no inbox. */
@@ -104,7 +130,15 @@ export async function POST(
   // Formulário brasileiro manda "(81) 99999-1234": sem o 55 a Meta lê o DDD
   // como país e o lead nunca recebe nada. A 1ª chave é a canônica (com 55);
   // a 2ª acha o contato gravado antes desta correção, ainda sem o 55.
-  const phoneKeys = brPhoneLookupKeys(phoneRaw)
+  // Número cortado pela máscara do formulário (digitou o +55 e perdeu os 2
+  // últimos dígitos): não inventa outro 55 na frente — grava como chegou,
+  // que fica visivelmente incompleto — e marca contato e negócio para o
+  // vendedor chamar por outro canal. A 2ª chave acha quem já foi gravado
+  // com o 55 duplicado e corrige o telefone dele.
+  const telefoneIncompleto = telefoneBrCortado(phoneRaw)
+  const phoneKeys = telefoneIncompleto
+    ? [normalizePhone(phoneRaw), `55${normalizePhone(phoneRaw)}`]
+    : brPhoneLookupKeys(phoneRaw)
   const phone = phoneKeys[0]
   if (!phone) return NextResponse.json({ ok: false, error: 'missing phone' }, { status: 400 })
   const email = str(a.email)
@@ -192,6 +226,14 @@ export async function POST(
   } catch (e) {
     console.error('[leads/token] tag falhou', e)
   }
+  if (telefoneIncompleto) {
+    try {
+      const tagId = await acharOuCriarTag(db, cfg.account_id, ownerId, TAG_TELEFONE_INCOMPLETO)
+      await marcarContatoComTag(db, cfg.account_id, contactId, tagId)
+    } catch (e) {
+      console.error('[leads/token] tag telefone incompleto falhou', e)
+    }
+  }
 
   // Negócio: quem preenche de novo já tem um aberto neste funil — reaproveita
   // em vez de abrir outro (um lead chegou a ter 4 negócios iguais). O reenvio
@@ -225,6 +267,35 @@ export async function POST(
       .select('id')
       .single()
     dealId = deal?.id ?? null
+  }
+
+  // Aviso no negócio (deal_notes — nunca em deals.notes). Uma vez por
+  // negócio: quem reenvia o formulário com o número cortado não duplica.
+  if (telefoneIncompleto && dealId) {
+    try {
+      const { data: jaTem } = await db
+        .from('deal_notes')
+        .select('id')
+        .eq('deal_id', dealId)
+        .eq('title', NOTA_TELEFONE_INCOMPLETO)
+        .limit(1)
+        .maybeSingle()
+      if (!jaTem) {
+        const insta = str(a.instagram)?.replace(/^@/, '')
+        await db.from('deal_notes').insert({
+          deal_id: dealId,
+          account_id: cfg.account_id,
+          title: NOTA_TELEFONE_INCOMPLETO,
+          body:
+            `O formulário mandou "${phoneRaw}": faltam os 2 últimos dígitos ` +
+            `(a pessoa digitou o +55 e o campo cortou o fim). O WhatsApp não vai chegar. ` +
+            (insta ? `Chame pelo Instagram: @${insta}` : 'Chame por outro canal (e-mail, Instagram).'),
+          kind: 'alerta',
+        })
+      }
+    } catch (e) {
+      console.error('[leads/token] nota telefone incompleto falhou', e)
+    }
   }
 
   // Atribuição (UTMs + payload bruto) — best-effort, nunca derruba a resposta.
@@ -285,7 +356,8 @@ export async function POST(
   // caminho das automações, que grava o balão na conversa: o vendedor vê no
   // inbox o que o lead recebeu. Best-effort.
   let welcomeSent = false
-  if (cfg.welcome_template && !reused) {
+  // Número cortado: o template voltaria 131026 — nem tenta.
+  if (cfg.welcome_template && !reused && !telefoneIncompleto) {
     try {
       const wa = await resolveChannelConfig(db, cfg.account_id)
       if (wa?.id) {
@@ -319,7 +391,14 @@ export async function POST(
   }
 
   return NextResponse.json(
-    { ok: true, contact_id: contactId, deal_id: dealId, reused_deal: reused, welcome_sent: welcomeSent },
+    {
+      ok: true,
+      contact_id: contactId,
+      deal_id: dealId,
+      reused_deal: reused,
+      welcome_sent: welcomeSent,
+      telefone_incompleto: telefoneIncompleto,
+    },
     { status: 200 },
   )
 }

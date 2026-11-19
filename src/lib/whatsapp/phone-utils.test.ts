@@ -8,6 +8,7 @@ import {
   phoneVariants,
   phonesMatch,
   sanitizePhoneForMeta,
+  telefoneBrCortado,
 } from "./phone-utils";
 
 describe("normalizeBrPhone", () => {
@@ -212,5 +213,23 @@ describe("isRecipientNotAllowedError", () => {
       false,
     );
     expect(isRecipientNotAllowedError("")).toBe(false);
+  });
+});
+
+describe("telefoneBrCortado", () => {
+  it.each([
+    ["55759817942", true], // +55 75 98179-42xx cortado
+    ["55819964210", true],
+    ["55119981702", true],
+    ["+55 13 98817-22", true],
+    ["55999438246", false], // DDD 55 de verdade (Santa Maria)
+    ["55997275685", false],
+    ["5575981794212", false], // completo, com 55
+    ["75981794212", false], // completo, sem 55
+    ["(11) 99999-1234", false],
+    ["2298114750", false],
+    ["", false],
+  ])("%s → %s", (entrada, esperado) => {
+    expect(telefoneBrCortado(entrada)).toBe(esperado);
   });
 });
