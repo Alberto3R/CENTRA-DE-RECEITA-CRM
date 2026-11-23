@@ -5,6 +5,7 @@
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { encrypt, decrypt } from "@/lib/whatsapp/encryption";
 import { refreshAccessToken } from "./oauth";
+import type { GoogleEvent } from "./booking-parse";
 
 const CAL_API = "https://www.googleapis.com/calendar/v3";
 
@@ -181,6 +182,41 @@ export async function listCalendars(
     summary: c.summaryOverride || c.summary || c.id,
     primary: !!c.primary,
   }));
+}
+
+/**
+ * Eventos ALTERADOS desde `updatedMinISO` (criados, editados ou cancelados),
+ * com recorrências expandidas. Usado pela leitura de reservas feitas na
+ * página de agendamento do Google (booking-sync). O escopo calendar.events
+ * já dá leitura dos eventos — não precisa de calendar.readonly.
+ */
+export async function listChangedEvents(
+  accessToken: string,
+  calendarId: string,
+  updatedMinISO: string,
+): Promise<GoogleEvent[]> {
+  const out: GoogleEvent[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const qs = new URLSearchParams({
+      updatedMin: updatedMinISO,
+      showDeleted: "true",
+      singleEvents: "true",
+      maxResults: "250",
+    });
+    if (pageToken) qs.set("pageToken", pageToken);
+    const res = await fetch(`${CAL_API}/calendars/${encodeURIComponent(calendarId)}/events?${qs}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`events.list falhou (${res.status}): ${await res.text().catch(() => "")}`.slice(0, 300));
+    }
+    const j = (await res.json()) as { items?: GoogleEvent[]; nextPageToken?: string };
+    out.push(...(j.items ?? []));
+    pageToken = j.nextPageToken;
+    if (!pageToken) break;
+  }
+  return out;
 }
 
 /** Slots livres da conta prontos pra ofertar (junta getAccountCalendar+freeBusy+computeSlots). */
