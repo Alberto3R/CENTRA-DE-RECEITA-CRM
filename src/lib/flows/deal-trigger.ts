@@ -27,6 +27,7 @@ import {
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
 import { iniciarRunDeCadencia } from "./engine";
+import { registrarTemplateNaConversa } from "./registrar-envio";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = any;
@@ -239,9 +240,10 @@ async function fireForEvent(
 
   let sent = false;
   let lastError = "";
+  let waMessageId = "";
   for (const variant of phoneVariants(sanitized)) {
     try {
-      await sendTemplateMessage({
+      const r = await sendTemplateMessage({
         phoneNumberId: wa.phone_number_id as string,
         accessToken: token,
         to: variant,
@@ -250,6 +252,7 @@ async function fireForEvent(
         template: isMessageTemplate(tpl) ? tpl : undefined,
         params,
       });
+      waMessageId = r.messageId;
       sent = true;
       break;
     } catch (e) {
@@ -258,6 +261,23 @@ async function fireForEvent(
     }
   }
   if (!sent) return `error:send:${lastError.slice(0, 120)}`;
+
+  // A mensagem já saiu: agora ela precisa aparecer na conversa do CRM, senão
+  // quem responde chega sem contexto pro time. Erro aqui não muda o outcome.
+  try {
+    const reg = await registrarTemplateNaConversa(db, {
+      accountId: flow.account_id,
+      contactId,
+      channelId: (wa as { id?: string | null }).id ?? null,
+      templateName: cfg.template_name,
+      bodyText: (tpl as { body_text?: string | null }).body_text,
+      params,
+      waMessageId,
+    });
+    if (!reg.ok) console.error("[deal-trigger] template enviado mas não gravado na conversa:", reg.motivo);
+  } catch (e) {
+    console.error("[deal-trigger] template enviado mas não gravado na conversa:", e);
+  }
 
   // mode 'flow' → run aguardando a primeira resposta do lead
   if (modo === "flow" && flow.entry_node_id) {
