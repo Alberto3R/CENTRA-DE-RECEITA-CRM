@@ -27,14 +27,14 @@ import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { WebhooksSettings } from '@/components/settings/webhooks-settings';
 import {
   resolveSection,
-  isAdminSection,
+  canOpenSection,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
 
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, canEditSettings, isImpersonating } = useAuth();
+  const { defaultCurrency, canEditSettings, canManageAgenda, isImpersonating } = useAuth();
 
   /**
    * VER as configurações é diferente de EDITAR.
@@ -58,8 +58,13 @@ export default function SettingsPage() {
   // Agentes/visualizadores só acessam seções pessoais (perfil/segurança/
   // aparência). Deep-link pra uma seção admin cai no Perfil — o menu já
   // esconde, isto fecha o acesso direto por URL. RLS reforça no back.
-  const section =
-    !canViewSettings && isAdminSection(rawSection) ? 'profile' : rawSection;
+  // A closer também abre a Agenda Google (seções `closerOk`).
+  const section = canOpenSection(rawSection, {
+    canManage: canViewSettings,
+    canManageAgenda,
+  })
+    ? rawSection
+    : 'profile';
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -118,6 +123,7 @@ export default function SettingsPage() {
           onSelect={go}
           hints={hints}
           canManage={canViewSettings}
+          canManageAgenda={canManageAgenda}
         />
         <div className="min-w-0">{panel[section]}</div>
       </div>

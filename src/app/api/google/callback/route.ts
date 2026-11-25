@@ -1,9 +1,9 @@
 // GET /api/google/callback — retorno do consent do Google. Troca o code por
-// tokens e guarda a conexão da conta (refresh token cifrado). Só admin+.
+// tokens e guarda a conexão da conta (refresh token cifrado). Só admin+ ou a closer.
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-import { requireRole } from "@/lib/auth/account";
+import { requireAgendaManager } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { encrypt } from "@/lib/whatsapp/encryption";
 import { exchangeCode, fetchGoogleEmail, publicOrigin } from "@/lib/google/oauth";
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const state = searchParams.get("state");
 
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireAgendaManager();
 
     const jar = await cookies();
     const saved = jar.get("g_oauth_state")?.value;

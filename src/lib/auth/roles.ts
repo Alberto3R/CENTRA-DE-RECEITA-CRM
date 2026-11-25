@@ -98,6 +98,23 @@ export function canViewOnly(role: AccountRole): boolean {
   return role === "viewer";
 }
 
+/**
+ * Agenda Google da conta (conectar/desconectar, escolher a agenda, horários
+ * de atendimento): admin+ OU a agente com função comercial `closer` — é ela
+ * quem cuida das sessões que a página de agendamento marca.
+ *
+ * Só `closer` EXPLÍCITO. A régua da IA trata `funcao = null` como closer,
+ * mas aqui null NÃO libera: senão todo agente sem função definida passaria a
+ * mexer na agenda da conta.
+ */
+export function canManageAgenda(
+  role: AccountRole,
+  funcao: string | null | undefined,
+): boolean {
+  if (hasMinRole(role, "admin")) return true;
+  return role === "agent" && funcao === "closer";
+}
+
 /** Owner only: irreversible destructive operations. */
 export function canDeleteAccount(role: AccountRole): boolean {
   return role === "owner";

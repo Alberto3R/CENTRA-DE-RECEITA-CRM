@@ -28,7 +28,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
-import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
+import { canManageAgenda, hasMinRole, isAccountRole, type AccountRole } from "./roles";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 import { getActiveImpersonation } from "./platform-admin";
 
@@ -258,4 +258,24 @@ export async function requireRole(min: AccountRole): Promise<AccountContext> {
     );
   }
   return ctx;
+}
+
+/**
+ * Guarda das rotas da Agenda Google: admin+ ou agente com função `closer`
+ * (ver `canManageAgenda`). Viewer e impersonation (que roda como viewer)
+ * nunca passam.
+ */
+export async function requireAgendaManager(): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  if (hasMinRole(ctx.role, "admin")) return ctx;
+  if (ctx.role === "agent") {
+    const { data } = await ctx.supabase
+      .from("profiles")
+      .select("funcao")
+      .eq("user_id", ctx.userId)
+      .maybeSingle();
+    const funcao = (data as { funcao?: string | null } | null)?.funcao ?? null;
+    if (canManageAgenda(ctx.role, funcao)) return ctx;
+  }
+  throw new ForbiddenError("A agenda é configurada por admin ou pela closer da conta.");
 }

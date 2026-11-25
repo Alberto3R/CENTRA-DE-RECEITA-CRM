@@ -6,13 +6,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requireAgendaManager, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { listCalendars } from "@/lib/google/calendar";
 
 export async function GET() {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireAgendaManager();
     const admin = supabaseAdmin();
     const { data: conn } = await admin
       .from("google_connections")
@@ -42,7 +42,7 @@ const putSchema = z.object({ calendarId: z.string().trim().min(1).max(300) });
 
 export async function PUT(request: Request) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireAgendaManager();
     let body: z.infer<typeof putSchema>;
     try {
       body = putSchema.parse(await request.json());
