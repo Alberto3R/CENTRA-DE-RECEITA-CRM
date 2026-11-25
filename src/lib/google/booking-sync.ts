@@ -29,6 +29,7 @@ import {
   firstNameOf,
   formatQuando,
   isCancelled,
+  matchesTitleFilter,
   meetLinkOf,
   pickBooker,
   reminderTimes,
@@ -45,6 +46,8 @@ interface SyncConfig {
   tag_name: string | null;
   handoff_to_human: boolean;
   last_synced_at: string | null;
+  /** Só eventos com este texto no título contam como reserva (migration 126). */
+  title_filter: string | null;
 }
 
 interface CallRow {
@@ -75,7 +78,7 @@ export async function processBookingSync(): Promise<BookingSyncResult> {
   const { data: configs, error } = await admin
     .from("calendar_booking_sync")
     .select(
-      "account_id, confirm_template, reminder_template, reminder_offsets_min, tag_name, handoff_to_human, last_synced_at",
+      "account_id, confirm_template, reminder_template, reminder_offsets_min, tag_name, handoff_to_human, last_synced_at, title_filter",
     )
     .eq("enabled", true);
   if (error) {
@@ -141,6 +144,11 @@ async function handleEvent(
 
   // Call do agente: ele já confirmou pela conversa.
   if (existing && existing.source !== "booking_page") return "skipped_agent_call";
+
+  // Evento que não é da página de agendamento (outra reunião da agenda
+  // principal). Só vale pra evento NOVO: um já registrado passou no filtro
+  // quando entrou, e o cancelamento dele pode chegar sem título.
+  if (!existing && !matchesTitleFilter(ev.summary, cfg.title_filter)) return "skipped_title_filter";
 
   if (isCancelled(ev)) {
     if (!existing || existing.status === "cancelled") return "skipped_cancelled";

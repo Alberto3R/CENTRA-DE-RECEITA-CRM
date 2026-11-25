@@ -147,3 +147,28 @@ export function reminderTimes(start: Date, offsetsMin: number[], now: Date): Dat
     .filter((d) => d.getTime() > limite && !vistos.has(d.getTime()) && vistos.add(d.getTime()))
     .sort((a, b) => a.getTime() - b.getTime());
 }
+
+/**
+ * A agenda conectada costuma ser a principal da pessoa, com outras reuniões
+ * que também têm convidado de fora. Com `filtro` preenchido, só conta como
+ * reserva o evento cujo título contém esse texto (sem diferenciar maiúsculas
+ * nem acentos) — a página de agendamento do Google põe o nome dela no título.
+ * Filtro vazio/null = qualquer evento com convidado externo (comportamento antigo).
+ */
+export function matchesTitleFilter(
+  summary: string | null | undefined,
+  filtro: string | null | undefined,
+): boolean {
+  const alvo = norm(filtro);
+  if (!alvo) return true;
+  return norm(summary).includes(alvo);
+}
+
+function norm(s: string | null | undefined): string {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
