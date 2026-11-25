@@ -15,6 +15,7 @@ import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import {
   canEditSettings as canEditSettingsFor,
+  canManageAgenda as canManageAgendaFor,
   canManageMembers as canManageMembersFor,
   canSendMessages as canSendMessagesFor,
   isAccountRole,
@@ -35,6 +36,8 @@ interface Profile {
   beta_features: string[];
   account_id: string | null;
   account_role: AccountRole | null;
+  /** Função comercial (closer|sdr|social_seller|gestor). null = não definida. */
+  funcao: string | null;
 }
 
 interface AccountSummary {
@@ -103,6 +106,8 @@ interface AuthContextValue {
   canManageMembers: boolean;
   /** True if the caller can edit account-wide settings (admin+). */
   canEditSettings: boolean;
+  /** Admin+ ou agente com função `closer`: conecta e configura a Agenda Google. */
+  canManageAgenda: boolean;
   /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
   /**
@@ -154,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role",
+          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, funcao",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -255,6 +260,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // que todas as telas usam para filtrar as consultas.
           account_id: effectiveAccountId,
           account_role: accountRole,
+          funcao: (data as { funcao?: string | null }).funcao ?? null,
         });
         setAccount(accountRow);
       }
@@ -378,9 +384,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isViewer: role === "viewer",
       canManageMembers: role ? canManageMembersFor(role) : false,
       canEditSettings: role ? canEditSettingsFor(role) : false,
+      canManageAgenda: role ? canManageAgendaFor(role, profile?.funcao) : false,
       canSendMessages: role ? canSendMessagesFor(role) : false,
     };
-  }, [profile?.account_role, profile?.account_id]);
+  }, [profile?.account_role, profile?.account_id, profile?.funcao]);
 
   return (
     <AuthContext.Provider
@@ -435,6 +442,7 @@ export function useAuth(): AuthContextValue {
       isViewer: false,
       canManageMembers: false,
       canEditSettings: false,
+      canManageAgenda: false,
       canSendMessages: false,
     };
   }

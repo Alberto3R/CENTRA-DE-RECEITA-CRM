@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   RAIL_GROUPS,
   SECTION_META,
+  canOpenSection,
   SETTINGS_SECTIONS,
   type SettingsSection,
 } from './settings-sections';
@@ -26,12 +27,15 @@ export function SettingsRail({
   onSelect,
   hints,
   canManage = true,
+  canManageAgenda = false,
 }: {
   active: SettingsSection;
   onSelect: (section: SettingsSection) => void;
   hints?: Partial<Record<SettingsSection, ReactNode>>;
   /** Admin+ vê tudo; quando false, itens adminOnly somem do rail. */
   canManage?: boolean;
+  /** Closer: além das pessoais, vê as seções `closerOk` (Agenda Google). */
+  canManageAgenda?: boolean;
 }) {
   const activeRef = useRef<HTMLButtonElement>(null);
 
@@ -60,7 +64,7 @@ export function SettingsRail({
         const items = SETTINGS_SECTIONS.filter(
           (s) =>
             SECTION_META[s].group === group &&
-            (canManage || !SECTION_META[s].adminOnly),
+            canOpenSection(s, { canManage, canManageAgenda }),
         );
         if (items.length === 0) return null;
         return (

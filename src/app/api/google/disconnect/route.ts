@@ -1,14 +1,14 @@
-// POST /api/google/disconnect — desconecta a agenda Google da conta. Só admin+.
+// POST /api/google/disconnect — desconecta a agenda Google da conta. Só admin+ ou a closer.
 // Revoga o token no Google (best-effort) e apaga a conexão.
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requireAgendaManager, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { decrypt } from "@/lib/whatsapp/encryption";
 
 export async function POST() {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireAgendaManager();
     const admin = supabaseAdmin();
 
     const { data } = await admin

@@ -1,9 +1,10 @@
 // /api/scheduling/config — regras de agenda da conta (fuso, duração, buffer,
-// horário de atendimento). GET p/ membros; PUT p/ admin+.
+// horário de atendimento). GET p/ membros; PUT p/ admin+ ou a closer.
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requireAgendaManager, requireRole, toErrorResponse } from "@/lib/auth/account";
+import { supabaseAdmin } from "@/lib/flows/admin-client";
 
 const DEFAULTS = {
   enabled: true,
@@ -46,14 +47,16 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireAgendaManager();
     let patch: z.infer<typeof bodySchema>;
     try {
       patch = bodySchema.parse(await request.json());
     } catch {
       return NextResponse.json({ error: "Dados inválidos." }, { status: 400 });
     }
-    const { error } = await ctx.supabase.from("scheduling_config").upsert(
+    // Service role: a RLS de scheduling_config só deixa admin escrever, e a
+    // closer passou pela guarda acima. A linha é sempre a da conta do ctx.
+    const { error } = await supabaseAdmin().from("scheduling_config").upsert(
       { account_id: ctx.accountId, ...patch, updated_at: new Date().toISOString() },
       { onConflict: "account_id" },
     );

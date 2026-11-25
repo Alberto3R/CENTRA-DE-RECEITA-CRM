@@ -67,6 +67,11 @@ export interface SectionMeta {
    * que deep-linkar cai no Perfil) e no rail (some da lista).
    */
   adminOnly?: boolean;
+  /**
+   * Exceção ao `adminOnly`: a agente com função `closer` também abre
+   * (hoje só a Agenda Google — ver `canManageAgenda`).
+   */
+  closerOk?: boolean;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
@@ -85,7 +90,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   acquisition: { id: 'acquisition', label: 'Aquisição', icon: Waypoints, group: 'workspace', adminOnly: true },
   'group-agent': { id: 'group-agent', label: 'Agente no grupo', icon: MessagesSquare, group: 'workspace', adminOnly: true },
   'ai-agent': { id: 'ai-agent', label: 'Agente IA', icon: Bot, group: 'workspace', adminOnly: true },
-  agenda: { id: 'agenda', label: 'Agenda (Google)', icon: CalendarClock, group: 'workspace', adminOnly: true },
+  agenda: { id: 'agenda', label: 'Agenda (Google)', icon: CalendarClock, group: 'workspace', adminOnly: true, closerOk: true },
   webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', adminOnly: true },
   members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace', adminOnly: true },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', adminOnly: true },
@@ -94,6 +99,19 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
 /** True quando a seção exige admin+ (usado na página e no rail). */
 export function isAdminSection(section: SettingsSection): boolean {
   return SECTION_META[section].adminOnly === true;
+}
+
+/**
+ * Pode abrir a seção? Admin+ abre tudo; os demais só as pessoais e, se
+ * tiverem a função closer, as marcadas `closerOk`.
+ */
+export function canOpenSection(
+  section: SettingsSection,
+  access: { canManage: boolean; canManageAgenda: boolean },
+): boolean {
+  const meta = SECTION_META[section];
+  if (access.canManage || !meta.adminOnly) return true;
+  return meta.closerOk === true && access.canManageAgenda;
 }
 
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
