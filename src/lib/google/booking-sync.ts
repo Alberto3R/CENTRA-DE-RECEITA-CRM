@@ -99,10 +99,16 @@ export async function processBookingSync(): Promise<BookingSyncResult> {
       const events = await listChangedEvents(conn.accessToken, conn.calendarId, desde.toISOString());
       result.events += events.length;
 
+      // Uma consulta por lote, não uma por evento: a agenda principal de quem
+      // atende tem centenas de eventos alterados (recorrências expandidas) e a
+      // consulta por evento estourava os 60s da função (27/11/2026: 355
+      // consultas e timeout, sem gravar last_synced_at — travava pra sempre).
+      const existentes = await carregarCallsExistentes(admin, cfg.account_id, events.map((e) => e.id));
+
       for (const ev of events) {
         let outcome: string;
         try {
-          outcome = await handleEvent(admin, cfg, conn.calendarId, ev, startedAt);
+          outcome = await handleEvent(admin, cfg, conn.calendarId, ev, startedAt, existentes.get(ev.id) ?? null);
         } catch (e) {
           outcome = "error";
           result.errors.push(`${cfg.account_id}/${ev.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -127,20 +133,45 @@ export async function processBookingSync(): Promise<BookingSyncResult> {
   return result;
 }
 
+/** Divide em lotes de `tamanho` (o `.in()` vai na URL do PostgREST). */
+export function emLotes<T>(itens: T[], tamanho: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < itens.length; i += tamanho) out.push(itens.slice(i, i + tamanho));
+  return out;
+}
+
+const LOTE_IDS = 100;
+
+/** Calls já registradas para estes eventos, indexadas pelo id do evento no Google. */
+async function carregarCallsExistentes(
+  admin: Admin,
+  accountId: string,
+  eventIds: string[],
+): Promise<Map<string, CallRow>> {
+  const mapa = new Map<string, CallRow>();
+  const ids = [...new Set(eventIds.filter(Boolean))];
+  for (const lote of emLotes(ids, LOTE_IDS)) {
+    const { data, error } = await admin
+      .from("scheduled_calls")
+      .select("id, source, status, starts_at, contact_id, conversation_id, google_event_id")
+      .eq("account_id", accountId)
+      .in("google_event_id", lote);
+    // Falhar aqui é melhor que seguir achando que nada existe: trataria call
+    // já registrada como reserva nova e confirmaria de novo.
+    if (error) throw new Error(`scheduled_calls: ${error.message}`);
+    for (const r of (data ?? []) as (CallRow & { google_event_id: string })[]) mapa.set(r.google_event_id, r);
+  }
+  return mapa;
+}
+
 async function handleEvent(
   admin: Admin,
   cfg: SyncConfig,
   calendarId: string,
   ev: GoogleEvent,
   now: Date,
+  existing: CallRow | null,
 ): Promise<string> {
-  const { data: existingRow } = await admin
-    .from("scheduled_calls")
-    .select("id, source, status, starts_at, contact_id, conversation_id")
-    .eq("account_id", cfg.account_id)
-    .eq("google_event_id", ev.id)
-    .maybeSingle();
-  const existing = existingRow as CallRow | null;
 
   // Call do agente: ele já confirmou pela conversa.
   if (existing && existing.source !== "booking_page") return "skipped_agent_call";
