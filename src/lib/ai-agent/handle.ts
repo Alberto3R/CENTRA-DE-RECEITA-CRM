@@ -17,6 +17,7 @@ import { advanceDealsOnCallBooked } from '@/lib/pipeline/auto-advance'
 import { loadOutboundTurns, formatTemplateTurn } from './outbound-context'
 import { registrarTurno } from './turnos'
 import { leadContextFrom } from './lead-context'
+import { ESPERA_RAJADA_MS, esperar, momentoDaMensagem, rodadaCoberta } from './rajada'
 
 const GRAPH_VERSION = 'v22.0'
 const HISTORY_LIMIT = 20
@@ -209,6 +210,8 @@ export async function maybeRunAgent(params: {
   /** Token de acesso da marca, já descriptografado. */
   accessToken: string
   inboundText: string
+  /** Espera antes de pensar (ver rajada.ts). Testes passam 0. */
+  esperaMs?: number
 }): Promise<void> {
   const {
     supabase,
@@ -222,7 +225,8 @@ export async function maybeRunAgent(params: {
 
   if (!inboundText.trim()) return // v1: responde só a texto
 
-  // Âncora da rodada — usada pelo guarda anti-rajada antes do envio.
+  // Âncora do guarda anti-rajada: o momento da mensagem que disparou esta
+  // rodada (rajada.ts). Sem achar a mensagem, o início da rodada.
   const runStartedAt = new Date().toISOString()
 
   // 1. Config do agente DO CANAL (multi-agente: 1 persona por número).
@@ -314,6 +318,24 @@ export async function maybeRunAgent(params: {
       handoffMotivo: 'palavra-chave',
       reply: { reply: '', handoff: true, handoff_motivo: '', intencao: '', resumo: '', publico: '', silencio: false },
     })
+    return
+  }
+
+  // 3b. Espera o lead terminar de digitar. Quem manda "Oi" e "Boa tarde" em
+  // 2 balões recebe uma resposta só: a rodada do 1º balão sai aqui, sem
+  // gastar modelo. Depois da palavra-chave, para "atendente" + "por favor"
+  // ainda passar para o humano.
+  const desde =
+    (await momentoDaMensagem(supabase, conversationId, inboundText)) ?? runStartedAt
+  await esperar(params.esperaMs ?? ESPERA_RAJADA_MS)
+  const [coberta, { data: convAgora }] = await Promise.all([
+    rodadaCoberta(supabase, conversationId, desde),
+    supabase.from('conversations').select('ai_handoff').eq('id', conversationId).maybeSingle(),
+  ])
+  if ((convAgora as { ai_handoff?: boolean } | null)?.ai_handoff) return
+  if (coberta) {
+    await registrarTurno(supabaseAdmin(), { ...turno, intencao: 'descartada' })
+    console.log('[ai-agent] rodada coberta antes de pensar (' + coberta + ') —', conversationId)
     return
   }
 
@@ -490,49 +512,15 @@ export async function maybeRunAgent(params: {
     return
   }
 
-  // 5b. Guarda anti-rajada: se o cliente mandou mensagem MAIS NOVA enquanto
-  // esta rodada pensava (mensagens em sequência rápida), aborta sem enviar —
-  // a rodada disparada pela mensagem nova responde com o histórico completo.
-  // Evita respostas duplicadas/defasadas (ex.: cliente manda número e nome em
-  // 2 balões e o bot responde 2x a mesma coisa).
-  const { count: newerInbound } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('conversation_id', conversationId)
-    .eq('sender_type', 'customer')
-    .gt('created_at', runStartedAt)
-  if ((newerInbound ?? 0) > 0) {
+  // 5b. Guarda anti-rajada, de novo, porque o modelo leva segundos: se o lead
+  // mandou outra mensagem enquanto esta rodada pensava, ou outra rodada
+  // respondeu nesse meio-tempo, descarta sem enviar (ver rajada.ts). Em 29/09
+  // um lead recebeu 9 mensagens em 2 minutos; em 25/10 um lead do Ranieri
+  // recebeu a mesma pergunta 3 vezes.
+  const cobertaDepois = await rodadaCoberta(supabase, conversationId, desde)
+  if (cobertaDepois) {
     await registrarTurno(supabaseAdmin(), { ...turno, reply: result, intencao: 'descartada' })
-    console.log('[ai-agent] rajada detectada — abortando rodada defasada da conversa', conversationId)
-    return
-  }
-
-  // 5c. O guarda acima só pega mensagem que chegou DEPOIS desta rodada começar.
-  // Quando 2-3 balões chegam juntos (resposta automática de loja, pessoa que
-  // manda "obrigado" / "ta bom" / "poxa" de uma vez), todas as rodadas começam
-  // depois de todos os balões e todas respondem — em 29/09 um lead recebeu 9
-  // mensagens em 2 minutos. Só responde a rodada da ÚLTIMA mensagem do
-  // cliente, e só se nenhuma outra rodada já respondeu nesse meio-tempo.
-  const [{ data: ultimaDoCliente }, { count: botDepois }] = await Promise.all([
-    supabase
-      .from('messages')
-      .select('content_text')
-      .eq('conversation_id', conversationId)
-      .eq('sender_type', 'customer')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('conversation_id', conversationId)
-      .eq('sender_type', 'bot')
-      .gt('created_at', runStartedAt),
-  ])
-  const ultimoTexto = (ultimaDoCliente as { content_text?: string | null } | null)?.content_text
-  if ((ultimoTexto != null && ultimoTexto !== inboundText) || (botDepois ?? 0) > 0) {
-    await registrarTurno(supabaseAdmin(), { ...turno, reply: result, intencao: 'descartada' })
-    console.log('[ai-agent] outra rodada cobre esta conversa — abortando', conversationId)
+    console.log('[ai-agent] rodada coberta enquanto pensava (' + cobertaDepois + ') —', conversationId)
     return
   }
 
