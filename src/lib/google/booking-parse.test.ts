@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  matchesTitleFilter,
   extractPhone,
   firstNameOf,
   formatQuando,
@@ -127,5 +128,22 @@ describe("reminderTimes", () => {
   });
   it("sem duplicados", () => {
     expect(reminderTimes(start, [60, 60], new Date("2026-11-23T12:00:00Z"))).toHaveLength(1);
+  });
+});
+
+describe("matchesTitleFilter", () => {
+  it("sem filtro, qualquer título passa", () => {
+    expect(matchesTitleFilter("Reunião com fornecedor", null)).toBe(true);
+    expect(matchesTitleFilter(undefined, "")).toBe(true);
+  });
+  it("título da página de agendamento passa", () => {
+    expect(matchesTitleFilter("Time Que Vende (Maria Souza)", "Time Que Vende")).toBe(true);
+  });
+  it("ignora maiúsculas, acentos e espaços extras", () => {
+    expect(matchesTitleFilter("SESSÃO  estratégica", "sessao estrategica")).toBe(true);
+  });
+  it("outra reunião da agenda principal não passa", () => {
+    expect(matchesTitleFilter("Call com cliente X", "Time Que Vende")).toBe(false);
+    expect(matchesTitleFilter(undefined, "Time Que Vende")).toBe(false);
   });
 });
